@@ -336,6 +336,36 @@ function WorkspaceScreen() {
     [bookings.length, companies.length, marketplaceItems.length, users.length],
   );
 
+  const customerTabs = [
+    { key: 'home', label: 'Home', icon: 'home-outline' },
+    { key: 'explore', label: 'Explore', icon: 'search-outline' },
+    { key: 'orders', label: 'Orders', icon: 'receipt-outline' },
+    { key: 'profile', label: 'Profile', icon: 'person-outline' },
+  ];
+
+  const customerHeader =
+    customerTab === 'home'
+      ? {
+          title: 'Home services marketplace',
+          subtitle: 'Browse, compare, and book trusted services with a mobile-first customer shell.',
+        }
+      : customerTab === 'explore'
+        ? {
+            title: 'Explore live offers',
+            subtitle: 'Scan real products and services, then open the booking composer when you are ready.',
+          }
+        : customerTab === 'orders'
+          ? {
+              title: 'Orders and follow-up',
+              subtitle: 'Track bookings, status updates, and post-service ratings from one place.',
+            }
+          : {
+              title: authUser ? 'Account and preferences' : 'Sign in when needed',
+              subtitle: authUser
+                ? 'Manage your profile, addresses, payment defaults, and appearance settings.'
+                : 'Guests can browse freely and only authenticate when they want to place or track orders.',
+            };
+
   const activeWorkspaceLabel =
     activeRole === 'admin'
       ? 'Admin control center'
@@ -655,6 +685,103 @@ function WorkspaceScreen() {
     );
   }
 
+  if (activeRole === 'guest' || activeRole === 'customer') {
+    return (
+      <SafeAreaView edges={['top', 'bottom']} style={[styles.safeArea, customerDarkMode && styles.customerShellSafeAreaDark]}>
+        <View style={[styles.customerShell, customerDarkMode && styles.customerShellDark]}>
+          <View style={[styles.customerHeaderCard, customerDarkMode && styles.customerHeaderCardDark]}>
+            <View style={styles.customerHeaderTopRow}>
+              <View style={styles.infoBodyGrow}>
+                <Text style={[styles.customerHeaderBrand, customerDarkMode && styles.customerTitleDark]}>Jahzeen</Text>
+                <Text style={[styles.customerHeaderTitle, customerDarkMode && styles.customerTitleDark]}>{customerHeader.title}</Text>
+                <Text style={[styles.customerHeaderSubtitle, customerDarkMode && styles.customerSubtitleDark]}>{customerHeader.subtitle}</Text>
+              </View>
+              <View style={[styles.customerHeaderBadge, customerDarkMode && styles.customerHeaderBadgeDark]}>
+                <Text style={[styles.customerHeaderBadgeText, customerDarkMode && styles.customerTitleDark]}>{authUser ? (currentUserRecord?.role ?? 'customer').toUpperCase() : 'GUEST'}</Text>
+              </View>
+            </View>
+            <View style={styles.customerHeaderMetaRow}>
+              <Text style={[styles.customerHeaderMetaText, customerDarkMode && styles.customerSubtitleDark]}>{authUser?.email ?? 'Explore first. Sign in only when you need to book.'}</Text>
+              {busy ? <ActivityIndicator color={customerDarkMode ? '#F5F7FA' : colors.primary} /> : null}
+            </View>
+            {!!authMessage ? <Text style={[styles.customerHeaderMessage, customerDarkMode && styles.customerHeaderMessageDark]}>{authMessage}</Text> : null}
+          </View>
+
+          <ScrollView style={styles.customerScroll} contentContainerStyle={styles.customerScrollContent} showsVerticalScrollIndicator={false}>
+            <CustomerWorkspace
+              wide={wide}
+              tab={customerTab}
+              onTabChange={setCustomerTab}
+              authUser={authUser}
+              currentUserRole={currentUserRecord?.role ?? 'customer'}
+              marketplaceItems={marketplaceItems}
+              bookingComposer={bookingComposer}
+              onBookingComposerChange={setBookingComposer}
+              bookingErrors={bookingErrors}
+              onSelectItem={(item) =>
+                setBookingComposer((current) => ({
+                  ...current,
+                  itemId: item.id,
+                  companyId: item.companyId,
+                }))
+              }
+              onPlaceBooking={handleBookingPlace}
+              customerBookings={customerBookings}
+              ratingDrafts={ratingDrafts}
+              onRatingDraftChange={(bookingId, nextDraft) =>
+                setRatingDrafts((current) => ({
+                  ...current,
+                  [bookingId]: {
+                    score: nextDraft.score,
+                    review: nextDraft.review,
+                  },
+                }))
+              }
+              ratingErrors={ratingErrors}
+              onSubmitRating={handleRatingSubmit}
+              authMode={authMode}
+              onAuthModeChange={setAuthMode}
+              signInForm={signInForm}
+              onSignInFormChange={setSignInForm}
+              signUpForm={signUpForm}
+              onSignUpFormChange={setSignUpForm}
+              authErrors={authErrors}
+              confirmCode={confirmCode}
+              onConfirmCodeChange={setConfirmCode}
+              needsConfirmation={needsConfirmation}
+              onAuthAction={handleAuthAction}
+              onConfirmCode={handleConfirmCode}
+              darkMode={customerDarkMode}
+              onToggleDarkMode={() => setCustomerDarkMode((current) => !current)}
+              profileForm={profileForm}
+              onProfileFormChange={setProfileForm}
+              profileErrors={profileErrors}
+              onSaveProfile={handleProfileSave}
+              addressForm={addressForm}
+              onAddressFormChange={setAddressForm}
+              addressErrors={addressErrors}
+              onSaveAddress={handleAddressSave}
+              onSignOut={signOutCurrentUser}
+              banner={customerBanner}
+            />
+          </ScrollView>
+
+          <View style={[styles.customerBottomDock, customerDarkMode && styles.customerBottomDockDark]}>
+            <BottomNavBar
+              items={customerTabs}
+              selectedKey={customerTab}
+              onChange={(value) => setCustomerTab(value as 'home' | 'explore' | 'orders' | 'profile')}
+              containerStyle={customerDarkMode ? styles.bottomNavDark : undefined}
+              itemStyle={customerDarkMode ? styles.bottomNavItemDark : undefined}
+              textStyle={customerDarkMode ? styles.bottomNavTextDark : undefined}
+              darkMode={customerDarkMode}
+            />
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView edges={['top']} style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
@@ -733,65 +860,6 @@ function WorkspaceScreen() {
           />
         ) : null}
 
-        {(activeRole === 'guest' || activeRole === 'customer') ? (
-          <CustomerWorkspace
-            wide={wide}
-            tab={customerTab}
-            onTabChange={setCustomerTab}
-            authUser={authUser}
-            currentUserRole={currentUserRecord?.role ?? 'customer'}
-            marketplaceItems={marketplaceItems}
-            bookingComposer={bookingComposer}
-            onBookingComposerChange={setBookingComposer}
-            bookingErrors={bookingErrors}
-            onSelectItem={(item) =>
-              setBookingComposer((current) => ({
-                ...current,
-                itemId: item.id,
-                companyId: item.companyId,
-              }))
-            }
-            onPlaceBooking={handleBookingPlace}
-            customerBookings={customerBookings}
-            ratingDrafts={ratingDrafts}
-            onRatingDraftChange={(bookingId, nextDraft) =>
-              setRatingDrafts((current) => ({
-                ...current,
-                [bookingId]: {
-                  score: nextDraft.score,
-                  review: nextDraft.review,
-                },
-              }))
-            }
-            ratingErrors={ratingErrors}
-            onSubmitRating={handleRatingSubmit}
-            authMode={authMode}
-            onAuthModeChange={setAuthMode}
-            signInForm={signInForm}
-            onSignInFormChange={setSignInForm}
-            signUpForm={signUpForm}
-            onSignUpFormChange={setSignUpForm}
-            authErrors={authErrors}
-            confirmCode={confirmCode}
-            onConfirmCodeChange={setConfirmCode}
-            needsConfirmation={needsConfirmation}
-            onAuthAction={handleAuthAction}
-            onConfirmCode={handleConfirmCode}
-            darkMode={customerDarkMode}
-            onToggleDarkMode={() => setCustomerDarkMode((current) => !current)}
-            profileForm={profileForm}
-            onProfileFormChange={setProfileForm}
-            profileErrors={profileErrors}
-            onSaveProfile={handleProfileSave}
-            addressForm={addressForm}
-            onAddressFormChange={setAddressForm}
-            addressErrors={addressErrors}
-            onSaveAddress={handleAddressSave}
-            onSignOut={signOutCurrentUser}
-            banner={customerBanner}
-          />
-        ) : null}
-
         {busy ? <ActivityIndicator color={colors.primary} style={styles.busyIndicator} /> : null}
       </ScrollView>
     </SafeAreaView>
@@ -865,6 +933,11 @@ function AdminWorkspace({
   onRevokeInvitation,
   banner,
 }: AdminWorkspaceProps) {
+  const adminUsers = users.filter((user) => user.role === 'admin');
+  const companyUsers = users.filter((user) => user.role === 'company');
+  const customerUsers = users.filter((user) => user.role === 'customer');
+  const pendingInvitations = invitations.filter((invitation) => invitation.status === 'pending');
+
   return (
     <>
       <SegmentControl
@@ -961,9 +1034,37 @@ function AdminWorkspace({
       ) : null}
 
       {tab === 'users' ? (
-        <SectionCard title="User directory" subtitle="All registered platform users are visible here with their current role.">
-          {users.length ? users.map((user) => <InfoRow key={user.id} title={`${user.fullName} · ${user.role}`} subtitle={`${user.email}${user.companyName ? ` · ${user.companyName}` : ''}`} />) : <EmptyState title="No users yet" body="User records appear after sign-in or accepted company invitations." />}
-        </SectionCard>
+        <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
+          <View style={styles.columnPane}>
+            <SectionCard title="Company user management" subtitle="Invite company owners, monitor pending activations, and manage every partner account from one admin page.">
+              {companyUsers.length ? companyUsers.map((user) => <InfoRow key={user.id} title={user.fullName} subtitle={`${user.email}${user.companyName ? ` · ${user.companyName}` : ''}`} />) : <EmptyState title="No company users yet" body="Send a company invitation first, then accepted company accounts will appear here." />}
+            </SectionCard>
+
+            <SectionCard title="Pending company invitations" subtitle="These accounts are not active company users until the invitation is accepted and the user confirms sign-up.">
+              {pendingInvitations.length ? pendingInvitations.map((invitation) => (
+                <InfoRow
+                  key={invitation.id}
+                  title={`${invitation.companyName} · ${invitation.email}`}
+                  subtitle={`Delivery: ${invitation.emailDeliveryStatus}${invitation.emailSentAtLabel ? ` · ${invitation.emailSentAtLabel}` : ''}`}
+                  actionLabel="Resend"
+                  onAction={() => onResendInvitation(invitation)}
+                  secondaryActionLabel="Revoke"
+                  onSecondaryAction={() => onRevokeInvitation(invitation)}
+                />
+              )) : <EmptyState title="No pending invitations" body="Every saved invitation is either accepted, revoked, or waiting for the next send." />}
+            </SectionCard>
+          </View>
+
+          <View style={styles.columnPane}>
+            <SectionCard title="Customer accounts" subtitle="Signed-in customer accounts are separated here so company-user administration stays focused.">
+              {customerUsers.length ? customerUsers.map((user) => <InfoRow key={user.id} title={user.fullName} subtitle={user.email} />) : <EmptyState title="No customers yet" body="Customer accounts will appear here after customer sign-up or sign-in." />}
+            </SectionCard>
+
+            <SectionCard title="Admin accounts" subtitle="Manual admin accounts survive refresh by resolving the role from Cognito session groups and the approved admin email list.">
+              {adminUsers.length ? adminUsers.map((user) => <InfoRow key={user.id} title={user.fullName} subtitle={user.email} />) : <EmptyState title="No admin records yet" body="Manual admin sign-in creates the persistent admin user record after authentication." />}
+            </SectionCard>
+          </View>
+        </View>
       ) : null}
     </>
   );
@@ -1334,13 +1435,6 @@ function CustomerWorkspace({
     verificationCard: darkMode ? styles.customerVerificationDark : undefined,
   } as const;
 
-  const customerTabs = [
-    { key: 'home', label: 'Home', icon: 'home-outline' },
-    { key: 'explore', label: 'Explore', icon: 'search-outline' },
-    { key: 'orders', label: 'Orders', icon: 'receipt-outline' },
-    { key: 'profile', label: 'Profile', icon: 'person-outline' },
-  ];
-
   return (
     <View style={[styles.customerWorkspace, customerTheme.canvas]}>
       {banner ? <StatusBanner tone={banner.tone} text={banner.text} /> : null}
@@ -1583,8 +1677,6 @@ function CustomerWorkspace({
           </View>
         )
       ) : null}
-
-      <BottomNavBar items={customerTabs} selectedKey={tab} onChange={(value) => onTabChange(value as 'home' | 'explore' | 'orders' | 'profile')} containerStyle={customerTheme.navWrap} itemStyle={customerTheme.navItem} textStyle={customerTheme.navText} darkMode={darkMode} />
     </View>
   );
 }
@@ -1996,6 +2088,94 @@ const styles = StyleSheet.create({
     padding: 18,
     gap: 16,
     paddingBottom: 28,
+  },
+  customerShellSafeAreaDark: {
+    backgroundColor: '#0E151D',
+  },
+  customerShell: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  customerShellDark: {
+    backgroundColor: '#0E151D',
+  },
+  customerHeaderCard: {
+    marginHorizontal: 18,
+    marginTop: 12,
+    marginBottom: 10,
+    padding: 18,
+    borderRadius: 24,
+    backgroundColor: '#FFF8EF',
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: 10,
+  },
+  customerHeaderCardDark: {
+    backgroundColor: '#16202B',
+    borderColor: '#273341',
+  },
+  customerHeaderTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  customerHeaderBrand: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  customerHeaderTitle: {
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  customerHeaderSubtitle: {
+    color: colors.muted,
+    lineHeight: 21,
+  },
+  customerHeaderBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#E6EFF8',
+  },
+  customerHeaderBadgeDark: {
+    backgroundColor: '#1D2A37',
+  },
+  customerHeaderBadgeText: {
+    color: colors.primary,
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  customerHeaderMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  customerHeaderMetaText: {
+    flex: 1,
+    color: colors.muted,
+    fontWeight: '600',
+  },
+  customerHeaderMessage: {
+    color: colors.primary,
+    fontWeight: '700',
+  },
+  customerHeaderMessageDark: {
+    color: '#8FC3FF',
+  },
+  customerScroll: {
+    flex: 1,
+  },
+  customerScrollContent: {
+    paddingHorizontal: 18,
+    paddingBottom: 140,
+    gap: 16,
   },
   customerWorkspace: {
     gap: 16,
@@ -2465,6 +2645,22 @@ const styles = StyleSheet.create({
   },
   bottomNavTextActive: {
     color: '#FFFFFF',
+  },
+  customerBottomDock: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 16,
+    backgroundColor: '#F6F4EEFA',
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  customerBottomDockDark: {
+    backgroundColor: '#0E151DFA',
+    borderTopColor: '#273341',
   },
   verificationCard: {
     gap: 10,

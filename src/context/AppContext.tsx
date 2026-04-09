@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import {
   confirmSignUp,
+  fetchAuthSession,
   fetchUserAttributes,
   getCurrentUser,
   signIn,
@@ -158,6 +159,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [initialized, setInitialized] = useState(false);
   const [busy, setBusy] = useState(false);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authGroups, setAuthGroups] = useState<string[]>([]);
   const [authMessage, setAuthMessage] = useState('');
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
   const [pendingEmail, setPendingEmail] = useState('');
@@ -237,7 +239,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return users.find((entry) => entry.email.toLowerCase() === authUser.email.toLowerCase()) ?? null;
   }, [authUser, users]);
 
-  const activeRole: AppRole = authUser ? currentUserRecord?.role ?? 'customer' : 'guest';
+  const activeRole: AppRole = useMemo(() => {
+    if (!authUser) {
+      return 'guest';
+    }
+
+    const normalizedEmail = authUser.email.toLowerCase();
+
+    if (authGroups.includes('admin') || MANUAL_ADMIN_EMAILS.includes(normalizedEmail)) {
+      return 'admin';
+    }
+
+    if (authGroups.includes('company')) {
+      return 'company';
+    }
+
+    if (authGroups.includes('customer')) {
+      return 'customer';
+    }
+
+    return currentUserRecord?.role ?? 'customer';
+  }, [authGroups, authUser, currentUserRecord]);
 
   const currentCompany = useMemo(() => {
     if (!currentUserRecord?.companyId) {
@@ -376,18 +398,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   async function refreshAuthUser() {
     try {
       const currentUser = await getCurrentUser();
+      const session = await fetchAuthSession();
       const attributes = await fetchUserAttributes();
+      const tokenGroups = session.tokens?.idToken?.payload?.['cognito:groups'];
+      const nextGroups = Array.isArray(tokenGroups)
+        ? tokenGroups.filter((entry): entry is string => typeof entry === 'string')
+        : [];
       const nextAuthUser: AuthUser = {
         userId: currentUser.userId,
         email: attributes.email ?? '',
         fullName: attributes.name ?? attributes.email ?? 'Jahzeen user',
       };
       setAuthUser(nextAuthUser);
+      setAuthGroups(nextGroups);
       setProfile((current: UserProfile) => ({ ...current, fullName: nextAuthUser.fullName || current.fullName, email: nextAuthUser.email || current.email }));
       await ensureUserRecord(nextAuthUser);
       setAuthMessage('Signed in successfully.');
     } catch {
       setAuthUser(null);
+      setAuthGroups([]);
     }
   }
 
@@ -497,6 +526,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       await signOut();
       setAuthUser(null);
+      setAuthGroups([]);
       setAuthMessage('Signed out.');
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : 'Unable to sign out.');
