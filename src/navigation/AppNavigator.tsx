@@ -115,6 +115,7 @@ function WorkspaceScreen() {
   const [adminTab, setAdminTab] = useState<'overview' | 'companies' | 'users'>('overview');
   const [companyTab, setCompanyTab] = useState<'overview' | 'catalog' | 'bookings' | 'loyalty'>('overview');
   const [customerTab, setCustomerTab] = useState<'marketplace' | 'orders' | 'account'>('marketplace');
+  const [showGuestAuthScreen, setShowGuestAuthScreen] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
 
   const [signInForm, setSignInForm] = useState({ email: '', password: '' });
@@ -203,6 +204,17 @@ function WorkspaceScreen() {
       paymentMethod: profile.defaultPaymentMethod,
     }));
   }, [addresses, profile.defaultPaymentMethod]);
+
+  useEffect(() => {
+    if (authUser) {
+      setShowGuestAuthScreen(false);
+      return;
+    }
+
+    if (customerTab !== 'marketplace') {
+      setCustomerTab('marketplace');
+    }
+  }, [authUser, customerTab]);
 
   const selectedAdminCompany = useMemo(
     () => companies.find((entry) => entry.id === selectedAdminCompanyId) ?? null,
@@ -601,7 +613,7 @@ function WorkspaceScreen() {
     if (Object.keys(errors).length) {
       setCustomerBanner({ tone: 'error', text: authUser ? 'Fix the booking details before placing the order.' : 'Sign in before placing a booking.' });
       if (!authUser) {
-        setCustomerTab('account');
+        setShowGuestAuthScreen(true);
       }
       return;
     }
@@ -773,8 +785,11 @@ function WorkspaceScreen() {
             confirmCode={confirmCode}
             onConfirmCodeChange={setConfirmCode}
             needsConfirmation={needsConfirmation}
+            showGuestAuthScreen={showGuestAuthScreen}
             onAuthAction={handleAuthAction}
             onConfirmCode={handleConfirmCode}
+            onOpenAuthScreen={() => setShowGuestAuthScreen(true)}
+            onCloseAuthScreen={() => setShowGuestAuthScreen(false)}
             profileForm={profileForm}
             onProfileFormChange={setProfileForm}
             profileErrors={profileErrors}
@@ -1252,8 +1267,11 @@ type CustomerWorkspaceProps = {
   confirmCode: string;
   onConfirmCodeChange: (value: string) => void;
   needsConfirmation: boolean;
+  showGuestAuthScreen: boolean;
   onAuthAction: () => void;
   onConfirmCode: () => void;
+  onOpenAuthScreen: () => void;
+  onCloseAuthScreen: () => void;
   profileForm: UserProfile;
   onProfileFormChange: React.Dispatch<React.SetStateAction<UserProfile>>;
   profileErrors: ValidationMap;
@@ -1293,8 +1311,11 @@ function CustomerWorkspace({
   confirmCode,
   onConfirmCodeChange,
   needsConfirmation,
+  showGuestAuthScreen,
   onAuthAction,
   onConfirmCode,
+  onOpenAuthScreen,
+  onCloseAuthScreen,
   profileForm,
   onProfileFormChange,
   profileErrors,
@@ -1306,20 +1327,55 @@ function CustomerWorkspace({
   onSignOut,
   banner,
 }: CustomerWorkspaceProps) {
+  const customerTabs = authUser
+    ? [
+        { key: 'marketplace', label: 'Marketplace' },
+        { key: 'orders', label: 'Orders' },
+        { key: 'account', label: 'Account' },
+      ]
+    : [{ key: 'marketplace', label: 'Marketplace' }];
+
   return (
     <>
       <SegmentControl
-        items={[
-          { key: 'marketplace', label: 'Marketplace' },
-          { key: 'orders', label: 'Orders' },
-          { key: 'account', label: authUser ? 'Account' : 'Access' },
-        ]}
+        items={customerTabs}
         selectedKey={tab}
         onChange={(value) => onTabChange(value as 'marketplace' | 'orders' | 'account')}
       />
       {banner ? <StatusBanner tone={banner.tone} text={banner.text} /> : null}
 
-      {tab === 'marketplace' ? (
+      {!authUser && showGuestAuthScreen ? (
+        <SectionCard title="Login to continue" subtitle="Customers can browse freely, but ordering requires a customer account.">
+          <View style={styles.rowGap}>
+            <ChoiceChip label="Sign in" selected={authMode === 'signin'} onPress={() => onAuthModeChange('signin')} />
+            <ChoiceChip label="Sign up" selected={authMode === 'signup'} onPress={() => onAuthModeChange('signup')} />
+          </View>
+          {authMode === 'signin' ? (
+            <>
+              <FormField label="Email" value={signInForm.email} onChangeText={(value) => onSignInFormChange((current) => ({ ...current, email: value }))} error={authErrors.email} />
+              <FormField label="Password" value={signInForm.password} onChangeText={(value) => onSignInFormChange((current) => ({ ...current, password: value }))} error={authErrors.password} secureTextEntry />
+            </>
+          ) : (
+            <>
+              <FormField label="Full name" value={signUpForm.fullName} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, fullName: value }))} error={authErrors.fullName} />
+              <FormField label="Email" value={signUpForm.email} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, email: value }))} error={authErrors.email} />
+              <FormField label="Phone" value={signUpForm.phone} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, phone: value }))} error={authErrors.phone} />
+              <FormField label="Password" value={signUpForm.password} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, password: value }))} error={authErrors.password} secureTextEntry />
+            </>
+          )}
+          <PrimaryButton label={authMode === 'signin' ? 'Sign in' : 'Create account'} onPress={onAuthAction} />
+          {needsConfirmation ? (
+            <View style={styles.verificationCard}>
+              <Text style={styles.verificationTitle}>Email verification required</Text>
+              <FormField label="Verification code" value={confirmCode} onChangeText={onConfirmCodeChange} error={authErrors.confirmCode} />
+              <SecondaryButton label="Confirm email" onPress={onConfirmCode} />
+            </View>
+          ) : null}
+          <SecondaryButton label="Back to homepage" onPress={onCloseAuthScreen} />
+        </SectionCard>
+      ) : null}
+
+      {tab === 'marketplace' && !showGuestAuthScreen ? (
         <>
           <SectionCard title="Marketplace" subtitle="Browse live products and services without authentication.">
             {marketplaceItems.length ? (
@@ -1354,13 +1410,13 @@ function CustomerWorkspace({
                 <ChoiceChip label="Apple Pay" selected={bookingComposer.paymentMethod === 'applePay'} onPress={() => onBookingComposerChange((current) => ({ ...current, paymentMethod: 'applePay' }))} />
               </View>
               {bookingErrors.auth ? <FieldError text={bookingErrors.auth} /> : null}
-              <PrimaryButton label={authUser ? 'Place booking' : 'Sign in to book'} onPress={onPlaceBooking} />
+              <PrimaryButton label={authUser ? 'Place booking' : 'Continue to login'} onPress={authUser ? onPlaceBooking : onOpenAuthScreen} />
             </SectionCard>
           ) : null}
         </>
       ) : null}
 
-      {tab === 'orders' ? (
+      {tab === 'orders' && authUser ? (
         <SectionCard title="My orders" subtitle="Signed-in customers can track bookings and submit ratings after completion.">
           {authUser ? (
             customerBookings.length ? customerBookings.map((booking) => (
@@ -1402,7 +1458,7 @@ function CustomerWorkspace({
         </SectionCard>
       ) : null}
 
-      {tab === 'account' ? (
+      {tab === 'account' && authUser ? (
         !authUser ? (
           <SectionCard title="Customer access" subtitle="Create an account or sign in when you are ready to book.">
             <View style={styles.toggleRow}>
