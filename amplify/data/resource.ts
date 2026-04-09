@@ -20,7 +20,11 @@ const schema = a.schema({
       invitedByEmail: a.string(),
       status: a.string().required(),
     })
-    .authorization((allow) => [allow.owner(), allow.guest().to(['read'])]),
+    .authorization((allow) => [
+      allow.group('admin'),
+      allow.group('company').to(['read']),
+      allow.owner(),
+    ]),
 
   UserProfile: a
     .model({
@@ -45,7 +49,11 @@ const schema = a.schema({
       isActive: a.boolean(),
       createdAtLabel: a.string(),
     })
-    .authorization((allow) => [allow.owner(), allow.guest().to(['read'])]),
+    .authorization((allow) => [
+      allow.group('admin'),
+      allow.group('company').to(['read', 'update']),
+      allow.guest().to(['read']),
+    ]),
 
   CompanyInvitation: a
     .model({
@@ -59,7 +67,9 @@ const schema = a.schema({
       emailDeliveryError: a.string(),
       emailSentAtLabel: a.string(),
     })
-    .authorization((allow) => [allow.owner()]),
+    .authorization((allow) => [
+      allow.group('admin'),
+    ]),
 
   sendCompanyInvitationEmail: a
     .mutation()
@@ -90,7 +100,11 @@ const schema = a.schema({
       loyaltyPoints: a.integer(),
       imageHint: a.string(),
     })
-    .authorization((allow) => [allow.owner(), allow.guest().to(['read'])]),
+    .authorization((allow) => [
+      allow.group('admin').to(['read']),
+      allow.group('company'),
+      allow.guest().to(['read']),
+    ]),
 
   LoyaltyProgram: a
     .model({
@@ -103,7 +117,11 @@ const schema = a.schema({
       tierRules: a.string(),
       isActive: a.boolean(),
     })
-    .authorization((allow) => [allow.owner(), allow.guest().to(['read'])]),
+    .authorization((allow) => [
+      allow.group('admin'),
+      allow.group('company'),
+      allow.guest().to(['read']),
+    ]),
 
   Address: a
     .model({
@@ -144,7 +162,12 @@ const schema = a.schema({
       ratingSubmitted: a.boolean(),
       timeline: a.string(),
     })
-    .authorization((allow) => [allow.owner(), allow.guest().to(['read'])]),
+    .authorization((allow) => [
+      allow.group('admin'),
+      allow.group('company').to(['read', 'update']),
+      allow.owner(),
+      allow.guest().to(['read']),
+    ]),
 
   Rating: a
     .model({
@@ -156,7 +179,12 @@ const schema = a.schema({
       review: a.string(),
       createdAtLabel: a.string(),
     })
-    .authorization((allow) => [allow.owner(), allow.guest().to(['read'])]),
+    .authorization((allow) => [
+      allow.group('admin').to(['read']),
+      allow.group('company').to(['read']),
+      allow.owner(),
+      allow.guest().to(['read']),
+    ]),
 });
 
 export type Schema = ClientSchema<typeof schema>;

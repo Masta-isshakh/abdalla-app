@@ -11,8 +11,9 @@
     "serve:web": "npx serve dist"
   },
   "dependencies": {
-    "@aws-sdk/client-sesv2": "^3.914.0",
     "@aws-amplify/ui-react-native": "^2.7.2",
+    "@aws-sdk/client-cognito-identity-provider": "^3.1027.0",
+    "@aws-sdk/client-sesv2": "^3.914.0",
     "@expo/metro-runtime": "~6.1.2",
     "@expo/vector-icons": "^15.1.1",
     "@react-native-async-storage/async-storage": "^2.2.0",

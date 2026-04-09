@@ -14,6 +14,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 
 import { readableBookingStatus, useAppState } from '../context/AppContext';
 import {
@@ -1329,13 +1330,15 @@ function CustomerWorkspace({
     navItem: darkMode ? styles.bottomNavItemDark : undefined,
     navText: darkMode ? styles.bottomNavTextDark : undefined,
     metaCard: darkMode ? styles.customerMetaCardDark : undefined,
+    bookingCard: darkMode ? styles.customerBookingCardDark : undefined,
+    verificationCard: darkMode ? styles.customerVerificationDark : undefined,
   } as const;
 
   const customerTabs = [
-    { key: 'home', label: 'Home' },
-    { key: 'explore', label: 'Explore' },
-    { key: 'orders', label: 'Orders' },
-    { key: 'profile', label: 'Profile' },
+    { key: 'home', label: 'Home', icon: 'home-outline' },
+    { key: 'explore', label: 'Explore', icon: 'search-outline' },
+    { key: 'orders', label: 'Orders', icon: 'receipt-outline' },
+    { key: 'profile', label: 'Profile', icon: 'person-outline' },
   ];
 
   return (
@@ -1457,9 +1460,9 @@ function CustomerWorkspace({
           {authUser ? (
             customerBookings.length ? customerBookings.map((booking) => (
               <View key={booking.id} style={styles.bookingWrap}>
-                <BookingCard booking={booking} />
+                <BookingCard booking={booking} darkMode={darkMode} />
                 {booking.status === 'completed' && !booking.ratingSubmitted ? (
-                  <View style={styles.ratingCard}>
+                  <View style={[styles.ratingCard, customerTheme.bookingCard]}>
                     <FormField
                       label="Score"
                       value={ratingDrafts[booking.id]?.score ?? ''}
@@ -1528,8 +1531,8 @@ function CustomerWorkspace({
             )}
             <PrimaryButton label={authMode === 'signin' ? 'Sign in' : 'Create account'} onPress={onAuthAction} />
             {needsConfirmation ? (
-              <View style={styles.verificationCard}>
-                <Text style={styles.verificationTitle}>Email verification required</Text>
+              <View style={[styles.verificationCard, customerTheme.verificationCard]}>
+                <Text style={[styles.verificationTitle, customerTheme.title]}>Email verification required</Text>
                 <FormField label="Verification code" value={confirmCode} onChangeText={onConfirmCodeChange} error={authErrors.confirmCode} theme={customerTheme.inputTheme} />
                 <SecondaryButton label="Confirm email" onPress={onConfirmCode} />
               </View>
@@ -1581,7 +1584,7 @@ function CustomerWorkspace({
         )
       ) : null}
 
-      <BottomNavBar items={customerTabs} selectedKey={tab} onChange={(value) => onTabChange(value as 'home' | 'explore' | 'orders' | 'profile')} containerStyle={customerTheme.navWrap} itemStyle={customerTheme.navItem} textStyle={customerTheme.navText} />
+      <BottomNavBar items={customerTabs} selectedKey={tab} onChange={(value) => onTabChange(value as 'home' | 'explore' | 'orders' | 'profile')} containerStyle={customerTheme.navWrap} itemStyle={customerTheme.navItem} textStyle={customerTheme.navText} darkMode={darkMode} />
     </View>
   );
 }
@@ -1855,11 +1858,16 @@ function CustomerMetricCard({ label, value, darkMode }: { label: string; value: 
   );
 }
 
-function BottomNavBar({ items, selectedKey, onChange, containerStyle, itemStyle, textStyle }: { items: Array<{ key: string; label: string }>; selectedKey: string; onChange: (value: string) => void; containerStyle?: object; itemStyle?: object; textStyle?: object }) {
+function BottomNavBar({ items, selectedKey, onChange, containerStyle, itemStyle, textStyle, darkMode }: { items: Array<{ key: string; label: string; icon: string }>; selectedKey: string; onChange: (value: string) => void; containerStyle?: object; itemStyle?: object; textStyle?: object; darkMode: boolean }) {
   return (
     <View style={[styles.bottomNav, containerStyle]}>
       {items.map((item) => (
         <Pressable key={item.key} style={[styles.bottomNavItem, itemStyle, item.key === selectedKey && styles.bottomNavItemActive]} onPress={() => onChange(item.key)}>
+          <Ionicons
+            name={item.icon as keyof typeof Ionicons.glyphMap}
+            size={18}
+            color={item.key === selectedKey ? '#FFFFFF' : darkMode ? '#C8D3DC' : colors.muted}
+          />
           <Text style={[styles.bottomNavText, textStyle, item.key === selectedKey && styles.bottomNavTextActive]}>{item.label}</Text>
         </Pressable>
       ))}
@@ -1923,21 +1931,21 @@ function CatalogCard({ item, actionLabel, onAction, secondaryActionLabel, onSeco
   );
 }
 
-function BookingCard({ booking }: { booking: Booking }) {
+function BookingCard({ booking, darkMode = false }: { booking: Booking; darkMode?: boolean }) {
   return (
-    <View style={styles.bookingCard}>
+    <View style={[styles.bookingCard, darkMode && styles.customerBookingCardDark]}>
       <View style={styles.rowBetween}>
         <View style={styles.infoBodyGrow}>
-          <Text style={styles.infoTitle}>{booking.itemTitle}</Text>
-          <Text style={styles.infoSubtitle}>{booking.companyName} · {booking.bookingNumber}</Text>
+          <Text style={[styles.infoTitle, darkMode && styles.customerTitleDark]}>{booking.itemTitle}</Text>
+          <Text style={[styles.infoSubtitle, darkMode && styles.customerSubtitleDark]}>{booking.companyName} · {booking.bookingNumber}</Text>
         </View>
         <View style={styles.statusBadge}>
           <Text style={styles.statusBadgeText}>{readableBookingStatus(booking.status)}</Text>
         </View>
       </View>
-      <Text style={styles.helperText}>{booking.scheduleDate} · {booking.scheduleTime}</Text>
-      <Text style={styles.helperText}>{booking.addressLine}</Text>
-      <Text style={styles.helperText}>QAR {booking.total.toFixed(0)} · {booking.paymentMethod}</Text>
+      <Text style={[styles.helperText, darkMode && styles.customerSubtitleDark]}>{booking.scheduleDate} · {booking.scheduleTime}</Text>
+      <Text style={[styles.helperText, darkMode && styles.customerSubtitleDark]}>{booking.addressLine}</Text>
+      <Text style={[styles.helperText, darkMode && styles.customerSubtitleDark]}>QAR {booking.total.toFixed(0)} · {booking.paymentMethod}</Text>
     </View>
   );
 }
@@ -2373,6 +2381,11 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 14,
   },
+  customerBookingCardDark: {
+    backgroundColor: '#1B2632',
+    borderWidth: 1,
+    borderColor: '#2D3A48',
+  },
   homeHeroPanel: {
     gap: 14,
     borderRadius: 20,
@@ -2435,6 +2448,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderRadius: 16,
+    gap: 4,
   },
   bottomNavItemDark: {
     backgroundColor: '#1D2A37',
@@ -2457,6 +2471,11 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     backgroundColor: '#F7F9FC',
     padding: 14,
+  },
+  customerVerificationDark: {
+    backgroundColor: '#1B2632',
+    borderWidth: 1,
+    borderColor: '#2D3A48',
   },
   verificationTitle: {
     color: colors.text,
