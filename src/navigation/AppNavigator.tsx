@@ -4,6 +4,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import {
   ActivityIndicator,
+  Image,
   Alert,
   Pressable,
   ScrollView,
@@ -437,21 +438,6 @@ function WorkspaceScreen() {
                 : 'Guests can browse freely and only authenticate when they want to place or track orders.',
             };
 
-  const customerHeaderChips =
-    customerTab === 'home'
-      ? ['Cleaning', 'Repairs', 'Beauty', 'Wellness']
-      : customerTab === 'explore'
-        ? ['Live offers', 'Featured picks', 'Fast booking', 'Trusted companies']
-        : customerTab === 'orders'
-          ? ['Active bookings', 'Status updates', 'Ratings', 'Support']
-          : ['Profile', 'Addresses', 'Payments', 'Appearance'];
-
-  const customerHeaderStats = [
-    { label: 'Companies', value: String(new Set(marketplaceItems.map((item) => item.companyId)).size) },
-    { label: 'Offers', value: String(marketplaceItems.length) },
-    { label: 'Orders', value: authUser ? String(customerBookings.length) : 'Guest' },
-  ];
-
   const activeWorkspaceLabel =
     activeRole === 'admin'
       ? 'Admin control center'
@@ -821,45 +807,42 @@ function WorkspaceScreen() {
       <SafeAreaView edges={['top', 'bottom']} style={[styles.safeArea, customerDarkMode && styles.customerShellSafeAreaDark]}>
         <View style={[styles.customerShell, customerDarkMode && styles.customerShellDark]}>
           <LinearGradient colors={customerDarkMode ? ['#0F1A25', '#182736'] : ['#FFF3DE', '#F4E4C6']} style={[styles.customerHeaderCard, customerDarkMode && styles.customerHeaderCardDark]}>
-            <View style={styles.customerHeaderTopRow}>
-              <View style={styles.customerBrandLockup}>
-                <View style={[styles.customerBrandMonogram, customerDarkMode && styles.customerBrandMonogramDark]}>
-                  <Text style={styles.customerBrandMonogramText}>J</Text>
-                </View>
+            <View style={styles.customerHeaderBar}>
+              <View style={styles.customerLogoWrap}>
+                <Image source={require('../../assets/icon.png')} style={styles.customerLogoImage} resizeMode="contain" />
                 <View style={styles.infoBodyGrow}>
-                  <Text style={[styles.customerHeaderBrand, customerDarkMode && styles.customerHeaderBrandDark]}>Jahzeen Qatar</Text>
-                  <Text style={[styles.customerHeaderTitle, customerDarkMode && styles.customerTitleDark]}>{customerHeader.title}</Text>
-                  <Text style={[styles.customerHeaderSubtitle, customerDarkMode && styles.customerSubtitleDark]}>{customerHeader.subtitle}</Text>
+                  <Text style={[styles.customerHeaderBrand, customerDarkMode && styles.customerHeaderBrandDark]}>Jahzeen</Text>
+                  <Text style={[styles.customerHeaderMiniTitle, customerDarkMode && styles.customerTitleDark]}>{customerHeader.title}</Text>
                 </View>
               </View>
-              <View style={[styles.customerHeaderBadge, customerDarkMode && styles.customerHeaderBadgeDark]}>
-                <Text style={[styles.customerHeaderBadgeText, customerDarkMode && styles.customerHeaderBadgeTextDark]}>{authUser ? (currentUserRecord?.role ?? 'customer').toUpperCase() : 'GUEST'}</Text>
+
+              <View style={styles.customerHeaderActions}>
+                <Pressable style={[styles.customerHeaderIconButton, customerDarkMode && styles.customerHeaderIconButtonDark]} onPress={() => setCustomerTab('profile')}>
+                  <Ionicons name="person-outline" size={20} color={customerDarkMode ? '#F5F7FA' : colors.text} />
+                </Pressable>
+
+                <Pressable style={[styles.customerHeaderIconButton, customerDarkMode && styles.customerHeaderIconButtonDark]} onPress={() => setCustomerTab('orders')}>
+                  <Ionicons name="cart-outline" size={20} color={customerDarkMode ? '#F5F7FA' : colors.text} />
+                  {customerBookings.length ? (
+                    <View style={styles.customerHeaderIconBadge}>
+                      <Text style={styles.customerHeaderIconBadgeText}>{Math.min(customerBookings.length, 9)}</Text>
+                    </View>
+                  ) : null}
+                </Pressable>
+
+                <Pressable style={[styles.customerHeaderIconButton, customerDarkMode && styles.customerHeaderIconButtonDark]} onPress={() => setCustomerBanner({ tone: 'info', text: authUser ? 'Notifications will appear here.' : 'Sign in to receive booking and offer notifications.' })}>
+                  <Ionicons name="notifications-outline" size={20} color={customerDarkMode ? '#F5F7FA' : colors.text} />
+                  {busy ? <View style={styles.customerHeaderStatusDot} /> : null}
+                </Pressable>
               </View>
             </View>
 
             <View style={styles.customerHeaderMetaRow}>
               <View style={[styles.customerHeaderSearchPill, customerDarkMode && styles.customerHeaderSearchPillDark]}>
                 <Ionicons name="location-outline" size={16} color={customerDarkMode ? '#C8D3DC' : colors.primary} />
-                <Text style={[styles.customerHeaderMetaText, customerDarkMode && styles.customerSubtitleDark]}>{authUser?.email ?? 'Doha, Qatar · Browse first, sign in only when you book.'}</Text>
+                <Text style={[styles.customerHeaderMetaText, customerDarkMode && styles.customerSubtitleDark]}>{authUser?.email ?? customerHeader.subtitle}</Text>
               </View>
               {busy ? <ActivityIndicator color={customerDarkMode ? '#F5F7FA' : colors.primary} /> : null}
-            </View>
-
-            <View style={styles.customerHeaderChipRow}>
-              {customerHeaderChips.map((chip) => (
-                <View key={chip} style={[styles.customerHeaderChip, customerDarkMode && styles.customerHeaderChipDark]}>
-                  <Text style={[styles.customerHeaderChipText, customerDarkMode && styles.customerHeaderChipTextDark]}>{chip}</Text>
-                </View>
-              ))}
-            </View>
-
-            <View style={styles.customerHeaderStatsRow}>
-              {customerHeaderStats.map((stat) => (
-                <View key={stat.label} style={[styles.customerHeaderStatCard, customerDarkMode && styles.customerHeaderStatCardDark]}>
-                  <Text style={[styles.customerHeaderStatValue, customerDarkMode && styles.customerTitleDark]}>{stat.value}</Text>
-                  <Text style={[styles.customerHeaderStatLabel, customerDarkMode && styles.customerSubtitleDark]}>{stat.label}</Text>
-                </View>
-              ))}
             </View>
 
             {!!authMessage ? <Text style={[styles.customerHeaderMessage, customerDarkMode && styles.customerHeaderMessageDark]}>{authMessage}</Text> : null}
@@ -2442,15 +2425,79 @@ const styles = StyleSheet.create({
     marginHorizontal: 18,
     marginTop: 12,
     marginBottom: 10,
-    padding: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderRadius: 24,
     backgroundColor: '#FFF8EF',
     borderWidth: 1,
     borderColor: colors.border,
-    gap: 10,
+    gap: 12,
   },
   customerHeaderCardDark: {
     borderColor: '#273341',
+  },
+  customerHeaderBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  customerLogoWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  customerLogoImage: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+  },
+  customerHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  customerHeaderIconButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFFBF',
+    borderWidth: 1,
+    borderColor: '#EADCC4',
+    position: 'relative',
+  },
+  customerHeaderIconButtonDark: {
+    backgroundColor: '#203142',
+    borderColor: '#324456',
+  },
+  customerHeaderIconBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -2,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.accent,
+  },
+  customerHeaderIconBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  customerHeaderStatusDot: {
+    position: 'absolute',
+    top: 8,
+    right: 9,
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: colors.accent,
   },
   customerBrandLockup: {
     flex: 1,
@@ -2494,6 +2541,12 @@ const styles = StyleSheet.create({
   },
   customerHeaderBrandDark: {
     color: '#8FC3FF',
+  },
+  customerHeaderMiniTitle: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '700',
+    color: colors.text,
   },
   customerHeaderTitle: {
     fontSize: 24,
