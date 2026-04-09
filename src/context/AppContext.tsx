@@ -31,7 +31,7 @@ import {
 } from '../app-types';
 
 const STORAGE_KEY = 'jahzeen-platform-state-v2';
-const ADMIN_BOOTSTRAP_EMAILS = ['owner@jahzeen.app', 'admin@jahzeen.app'];
+const MANUAL_ADMIN_EMAILS = ['owner@jahzeen.app', 'admin@jahzeen.app'];
 
 const starterProfile: UserProfile = {
   fullName: 'Guest Customer',
@@ -346,7 +346,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     let companyName: string | undefined;
     let invitedByEmail: string | undefined;
 
-    if (ADMIN_BOOTSTRAP_EMAILS.includes(email)) {
+    if (MANUAL_ADMIN_EMAILS.includes(email)) {
       role = 'admin';
     } else if (matchingInvitation) {
       role = 'company';
@@ -455,10 +455,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setBusy(true);
     setAuthMessage('');
     try {
-      const response = await signUp({ username: payload.email.trim().toLowerCase(), password: payload.password, options: { userAttributes: { email: payload.email.trim().toLowerCase(), name: payload.fullName } } });
-      setPendingEmail(payload.email.trim().toLowerCase());
+      const normalizedEmail = payload.email.trim().toLowerCase();
+
+      if (MANUAL_ADMIN_EMAILS.includes(normalizedEmail)) {
+        setAuthMessage('Admin accounts are created manually. Use sign in with the admin credentials instead.');
+        return;
+      }
+
+      const response = await signUp({ username: normalizedEmail, password: payload.password, options: { userAttributes: { email: normalizedEmail, name: payload.fullName } } });
+      setPendingEmail(normalizedEmail);
       setNeedsConfirmation(response.nextStep.signUpStep !== 'DONE');
-      setProfile((current: UserProfile) => ({ ...current, fullName: payload.fullName, email: payload.email.trim().toLowerCase(), phone: payload.phone }));
+      setProfile((current: UserProfile) => ({ ...current, fullName: payload.fullName, email: normalizedEmail, phone: payload.phone }));
       setAuthMessage('Account created. Enter the email verification code.');
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : 'Unable to create account.');

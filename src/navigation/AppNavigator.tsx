@@ -114,8 +114,8 @@ function WorkspaceScreen() {
 
   const [adminTab, setAdminTab] = useState<'overview' | 'companies' | 'users'>('overview');
   const [companyTab, setCompanyTab] = useState<'overview' | 'catalog' | 'bookings' | 'loyalty'>('overview');
-  const [customerTab, setCustomerTab] = useState<'marketplace' | 'orders' | 'account'>('marketplace');
-  const [showGuestAuthScreen, setShowGuestAuthScreen] = useState(false);
+  const [customerTab, setCustomerTab] = useState<'home' | 'explore' | 'orders' | 'profile'>('home');
+  const [customerDarkMode, setCustomerDarkMode] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
 
   const [signInForm, setSignInForm] = useState({ email: '', password: '' });
@@ -204,17 +204,6 @@ function WorkspaceScreen() {
       paymentMethod: profile.defaultPaymentMethod,
     }));
   }, [addresses, profile.defaultPaymentMethod]);
-
-  useEffect(() => {
-    if (authUser) {
-      setShowGuestAuthScreen(false);
-      return;
-    }
-
-    if (customerTab !== 'marketplace') {
-      setCustomerTab('marketplace');
-    }
-  }, [authUser, customerTab]);
 
   const selectedAdminCompany = useMemo(
     () => companies.find((entry) => entry.id === selectedAdminCompanyId) ?? null,
@@ -611,9 +600,9 @@ function WorkspaceScreen() {
     const errors = validateBookingDraft(bookingComposer, authUser, addresses);
     setBookingErrors(errors);
     if (Object.keys(errors).length) {
-      setCustomerBanner({ tone: 'error', text: authUser ? 'Fix the booking details before placing the order.' : 'Sign in before placing a booking.' });
+      setCustomerBanner({ tone: 'error', text: authUser ? 'Fix the booking details before placing the order.' : 'Open Profile and sign in before placing a booking.' });
       if (!authUser) {
-        setShowGuestAuthScreen(true);
+        setCustomerTab('profile');
       }
       return;
     }
@@ -785,11 +774,10 @@ function WorkspaceScreen() {
             confirmCode={confirmCode}
             onConfirmCodeChange={setConfirmCode}
             needsConfirmation={needsConfirmation}
-            showGuestAuthScreen={showGuestAuthScreen}
             onAuthAction={handleAuthAction}
             onConfirmCode={handleConfirmCode}
-            onOpenAuthScreen={() => setShowGuestAuthScreen(true)}
-            onCloseAuthScreen={() => setShowGuestAuthScreen(false)}
+            darkMode={customerDarkMode}
+            onToggleDarkMode={() => setCustomerDarkMode((current) => !current)}
             profileForm={profileForm}
             onProfileFormChange={setProfileForm}
             profileErrors={profileErrors}
@@ -1226,8 +1214,8 @@ function CompanyWorkspace({
 
 type CustomerWorkspaceProps = {
   wide: boolean;
-  tab: 'marketplace' | 'orders' | 'account';
-  onTabChange: (tab: 'marketplace' | 'orders' | 'account') => void;
+  tab: 'home' | 'explore' | 'orders' | 'profile';
+  onTabChange: (tab: 'home' | 'explore' | 'orders' | 'profile') => void;
   authUser: { email: string } | null;
   currentUserRole: string;
   marketplaceItems: CatalogItem[];
@@ -1267,11 +1255,10 @@ type CustomerWorkspaceProps = {
   confirmCode: string;
   onConfirmCodeChange: (value: string) => void;
   needsConfirmation: boolean;
-  showGuestAuthScreen: boolean;
   onAuthAction: () => void;
   onConfirmCode: () => void;
-  onOpenAuthScreen: () => void;
-  onCloseAuthScreen: () => void;
+  darkMode: boolean;
+  onToggleDarkMode: () => void;
   profileForm: UserProfile;
   onProfileFormChange: React.Dispatch<React.SetStateAction<UserProfile>>;
   profileErrors: ValidationMap;
@@ -1311,11 +1298,10 @@ function CustomerWorkspace({
   confirmCode,
   onConfirmCodeChange,
   needsConfirmation,
-  showGuestAuthScreen,
   onAuthAction,
   onConfirmCode,
-  onOpenAuthScreen,
-  onCloseAuthScreen,
+  darkMode,
+  onToggleDarkMode,
   profileForm,
   onProfileFormChange,
   profileErrors,
@@ -1327,97 +1313,147 @@ function CustomerWorkspace({
   onSignOut,
   banner,
 }: CustomerWorkspaceProps) {
-  const customerTabs = authUser
-    ? [
-        { key: 'marketplace', label: 'Marketplace' },
-        { key: 'orders', label: 'Orders' },
-        { key: 'account', label: 'Account' },
-      ]
-    : [{ key: 'marketplace', label: 'Marketplace' }];
+  const customerItems = marketplaceItems.slice(0, 6);
+  const featuredItems = marketplaceItems.filter((item) => item.featured).slice(0, 3);
+  const displayItems = (featuredItems.length ? featuredItems : customerItems).slice(0, 3);
+  const categories = Array.from(new Set(marketplaceItems.map((item) => item.category).filter(Boolean))).slice(0, 6);
+  const customerTheme = {
+    canvas: darkMode ? styles.customerCanvasDark : undefined,
+    card: darkMode ? styles.customerSectionDark : undefined,
+    title: darkMode ? styles.customerTitleDark : undefined,
+    subtitle: darkMode ? styles.customerSubtitleDark : undefined,
+    body: darkMode ? styles.customerBodyDark : undefined,
+    empty: darkMode ? styles.customerEmptyDark : undefined,
+    inputTheme: darkMode ? 'dark' : 'light',
+    navWrap: darkMode ? styles.bottomNavDark : undefined,
+    navItem: darkMode ? styles.bottomNavItemDark : undefined,
+    navText: darkMode ? styles.bottomNavTextDark : undefined,
+    metaCard: darkMode ? styles.customerMetaCardDark : undefined,
+  } as const;
+
+  const customerTabs = [
+    { key: 'home', label: 'Home' },
+    { key: 'explore', label: 'Explore' },
+    { key: 'orders', label: 'Orders' },
+    { key: 'profile', label: 'Profile' },
+  ];
 
   return (
-    <>
-      <SegmentControl
-        items={customerTabs}
-        selectedKey={tab}
-        onChange={(value) => onTabChange(value as 'marketplace' | 'orders' | 'account')}
-      />
+    <View style={[styles.customerWorkspace, customerTheme.canvas]}>
       {banner ? <StatusBanner tone={banner.tone} text={banner.text} /> : null}
 
-      {!authUser && showGuestAuthScreen ? (
-        <SectionCard title="Login to continue" subtitle="Customers can browse freely, but ordering requires a customer account.">
-          <View style={styles.rowGap}>
-            <ChoiceChip label="Sign in" selected={authMode === 'signin'} onPress={() => onAuthModeChange('signin')} />
-            <ChoiceChip label="Sign up" selected={authMode === 'signup'} onPress={() => onAuthModeChange('signup')} />
-          </View>
-          {authMode === 'signin' ? (
-            <>
-              <FormField label="Email" value={signInForm.email} onChangeText={(value) => onSignInFormChange((current) => ({ ...current, email: value }))} error={authErrors.email} />
-              <FormField label="Password" value={signInForm.password} onChangeText={(value) => onSignInFormChange((current) => ({ ...current, password: value }))} error={authErrors.password} secureTextEntry />
-            </>
-          ) : (
-            <>
-              <FormField label="Full name" value={signUpForm.fullName} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, fullName: value }))} error={authErrors.fullName} />
-              <FormField label="Email" value={signUpForm.email} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, email: value }))} error={authErrors.email} />
-              <FormField label="Phone" value={signUpForm.phone} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, phone: value }))} error={authErrors.phone} />
-              <FormField label="Password" value={signUpForm.password} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, password: value }))} error={authErrors.password} secureTextEntry />
-            </>
-          )}
-          <PrimaryButton label={authMode === 'signin' ? 'Sign in' : 'Create account'} onPress={onAuthAction} />
-          {needsConfirmation ? (
-            <View style={styles.verificationCard}>
-              <Text style={styles.verificationTitle}>Email verification required</Text>
-              <FormField label="Verification code" value={confirmCode} onChangeText={onConfirmCodeChange} error={authErrors.confirmCode} />
-              <SecondaryButton label="Confirm email" onPress={onConfirmCode} />
-            </View>
-          ) : null}
-          <SecondaryButton label="Back to homepage" onPress={onCloseAuthScreen} />
-        </SectionCard>
-      ) : null}
-
-      {tab === 'marketplace' && !showGuestAuthScreen ? (
+      {tab === 'home' ? (
         <>
-          <SectionCard title="Marketplace" subtitle="Browse live products and services without authentication.">
-            {marketplaceItems.length ? (
+          <SectionCard
+            title="Professional home services, ready when you are"
+            subtitle="Browse trusted companies, compare offers, and book only when you are ready. Guests can explore the full customer experience before signing in."
+            cardStyle={customerTheme.card}
+            titleStyle={customerTheme.title}
+            subtitleStyle={customerTheme.subtitle}
+          >
+            <View style={[styles.homeHeroPanel, customerTheme.metaCard]}>
+              <View style={styles.infoBodyGrow}>
+                <Text style={[styles.homeHeroTitle, customerTheme.title]}>Home cleaning, maintenance, beauty, repairs, and more.</Text>
+                <Text style={[styles.homeHeroBody, customerTheme.subtitle]}>Jahzeen keeps the storefront open to guests and keeps fulfilment inside dedicated admin and company groups.</Text>
+              </View>
+              <PrimaryButton label="Explore services" onPress={() => onTabChange('explore')} />
+            </View>
+            <View style={[styles.metricGrid, wide && styles.metricGridWide]}>
+              <CustomerMetricCard label="Live companies" value={String(new Set(marketplaceItems.map((item) => item.companyId)).size)} darkMode={darkMode} />
+              <CustomerMetricCard label="Visible offers" value={String(marketplaceItems.length)} darkMode={darkMode} />
+              <CustomerMetricCard label="Featured picks" value={String(featuredItems.length || Math.min(3, marketplaceItems.length))} darkMode={darkMode} />
+            </View>
+          </SectionCard>
+
+          <SectionCard
+            title="Popular categories"
+            subtitle="A professional landing page should help customers scan categories before they commit to an order."
+            cardStyle={customerTheme.card}
+            titleStyle={customerTheme.title}
+            subtitleStyle={customerTheme.subtitle}
+          >
+            {categories.length ? (
+              <View style={styles.toggleRow}>
+                {categories.map((category) => (
+                  <ChoiceChip key={category} label={category} selected={false} onPress={() => onTabChange('explore')} />
+                ))}
+              </View>
+            ) : (
+              <EmptyState title="No categories yet" body="Once companies publish offers, customers will see categories and featured services here." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
+            )}
+          </SectionCard>
+
+          <SectionCard
+            title="Featured offers"
+            subtitle="Guests can preview real services and products directly from the home page."
+            cardStyle={customerTheme.card}
+            titleStyle={customerTheme.title}
+            subtitleStyle={customerTheme.subtitle}
+          >
+            {displayItems.length ? (
               <View style={[styles.catalogGrid, wide && styles.catalogGridWide]}>
-                {marketplaceItems.map((item) => (
-                  <Pressable key={item.id} style={styles.marketplaceCard} onPress={() => onSelectItem(item)}>
+                {displayItems.map((item) => (
+                  <Pressable key={item.id} style={[styles.marketplaceCard, darkMode && styles.marketplaceCardDark]} onPress={() => { onSelectItem(item); onTabChange('explore'); }}>
                     <Text style={styles.marketplaceEyebrow}>{item.companyName}</Text>
-                    <Text style={styles.marketplaceTitle}>{item.title}</Text>
-                    <Text style={styles.marketplaceSummary}>{item.summary}</Text>
+                    <Text style={[styles.marketplaceTitle, darkMode && styles.marketplaceTitleDark]}>{item.title}</Text>
+                    <Text style={[styles.marketplaceSummary, darkMode && styles.customerSubtitleDark]}>{item.summary}</Text>
                     <View style={styles.rowBetween}>
-                      <Text style={styles.priceText}>QAR {item.price.toFixed(0)}</Text>
-                      <Text style={styles.metaText}>{item.durationLabel || item.kind}</Text>
+                      <Text style={[styles.priceText, darkMode && styles.marketplaceTitleDark]}>QAR {item.price.toFixed(0)}</Text>
+                      <Text style={[styles.metaText, darkMode && styles.customerSubtitleDark]}>{item.durationLabel || item.kind}</Text>
                     </View>
                   </Pressable>
                 ))}
               </View>
             ) : (
-              <EmptyState title="Marketplace is empty" body="No company has published items yet. Admins can create partner workspaces and companies can publish from their dashboard." />
+              <EmptyState title="Marketplace is empty" body="No company has published items yet. Admins can create partner workspaces and companies can publish from their dashboard." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
+            )}
+          </SectionCard>
+        </>
+      ) : null}
+
+      {tab === 'explore' ? (
+        <>
+          <SectionCard title="Explore offers" subtitle="Browse live products and services without authentication." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+            {marketplaceItems.length ? (
+              <View style={[styles.catalogGrid, wide && styles.catalogGridWide]}>
+                {marketplaceItems.map((item) => (
+                  <Pressable key={item.id} style={[styles.marketplaceCard, darkMode && styles.marketplaceCardDark]} onPress={() => onSelectItem(item)}>
+                    <Text style={styles.marketplaceEyebrow}>{item.companyName}</Text>
+                    <Text style={[styles.marketplaceTitle, darkMode && styles.marketplaceTitleDark]}>{item.title}</Text>
+                    <Text style={[styles.marketplaceSummary, darkMode && styles.customerSubtitleDark]}>{item.summary}</Text>
+                    <View style={styles.rowBetween}>
+                      <Text style={[styles.priceText, darkMode && styles.marketplaceTitleDark]}>QAR {item.price.toFixed(0)}</Text>
+                      <Text style={[styles.metaText, darkMode && styles.customerSubtitleDark]}>{item.durationLabel || item.kind}</Text>
+                    </View>
+                  </Pressable>
+                ))}
+              </View>
+            ) : (
+              <EmptyState title="Marketplace is empty" body="No company has published items yet. Admins can create partner workspaces and companies can publish from their dashboard." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
             )}
           </SectionCard>
 
           {bookingComposer.itemId ? (
-            <SectionCard title="Booking composer" subtitle={authUser ? 'Everything required to place the order is validated before submission.' : 'Pick an item now and sign in when you are ready to book.'}>
+            <SectionCard title="Booking composer" subtitle={authUser ? 'Everything required to place the order is validated before submission.' : 'Guests can prepare an order here, then sign in from Profile to complete it.'} cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
               <View style={styles.rowGap}>
-                <FormField label="Date" value={bookingComposer.scheduleDate} onChangeText={(value) => onBookingComposerChange((current) => ({ ...current, scheduleDate: value }))} error={bookingErrors.scheduleDate} />
-                <FormField label="Time" value={bookingComposer.scheduleTime} onChangeText={(value) => onBookingComposerChange((current) => ({ ...current, scheduleTime: value }))} error={bookingErrors.scheduleTime} />
+                <FormField label="Date" value={bookingComposer.scheduleDate} onChangeText={(value) => onBookingComposerChange((current) => ({ ...current, scheduleDate: value }))} error={bookingErrors.scheduleDate} theme={customerTheme.inputTheme} />
+                <FormField label="Time" value={bookingComposer.scheduleTime} onChangeText={(value) => onBookingComposerChange((current) => ({ ...current, scheduleTime: value }))} error={bookingErrors.scheduleTime} theme={customerTheme.inputTheme} />
               </View>
-              <FormField label="Notes" value={bookingComposer.notes} onChangeText={(value) => onBookingComposerChange((current) => ({ ...current, notes: value }))} multiline />
+              <FormField label="Notes" value={bookingComposer.notes} onChangeText={(value) => onBookingComposerChange((current) => ({ ...current, notes: value }))} multiline theme={customerTheme.inputTheme} />
               <View style={styles.toggleRow}>
                 <ChoiceChip label="Card" selected={bookingComposer.paymentMethod === 'card'} onPress={() => onBookingComposerChange((current) => ({ ...current, paymentMethod: 'card' }))} />
                 <ChoiceChip label="Cash" selected={bookingComposer.paymentMethod === 'cash'} onPress={() => onBookingComposerChange((current) => ({ ...current, paymentMethod: 'cash' }))} />
                 <ChoiceChip label="Apple Pay" selected={bookingComposer.paymentMethod === 'applePay'} onPress={() => onBookingComposerChange((current) => ({ ...current, paymentMethod: 'applePay' }))} />
               </View>
               {bookingErrors.auth ? <FieldError text={bookingErrors.auth} /> : null}
-              <PrimaryButton label={authUser ? 'Place booking' : 'Continue to login'} onPress={authUser ? onPlaceBooking : onOpenAuthScreen} />
+              <PrimaryButton label={authUser ? 'Place booking' : 'Open profile to login'} onPress={authUser ? onPlaceBooking : () => onTabChange('profile')} />
             </SectionCard>
           ) : null}
         </>
       ) : null}
 
-      {tab === 'orders' && authUser ? (
-        <SectionCard title="My orders" subtitle="Signed-in customers can track bookings and submit ratings after completion.">
+      {tab === 'orders' ? (
+        <SectionCard title="My orders" subtitle="Signed-in customers can track bookings and submit ratings after completion." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
           {authUser ? (
             customerBookings.length ? customerBookings.map((booking) => (
               <View key={booking.id} style={styles.bookingWrap}>
@@ -1435,6 +1471,7 @@ function CustomerWorkspace({
                       }
                       placeholder="1-5"
                       error={ratingErrors[booking.id]}
+                      theme={customerTheme.inputTheme}
                     />
                     <FormField
                       label="Review"
@@ -1446,54 +1483,73 @@ function CustomerWorkspace({
                         })
                       }
                       multiline
+                      theme={customerTheme.inputTheme}
                     />
                     <PrimaryButton label="Submit rating" onPress={() => onSubmitRating(booking.id)} />
                   </View>
                 ) : null}
               </View>
-            )) : <EmptyState title="No bookings yet" body="Place a booking from the marketplace after a company publishes services or products." />
+            )) : <EmptyState title="No bookings yet" body="Place a booking from Explore after a company publishes services or products." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
           ) : (
-            <EmptyState title="Sign in required" body="Browsing is public, but orders and ratings are tied to a customer account." />
+            <EmptyState title="Sign in required" body="Open the Profile tab to sign in, then your orders and ratings will appear here." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
           )}
         </SectionCard>
       ) : null}
 
-      {tab === 'account' && authUser ? (
+      {tab === 'profile' ? (
         !authUser ? (
-          <SectionCard title="Customer access" subtitle="Create an account or sign in when you are ready to book.">
+          <>
+            <SectionCard title="Profile" subtitle="Sign in only when you need to order, track bookings, or save your preferences." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+              <View style={[styles.darkModeCard, customerTheme.metaCard]}>
+                <View style={styles.infoBodyGrow}>
+                  <Text style={[styles.infoTitle, customerTheme.title]}>Appearance</Text>
+                  <Text style={[styles.helperText, customerTheme.subtitle]}>Switch between light and dark mode from the profile tab.</Text>
+                </View>
+                <ChoiceChip label={darkMode ? 'Dark mode on' : 'Dark mode off'} selected={darkMode} onPress={onToggleDarkMode} />
+              </View>
+            </SectionCard>
+            <SectionCard title="Login or create account" subtitle="Customers belong to the customer group after sign-up. Admins are manual accounts and company users only become company users from approved invitations." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
             <View style={styles.toggleRow}>
               <ChoiceChip label="Sign in" selected={authMode === 'signin'} onPress={() => onAuthModeChange('signin')} />
               <ChoiceChip label="Sign up" selected={authMode === 'signup'} onPress={() => onAuthModeChange('signup')} />
             </View>
             {authMode === 'signin' ? (
               <>
-                <FormField label="Email" value={signInForm.email} onChangeText={(value) => onSignInFormChange((current) => ({ ...current, email: value }))} error={authErrors.email} />
-                <FormField label="Password" value={signInForm.password} onChangeText={(value) => onSignInFormChange((current) => ({ ...current, password: value }))} error={authErrors.password} secureTextEntry />
+                <FormField label="Email" value={signInForm.email} onChangeText={(value) => onSignInFormChange((current) => ({ ...current, email: value }))} error={authErrors.email} theme={customerTheme.inputTheme} />
+                <FormField label="Password" value={signInForm.password} onChangeText={(value) => onSignInFormChange((current) => ({ ...current, password: value }))} error={authErrors.password} secureTextEntry theme={customerTheme.inputTheme} />
               </>
             ) : (
               <>
-                <FormField label="Full name" value={signUpForm.fullName} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, fullName: value }))} error={authErrors.fullName} />
-                <FormField label="Email" value={signUpForm.email} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, email: value }))} error={authErrors.email} />
-                <FormField label="Phone" value={signUpForm.phone} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, phone: value }))} error={authErrors.phone} />
-                <FormField label="Password" value={signUpForm.password} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, password: value }))} error={authErrors.password} secureTextEntry />
+                <FormField label="Full name" value={signUpForm.fullName} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, fullName: value }))} error={authErrors.fullName} theme={customerTheme.inputTheme} />
+                <FormField label="Email" value={signUpForm.email} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, email: value }))} error={authErrors.email} theme={customerTheme.inputTheme} />
+                <FormField label="Phone" value={signUpForm.phone} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, phone: value }))} error={authErrors.phone} theme={customerTheme.inputTheme} />
+                <FormField label="Password" value={signUpForm.password} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, password: value }))} error={authErrors.password} secureTextEntry theme={customerTheme.inputTheme} />
               </>
             )}
             <PrimaryButton label={authMode === 'signin' ? 'Sign in' : 'Create account'} onPress={onAuthAction} />
             {needsConfirmation ? (
               <View style={styles.verificationCard}>
                 <Text style={styles.verificationTitle}>Email verification required</Text>
-                <FormField label="Verification code" value={confirmCode} onChangeText={onConfirmCodeChange} error={authErrors.confirmCode} />
+                <FormField label="Verification code" value={confirmCode} onChangeText={onConfirmCodeChange} error={authErrors.confirmCode} theme={customerTheme.inputTheme} />
                 <SecondaryButton label="Confirm email" onPress={onConfirmCode} />
               </View>
             ) : null}
-          </SectionCard>
+            </SectionCard>
+          </>
         ) : (
           <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
             <View style={styles.columnPane}>
-              <SectionCard title="Profile" subtitle={`Signed in as ${currentUserRole}`}>
-                <FormField label="Full name" value={profileForm.fullName} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, fullName: value }))} error={profileErrors.fullName} />
-                <FormField label="Email" value={profileForm.email} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, email: value }))} error={profileErrors.email} />
-                <FormField label="Phone" value={profileForm.phone} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, phone: value }))} error={profileErrors.phone} />
+              <SectionCard title="Profile" subtitle={`Signed in as ${currentUserRole}`} cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+                <View style={[styles.darkModeCard, customerTheme.metaCard]}>
+                  <View style={styles.infoBodyGrow}>
+                    <Text style={[styles.infoTitle, customerTheme.title]}>Appearance</Text>
+                    <Text style={[styles.helperText, customerTheme.subtitle]}>Dark mode is available from the profile tab and only affects the customer experience.</Text>
+                  </View>
+                  <ChoiceChip label={darkMode ? 'Dark mode on' : 'Dark mode off'} selected={darkMode} onPress={onToggleDarkMode} />
+                </View>
+                <FormField label="Full name" value={profileForm.fullName} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, fullName: value }))} error={profileErrors.fullName} theme={customerTheme.inputTheme} />
+                <FormField label="Email" value={profileForm.email} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, email: value }))} error={profileErrors.email} theme={customerTheme.inputTheme} />
+                <FormField label="Phone" value={profileForm.phone} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, phone: value }))} error={profileErrors.phone} theme={customerTheme.inputTheme} />
                 <View style={styles.toggleRow}>
                   <ChoiceChip label="Card" selected={profileForm.defaultPaymentMethod === 'card'} onPress={() => onProfileFormChange((current) => ({ ...current, defaultPaymentMethod: 'card' }))} />
                   <ChoiceChip label="Cash" selected={profileForm.defaultPaymentMethod === 'cash'} onPress={() => onProfileFormChange((current) => ({ ...current, defaultPaymentMethod: 'cash' }))} />
@@ -1504,18 +1560,18 @@ function CustomerWorkspace({
             </View>
 
             <View style={styles.columnPane}>
-              <SectionCard title="Default address" subtitle="Used as the default destination for future bookings.">
+              <SectionCard title="Default address" subtitle="Used as the default destination for future bookings." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
                 <View style={styles.rowGap}>
-                  <FormField label="Label" value={addressForm.label} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, label: value }))} error={addressErrors.label} />
-                  <FormField label="Area" value={addressForm.area} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, area: value }))} error={addressErrors.area} />
+                  <FormField label="Label" value={addressForm.label} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, label: value }))} error={addressErrors.label} theme={customerTheme.inputTheme} />
+                  <FormField label="Area" value={addressForm.area} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, area: value }))} error={addressErrors.area} theme={customerTheme.inputTheme} />
                 </View>
                 <View style={styles.rowGap}>
-                  <FormField label="Street" value={addressForm.street} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, street: value }))} error={addressErrors.street} />
-                  <FormField label="Building" value={addressForm.building} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, building: value }))} error={addressErrors.building} />
+                  <FormField label="Street" value={addressForm.street} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, street: value }))} error={addressErrors.street} theme={customerTheme.inputTheme} />
+                  <FormField label="Building" value={addressForm.building} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, building: value }))} error={addressErrors.building} theme={customerTheme.inputTheme} />
                 </View>
                 <View style={styles.rowGap}>
-                  <FormField label="Unit" value={addressForm.unitNumber} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, unitNumber: value }))} />
-                  <FormField label="Phone" value={addressForm.contactPhone} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, contactPhone: value }))} error={addressErrors.contactPhone} />
+                  <FormField label="Unit" value={addressForm.unitNumber} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, unitNumber: value }))} theme={customerTheme.inputTheme} />
+                  <FormField label="Phone" value={addressForm.contactPhone} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, contactPhone: value }))} error={addressErrors.contactPhone} theme={customerTheme.inputTheme} />
                 </View>
                 <PrimaryButton label="Save address" onPress={onSaveAddress} />
                 <SecondaryButton label="Sign out" onPress={() => onSignOut()} />
@@ -1524,7 +1580,9 @@ function CustomerWorkspace({
           </View>
         )
       ) : null}
-    </>
+
+      <BottomNavBar items={customerTabs} selectedKey={tab} onChange={(value) => onTabChange(value as 'home' | 'explore' | 'orders' | 'profile')} containerStyle={customerTheme.navWrap} itemStyle={customerTheme.navItem} textStyle={customerTheme.navText} />
+    </View>
   );
 }
 
@@ -1681,12 +1739,12 @@ function SegmentControl({ items, selectedKey, onChange }: { items: Array<{ key: 
   );
 }
 
-function SectionCard({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
+function SectionCard({ title, subtitle, children, cardStyle, titleStyle, subtitleStyle, bodyStyle }: { title: string; subtitle: string; children: React.ReactNode; cardStyle?: object; titleStyle?: object; subtitleStyle?: object; bodyStyle?: object }) {
   return (
-    <View style={styles.sectionCard}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      <Text style={styles.sectionSubtitle}>{subtitle}</Text>
-      <View style={styles.sectionBody}>{children}</View>
+    <View style={[styles.sectionCard, cardStyle]}>
+      <Text style={[styles.sectionTitle, titleStyle]}>{title}</Text>
+      <Text style={[styles.sectionSubtitle, subtitleStyle]}>{subtitle}</Text>
+      <View style={[styles.sectionBody, bodyStyle]}>{children}</View>
     </View>
   );
 }
@@ -1699,6 +1757,7 @@ function FormField({
   multiline,
   secureTextEntry,
   error,
+  theme = 'light',
 }: {
   label: string;
   value: string;
@@ -1707,18 +1766,19 @@ function FormField({
   multiline?: boolean;
   secureTextEntry?: boolean;
   error?: string;
+  theme?: 'light' | 'dark';
 }) {
   return (
     <View style={styles.fieldWrap}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <Text style={[styles.fieldLabel, theme === 'dark' && styles.fieldLabelDark]}>{label}</Text>
       <TextInput
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor="#90A0A6"
+        placeholderTextColor={theme === 'dark' ? '#728190' : '#90A0A6'}
         multiline={multiline}
         secureTextEntry={secureTextEntry}
-        style={[styles.input, multiline && styles.inputMultiline, error && styles.inputError]}
+        style={[styles.input, theme === 'dark' && styles.inputDark, multiline && styles.inputMultiline, error && styles.inputError]}
       />
       {error ? <FieldError text={error} /> : null}
     </View>
@@ -1777,11 +1837,32 @@ function ChoiceChip({ label, selected, onPress }: { label: string; selected: boo
   );
 }
 
-function EmptyState({ title, body }: { title: string; body: string }) {
+function EmptyState({ title, body, cardStyle, titleStyle, bodyStyle }: { title: string; body: string; cardStyle?: object; titleStyle?: object; bodyStyle?: object }) {
   return (
-    <View style={styles.emptyState}>
-      <Text style={styles.emptyTitle}>{title}</Text>
-      <Text style={styles.emptyBody}>{body}</Text>
+    <View style={[styles.emptyState, cardStyle]}>
+      <Text style={[styles.emptyTitle, titleStyle]}>{title}</Text>
+      <Text style={[styles.emptyBody, bodyStyle]}>{body}</Text>
+    </View>
+  );
+}
+
+function CustomerMetricCard({ label, value, darkMode }: { label: string; value: string; darkMode: boolean }) {
+  return (
+    <View style={[styles.metricCard, darkMode && styles.customerMetaCardDark]}>
+      <Text style={[styles.metricValue, darkMode && styles.customerTitleDark]}>{value}</Text>
+      <Text style={[styles.metricLabel, darkMode && styles.customerSubtitleDark]}>{label}</Text>
+    </View>
+  );
+}
+
+function BottomNavBar({ items, selectedKey, onChange, containerStyle, itemStyle, textStyle }: { items: Array<{ key: string; label: string }>; selectedKey: string; onChange: (value: string) => void; containerStyle?: object; itemStyle?: object; textStyle?: object }) {
+  return (
+    <View style={[styles.bottomNav, containerStyle]}>
+      {items.map((item) => (
+        <Pressable key={item.key} style={[styles.bottomNavItem, itemStyle, item.key === selectedKey && styles.bottomNavItemActive]} onPress={() => onChange(item.key)}>
+          <Text style={[styles.bottomNavText, textStyle, item.key === selectedKey && styles.bottomNavTextActive]}>{item.label}</Text>
+        </Pressable>
+      ))}
     </View>
   );
 }
@@ -1906,6 +1987,15 @@ const styles = StyleSheet.create({
   screenContent: {
     padding: 18,
     gap: 16,
+    paddingBottom: 28,
+  },
+  customerWorkspace: {
+    gap: 16,
+  },
+  customerCanvasDark: {
+    backgroundColor: '#111922',
+    borderRadius: 24,
+    padding: 16,
   },
   heroCard: {
     borderRadius: 24,
@@ -2020,6 +2110,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.text,
   },
+  fieldLabelDark: {
+    color: '#F2F4F7',
+  },
   input: {
     backgroundColor: '#FAF8F2',
     borderWidth: 1,
@@ -2031,6 +2124,11 @@ const styles = StyleSheet.create({
   },
   inputError: {
     borderColor: colors.accent,
+  },
+  inputDark: {
+    backgroundColor: '#1A2430',
+    borderColor: '#2E3B49',
+    color: '#F7F9FB',
   },
   inputMultiline: {
     minHeight: 96,
@@ -2208,6 +2306,10 @@ const styles = StyleSheet.create({
     minWidth: 240,
     flexGrow: 1,
   },
+  marketplaceCardDark: {
+    backgroundColor: '#1B2430',
+    borderColor: '#2D3A48',
+  },
   marketplaceEyebrow: {
     color: colors.primary,
     fontWeight: '700',
@@ -2219,6 +2321,9 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     color: colors.text,
+  },
+  marketplaceTitleDark: {
+    color: '#F5F7FA',
   },
   marketplaceSummary: {
     color: colors.muted,
@@ -2267,6 +2372,85 @@ const styles = StyleSheet.create({
     backgroundColor: '#FAF8F2',
     borderRadius: 18,
     padding: 14,
+  },
+  homeHeroPanel: {
+    gap: 14,
+    borderRadius: 20,
+    backgroundColor: '#FBF2E3',
+    padding: 18,
+  },
+  homeHeroTitle: {
+    fontSize: 22,
+    lineHeight: 30,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  homeHeroBody: {
+    color: colors.muted,
+    lineHeight: 22,
+  },
+  darkModeCard: {
+    borderRadius: 18,
+    padding: 14,
+    backgroundColor: '#F7F4EC',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  customerSectionDark: {
+    backgroundColor: '#16202B',
+    borderColor: '#273341',
+  },
+  customerMetaCardDark: {
+    backgroundColor: '#1D2A37',
+    borderColor: '#2D3A48',
+  },
+  customerTitleDark: {
+    color: '#F5F7FA',
+  },
+  customerSubtitleDark: {
+    color: '#AFBCC8',
+  },
+  customerBodyDark: {
+    color: '#DCE3E9',
+  },
+  customerEmptyDark: {
+    backgroundColor: '#1B2632',
+  },
+  bottomNav: {
+    flexDirection: 'row',
+    gap: 8,
+    backgroundColor: colors.surface,
+    borderRadius: 22,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  bottomNavDark: {
+    backgroundColor: '#16202B',
+    borderColor: '#273341',
+  },
+  bottomNavItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderRadius: 16,
+  },
+  bottomNavItemDark: {
+    backgroundColor: '#1D2A37',
+  },
+  bottomNavItemActive: {
+    backgroundColor: colors.primary,
+  },
+  bottomNavText: {
+    color: colors.muted,
+    fontWeight: '700',
+  },
+  bottomNavTextDark: {
+    color: '#C8D3DC',
+  },
+  bottomNavTextActive: {
+    color: '#FFFFFF',
   },
   verificationCard: {
     gap: 10,
