@@ -27,11 +27,13 @@ import {
   InvitationDraft,
   LoyaltyProgram,
   LoyaltyProgramDraft,
+  OfferPromotion,
+  OfferPromotionDraft,
   SignUpPayload,
   UserProfile,
 } from '../app-types';
 
-const STORAGE_KEY = 'jahzeen-platform-state-v2';
+const STORAGE_KEY = 'jahzeen-platform-state-v3';
 const MANUAL_ADMIN_EMAILS = ['owner@jahzeen.app', 'admin@jahzeen.app'];
 
 const starterProfile: UserProfile = {
@@ -62,6 +64,7 @@ type PersistedState = {
   companies: Company[];
   invitations: CompanyInvitation[];
   catalogItems: CatalogItem[];
+  offerPromotions: OfferPromotion[];
   bookings: Booking[];
   ratings: Array<{ id: string; bookingId: string; companyId: string; itemId: string; customerEmail: string; score: number; review: string; createdAtLabel: string }>;
   loyaltyPrograms: LoyaltyProgram[];
@@ -80,6 +83,7 @@ interface AppContextValue {
   companies: Company[];
   invitations: CompanyInvitation[];
   catalogItems: CatalogItem[];
+  offerPromotions: OfferPromotion[];
   bookings: Booking[];
   ratings: PersistedState['ratings'];
   loyaltyPrograms: LoyaltyProgram[];
@@ -101,6 +105,8 @@ interface AppContextValue {
   revokeInvitation: (invitationId: string) => Promise<void>;
   saveCatalogItem: (companyId: string, draft: CatalogItemDraft) => Promise<void>;
   deleteCatalogItem: (itemId: string) => Promise<void>;
+  saveOfferPromotion: (companyId: string, draft: OfferPromotionDraft) => Promise<void>;
+  deleteOfferPromotion: (promotionId: string) => Promise<void>;
   saveLoyaltyProgram: (scope: 'admin' | 'company', companyId: string | undefined, draft: LoyaltyProgramDraft) => Promise<void>;
   placeBooking: (draft: BookingDraft) => Promise<Booking>;
   changeBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
@@ -169,6 +175,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [invitations, setInvitations] = useState<CompanyInvitation[]>([]);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
+  const [offerPromotions, setOfferPromotions] = useState<OfferPromotion[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [ratings, setRatings] = useState<PersistedState['ratings']>([]);
   const [loyaltyPrograms, setLoyaltyPrograms] = useState<LoyaltyProgram[]>([]);
@@ -187,6 +194,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setCompanies(parsed.companies ?? []);
           setInvitations(parsed.invitations ?? []);
           setCatalogItems(parsed.catalogItems ?? []);
+          setOfferPromotions(parsed.offerPromotions ?? []);
           setBookings(parsed.bookings ?? []);
           setRatings(parsed.ratings ?? []);
           setLoyaltyPrograms(parsed.loyaltyPrograms ?? []);
@@ -222,6 +230,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         companies,
         invitations,
         catalogItems,
+        offerPromotions,
         bookings,
         ratings,
         loyaltyPrograms,
@@ -229,7 +238,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ).catch(() => {
       // Ignore persistence errors.
     });
-  }, [initialized, profile, addresses, users, companies, invitations, catalogItems, bookings, ratings, loyaltyPrograms]);
+  }, [initialized, profile, addresses, users, companies, invitations, catalogItems, offerPromotions, bookings, ratings, loyaltyPrograms]);
 
   const currentUserRecord = useMemo(() => {
     if (!authUser) {
@@ -422,11 +431,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   async function syncCloudRecords() {
     try {
-      const [remoteUsers, remoteCompanies, remoteInvitations, remoteItems, remoteBookings, remoteRatings, remotePrograms, remoteAddresses, remoteProfiles] = await Promise.all([
+      const [remoteUsers, remoteCompanies, remoteInvitations, remoteItems, remotePromotions, remoteBookings, remoteRatings, remotePrograms, remoteAddresses, remoteProfiles] = await Promise.all([
         safeList('AppUser'),
         safeList('Company'),
         safeList('CompanyInvitation'),
         safeList('CatalogItem'),
+        safeList('OfferPromotion'),
         safeList('Booking'),
         safeList('Rating'),
         safeList('LoyaltyProgram'),
@@ -445,6 +455,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       if (remoteItems.length) {
         setCatalogItems(remoteItems.map((entry: any) => ({ id: entry.id, companyId: entry.companyId, companyName: entry.companyName, kind: entry.kind, title: entry.title, summary: entry.summary, description: entry.description ?? '', category: entry.category, price: Number(entry.price ?? 0), durationLabel: entry.durationLabel ?? '', isPublished: !!entry.isPublished, featured: !!entry.featured, tags: parseList(entry.tags), loyaltyPoints: Number(entry.loyaltyPoints ?? 0), imageHint: entry.imageHint ?? '' })));
+      }
+      if (remotePromotions.length) {
+        setOfferPromotions(remotePromotions.map((entry: any) => ({ id: entry.id, companyId: entry.companyId, companyName: entry.companyName, catalogItemId: entry.catalogItemId, catalogItemTitle: entry.catalogItemTitle, title: entry.title, headline: entry.headline ?? '', badgeText: entry.badgeText ?? '', discountLabel: entry.discountLabel ?? '', startsAtLabel: entry.startsAtLabel ?? '', endsAtLabel: entry.endsAtLabel ?? '', isActive: !!entry.isActive, sortOrder: Number(entry.sortOrder ?? 0) })));
       }
       if (remoteBookings.length) {
         setBookings(remoteBookings.map((entry: any) => ({ id: entry.id, bookingNumber: entry.bookingNumber, customerEmail: entry.customerEmail, customerName: entry.customerName, companyId: entry.companyId, companyName: entry.companyName, itemId: entry.itemId, itemTitle: entry.itemTitle, kind: entry.kind, scheduleDate: entry.scheduleDate, scheduleTime: entry.scheduleTime, addressLabel: entry.addressLabel, addressLine: entry.addressLine, paymentMethod: entry.paymentMethod, notes: entry.notes ?? '', status: entry.status, subtotal: Number(entry.subtotal ?? 0), serviceFee: Number(entry.serviceFee ?? 0), discount: Number(entry.discount ?? 0), total: Number(entry.total ?? 0), loyaltyPointsEarned: Number(entry.loyaltyPointsEarned ?? 0), ratingSubmitted: !!entry.ratingSubmitted, timeline: parseTimeline(entry.timeline) })));
@@ -511,7 +524,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setBusy(true);
     setAuthMessage('');
     try {
-      await confirmSignUp({ username: pendingEmail, confirmationCode: code.trim() });
+      const normalizedPendingEmail = pendingEmail.trim().toLowerCase();
+      const invitedCompanyUser = invitations.some(
+        (entry) => entry.email.trim().toLowerCase() === normalizedPendingEmail && entry.status === 'pending',
+      );
+
+      await confirmSignUp({
+        username: pendingEmail,
+        confirmationCode: code.trim(),
+        options: invitedCompanyUser
+          ? {
+              clientMetadata: {
+                appRole: 'company',
+              },
+            }
+          : undefined,
+      });
       setNeedsConfirmation(false);
       setAuthMessage('Email verified. You can sign in now.');
     } catch (error) {
@@ -576,6 +604,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   async function deleteCompany(companyId: string) {
     setCompanies((current) => current.filter((entry) => entry.id !== companyId));
     setCatalogItems((current) => current.filter((entry) => entry.companyId !== companyId));
+    setOfferPromotions((current) => current.filter((entry) => entry.companyId !== companyId));
     setBookings((current) => current.filter((entry) => entry.companyId !== companyId));
     setUsers((current) => current.filter((entry) => entry.companyId !== companyId));
     setInvitations((current) => current.filter((entry) => entry.companyId !== companyId));
@@ -634,7 +663,47 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   async function deleteCatalogItem(itemId: string) {
     setCatalogItems((current) => current.filter((entry) => entry.id !== itemId));
+    const linkedPromotions = offerPromotions.filter((entry) => entry.catalogItemId === itemId);
+    setOfferPromotions((current) => current.filter((entry) => entry.catalogItemId !== itemId));
     await safeDelete('CatalogItem', itemId);
+    await Promise.all(linkedPromotions.map((entry) => safeDelete('OfferPromotion', entry.id)));
+  }
+
+  async function saveOfferPromotion(companyId: string, draft: OfferPromotionDraft) {
+    const company = companies.find((entry) => entry.id === companyId);
+    const item = catalogItems.find((entry) => entry.id === draft.catalogItemId && entry.companyId === companyId);
+    if (!company || !item) {
+      throw new Error('Select a valid company item for this promotion.');
+    }
+
+    const nextPromotion: OfferPromotion = {
+      id: draft.id ?? `promotion-${Date.now()}`,
+      companyId,
+      companyName: company.name,
+      catalogItemId: item.id,
+      catalogItemTitle: item.title,
+      title: draft.title,
+      headline: draft.headline,
+      badgeText: draft.badgeText,
+      discountLabel: draft.discountLabel,
+      startsAtLabel: draft.startsAtLabel,
+      endsAtLabel: draft.endsAtLabel,
+      isActive: draft.isActive,
+      sortOrder: draft.sortOrder,
+    };
+
+    setOfferPromotions((current) => draft.id ? current.map((entry) => (entry.id === draft.id ? nextPromotion : entry)) : [nextPromotion, ...current]);
+
+    if (draft.id) {
+      await safeUpdate('OfferPromotion', { ...nextPromotion });
+    } else {
+      await safeCreate('OfferPromotion', { ...nextPromotion });
+    }
+  }
+
+  async function deleteOfferPromotion(promotionId: string) {
+    setOfferPromotions((current) => current.filter((entry) => entry.id !== promotionId));
+    await safeDelete('OfferPromotion', promotionId);
   }
 
   async function saveLoyaltyProgram(scope: 'admin' | 'company', companyId: string | undefined, draft: LoyaltyProgramDraft) {
@@ -686,7 +755,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, activeRole, profile, addresses, users, companies, invitations, catalogItems, bookings, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, signInWithEmail, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, deleteCatalogItem, saveLoyaltyProgram, placeBooking, changeBookingStatus, submitRating }}>
+    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, activeRole, profile, addresses, users, companies, invitations, catalogItems, offerPromotions, bookings, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, signInWithEmail, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, deleteCatalogItem, saveOfferPromotion, deleteOfferPromotion, saveLoyaltyProgram, placeBooking, changeBookingStatus, submitRating }}>
       {children}
     </AppContext.Provider>
   );

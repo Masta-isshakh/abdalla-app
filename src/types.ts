@@ -99,6 +99,22 @@ export interface CatalogItem {
   imageHint: string;
 }
 
+export interface OfferPromotion {
+  id: string;
+  companyId: string;
+  companyName: string;
+  catalogItemId: string;
+  catalogItemTitle: string;
+  title: string;
+  headline: string;
+  badgeText: string;
+  discountLabel: string;
+  startsAtLabel: string;
+  endsAtLabel: string;
+  isActive: boolean;
+  sortOrder: number;
+}
+
 export interface LoyaltyProgram {
   id: string;
   scope: LoyaltyScope;
@@ -194,6 +210,19 @@ export interface CatalogItemDraft {
   tags: string[];
   loyaltyPoints: number;
   imageHint: string;
+}
+
+export interface OfferPromotionDraft {
+  id?: string;
+  catalogItemId: string;
+  title: string;
+  headline: string;
+  badgeText: string;
+  discountLabel: string;
+  startsAtLabel: string;
+  endsAtLabel: string;
+  isActive: boolean;
+  sortOrder: number;
 }
 
 export interface LoyaltyProgramDraft {

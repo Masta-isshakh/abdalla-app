@@ -106,6 +106,27 @@ const schema = a.schema({
       allow.guest().to(['read']),
     ]),
 
+  OfferPromotion: a
+    .model({
+      companyId: a.id().required(),
+      companyName: a.string().required(),
+      catalogItemId: a.id().required(),
+      catalogItemTitle: a.string().required(),
+      title: a.string().required(),
+      headline: a.string().required(),
+      badgeText: a.string(),
+      discountLabel: a.string(),
+      startsAtLabel: a.string(),
+      endsAtLabel: a.string(),
+      isActive: a.boolean(),
+      sortOrder: a.integer(),
+    })
+    .authorization((allow) => [
+      allow.group('admin').to(['read']),
+      allow.group('company'),
+      allow.guest().to(['read']),
+    ]),
+
   LoyaltyProgram: a
     .model({
       scope: a.string().required(),

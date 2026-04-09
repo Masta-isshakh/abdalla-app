@@ -18,8 +18,6 @@ const backend = defineBackend({
   sendCompanyInvitationEmail,
 });
 
-backend.data.resources.graphqlApi.grantQuery(backend.authPostConfirmation.resources.lambda);
-
 backend.sendCompanyInvitationEmail.resources.lambda.addToRolePolicy(
   new iam.PolicyStatement({
     sid: 'AllowSesInvitationEmails',

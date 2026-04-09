@@ -25,6 +25,7 @@ import {
   CatalogItem,
   Company,
   CompanyInvitation,
+  OfferPromotion,
   PaymentMethod,
   UserProfile,
 } from '../app-types';
@@ -95,6 +96,7 @@ function WorkspaceScreen() {
     loyaltyPrograms,
     marketplaceItems,
     needsConfirmation,
+    offerPromotions,
     placeBooking,
     profile,
     ratings,
@@ -103,6 +105,7 @@ function WorkspaceScreen() {
     saveAddress,
     saveCatalogItem,
     saveLoyaltyProgram,
+    saveOfferPromotion,
     saveProfile,
     setCompanyActive,
     signInWithEmail,
@@ -111,10 +114,11 @@ function WorkspaceScreen() {
     submitRating,
     updateCompany,
     users,
+    deleteOfferPromotion,
   } = useAppState();
 
-  const [adminTab, setAdminTab] = useState<'overview' | 'companies' | 'users'>('overview');
-  const [companyTab, setCompanyTab] = useState<'overview' | 'catalog' | 'bookings' | 'loyalty'>('overview');
+  const [adminTab, setAdminTab] = useState<'overview' | 'companies' | 'publishing' | 'bookings' | 'users'>('overview');
+  const [companyTab, setCompanyTab] = useState<'overview' | 'catalog' | 'offers' | 'bookings' | 'loyalty'>('overview');
   const [customerTab, setCustomerTab] = useState<'home' | 'explore' | 'orders' | 'profile'>('home');
   const [customerDarkMode, setCustomerDarkMode] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
@@ -175,14 +179,27 @@ function WorkspaceScreen() {
     isActive: true,
   });
   const [ratingDrafts, setRatingDrafts] = useState<Record<string, { score: string; review: string }>>({});
+  const [offerForm, setOfferForm] = useState({
+    catalogItemId: '',
+    title: '',
+    headline: '',
+    badgeText: '',
+    discountLabel: '',
+    startsAtLabel: '',
+    endsAtLabel: '',
+    isActive: true,
+    sortOrder: '0',
+  });
 
   const [selectedAdminCompanyId, setSelectedAdminCompanyId] = useState<string | null>(null);
   const [selectedCatalogItemId, setSelectedCatalogItemId] = useState<string | null>(null);
+  const [selectedPromotionId, setSelectedPromotionId] = useState<string | null>(null);
 
   const [companyFormErrors, setCompanyFormErrors] = useState<ValidationMap>({});
   const [inviteFormErrors, setInviteFormErrors] = useState<ValidationMap>({});
   const [catalogFormErrors, setCatalogFormErrors] = useState<ValidationMap>({});
   const [loyaltyFormErrors, setLoyaltyFormErrors] = useState<ValidationMap>({});
+  const [offerFormErrors, setOfferFormErrors] = useState<ValidationMap>({});
   const [authErrors, setAuthErrors] = useState<ValidationMap>({});
   const [profileErrors, setProfileErrors] = useState<ValidationMap>({});
   const [addressErrors, setAddressErrors] = useState<ValidationMap>({});
@@ -259,14 +276,39 @@ function WorkspaceScreen() {
     () => catalogItems.filter((entry) => entry.companyId === currentCompany?.id),
     [catalogItems, currentCompany?.id],
   );
+  const companyPromotions = useMemo(
+    () => offerPromotions.filter((entry) => entry.companyId === currentCompany?.id).sort((left, right) => left.sortOrder - right.sortOrder),
+    [currentCompany?.id, offerPromotions],
+  );
   const selectedCatalogItem = useMemo(
     () => companyItems.find((entry) => entry.id === selectedCatalogItemId) ?? null,
     [companyItems, selectedCatalogItemId],
+  );
+  const selectedPromotion = useMemo(
+    () => companyPromotions.find((entry) => entry.id === selectedPromotionId) ?? null,
+    [companyPromotions, selectedPromotionId],
   );
   const currentCompanyProgram = useMemo(
     () => loyaltyPrograms.find((entry) => entry.scope === 'company' && entry.companyId === currentCompany?.id) ?? null,
     [currentCompany?.id, loyaltyPrograms],
   );
+  const activeMarketplacePromotions = useMemo(
+    () => offerPromotions
+      .filter((entry) => entry.isActive)
+      .map((promotion) => {
+        const item = marketplaceItems.find((catalogItem) => catalogItem.id === promotion.catalogItemId);
+        return item ? { promotion, item } : null;
+      })
+      .filter((entry): entry is { promotion: OfferPromotion; item: CatalogItem } => !!entry)
+      .sort((left, right) => left.promotion.sortOrder - right.promotion.sortOrder),
+    [marketplaceItems, offerPromotions],
+  );
+
+  useEffect(() => {
+    if (!authUser) {
+      setCustomerTab('home');
+    }
+  }, [authUser]);
 
   useEffect(() => {
     if (selectedCatalogItem) {
@@ -326,6 +368,35 @@ function WorkspaceScreen() {
     });
   }, [currentCompanyProgram]);
 
+  useEffect(() => {
+    if (selectedPromotion) {
+      setOfferForm({
+        catalogItemId: selectedPromotion.catalogItemId,
+        title: selectedPromotion.title,
+        headline: selectedPromotion.headline,
+        badgeText: selectedPromotion.badgeText,
+        discountLabel: selectedPromotion.discountLabel,
+        startsAtLabel: selectedPromotion.startsAtLabel,
+        endsAtLabel: selectedPromotion.endsAtLabel,
+        isActive: selectedPromotion.isActive,
+        sortOrder: String(selectedPromotion.sortOrder),
+      });
+      return;
+    }
+
+    setOfferForm({
+      catalogItemId: companyItems[0]?.id ?? '',
+      title: '',
+      headline: '',
+      badgeText: '',
+      discountLabel: '',
+      startsAtLabel: '',
+      endsAtLabel: '',
+      isActive: true,
+      sortOrder: '0',
+    });
+  }, [companyItems, selectedPromotion]);
+
   const adminMetrics = useMemo(
     () => [
       { label: 'Companies', value: String(companies.length) },
@@ -365,6 +436,21 @@ function WorkspaceScreen() {
                 ? 'Manage your profile, addresses, payment defaults, and appearance settings.'
                 : 'Guests can browse freely and only authenticate when they want to place or track orders.',
             };
+
+  const customerHeaderChips =
+    customerTab === 'home'
+      ? ['Cleaning', 'Repairs', 'Beauty', 'Wellness']
+      : customerTab === 'explore'
+        ? ['Live offers', 'Featured picks', 'Fast booking', 'Trusted companies']
+        : customerTab === 'orders'
+          ? ['Active bookings', 'Status updates', 'Ratings', 'Support']
+          : ['Profile', 'Addresses', 'Payments', 'Appearance'];
+
+  const customerHeaderStats = [
+    { label: 'Companies', value: String(new Set(marketplaceItems.map((item) => item.companyId)).size) },
+    { label: 'Offers', value: String(marketplaceItems.length) },
+    { label: 'Orders', value: authUser ? String(customerBookings.length) : 'Guest' },
+  ];
 
   const activeWorkspaceLabel =
     activeRole === 'admin'
@@ -545,6 +631,51 @@ function WorkspaceScreen() {
     }
   }
 
+  async function handleOfferSave() {
+    if (!currentCompany) {
+      return;
+    }
+
+    const errors = validateOfferDraft(offerForm);
+    setOfferFormErrors(errors);
+    if (Object.keys(errors).length) {
+      setCompanyBanner({ tone: 'error', text: 'Fix the promotion fields before saving.' });
+      return;
+    }
+
+    try {
+      await saveOfferPromotion(currentCompany.id, {
+        id: selectedPromotion?.id,
+        catalogItemId: offerForm.catalogItemId,
+        title: offerForm.title.trim(),
+        headline: offerForm.headline.trim(),
+        badgeText: offerForm.badgeText.trim(),
+        discountLabel: offerForm.discountLabel.trim(),
+        startsAtLabel: offerForm.startsAtLabel.trim(),
+        endsAtLabel: offerForm.endsAtLabel.trim(),
+        isActive: offerForm.isActive,
+        sortOrder: Number(offerForm.sortOrder),
+      });
+      setSelectedPromotionId(null);
+      setOfferFormErrors({});
+      setCompanyBanner({ tone: 'success', text: selectedPromotion ? 'Promotion updated.' : 'Promotion saved.' });
+    } catch (error) {
+      setCompanyBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to save promotion.' });
+    }
+  }
+
+  async function handleOfferDelete(promotionId: string) {
+    try {
+      await deleteOfferPromotion(promotionId);
+      if (selectedPromotionId === promotionId) {
+        setSelectedPromotionId(null);
+      }
+      setCompanyBanner({ tone: 'info', text: 'Promotion removed.' });
+    } catch (error) {
+      setCompanyBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to delete promotion.' });
+    }
+  }
+
   async function handleAuthAction() {
     const errors = authMode === 'signin' ? validateSignInDraft(signInForm) : validateSignUpDraft(signUpForm);
     setAuthErrors(errors);
@@ -689,23 +820,50 @@ function WorkspaceScreen() {
     return (
       <SafeAreaView edges={['top', 'bottom']} style={[styles.safeArea, customerDarkMode && styles.customerShellSafeAreaDark]}>
         <View style={[styles.customerShell, customerDarkMode && styles.customerShellDark]}>
-          <View style={[styles.customerHeaderCard, customerDarkMode && styles.customerHeaderCardDark]}>
+          <LinearGradient colors={customerDarkMode ? ['#0F1A25', '#182736'] : ['#FFF3DE', '#F4E4C6']} style={[styles.customerHeaderCard, customerDarkMode && styles.customerHeaderCardDark]}>
             <View style={styles.customerHeaderTopRow}>
-              <View style={styles.infoBodyGrow}>
-                <Text style={[styles.customerHeaderBrand, customerDarkMode && styles.customerTitleDark]}>Jahzeen</Text>
-                <Text style={[styles.customerHeaderTitle, customerDarkMode && styles.customerTitleDark]}>{customerHeader.title}</Text>
-                <Text style={[styles.customerHeaderSubtitle, customerDarkMode && styles.customerSubtitleDark]}>{customerHeader.subtitle}</Text>
+              <View style={styles.customerBrandLockup}>
+                <View style={[styles.customerBrandMonogram, customerDarkMode && styles.customerBrandMonogramDark]}>
+                  <Text style={styles.customerBrandMonogramText}>J</Text>
+                </View>
+                <View style={styles.infoBodyGrow}>
+                  <Text style={[styles.customerHeaderBrand, customerDarkMode && styles.customerHeaderBrandDark]}>Jahzeen Qatar</Text>
+                  <Text style={[styles.customerHeaderTitle, customerDarkMode && styles.customerTitleDark]}>{customerHeader.title}</Text>
+                  <Text style={[styles.customerHeaderSubtitle, customerDarkMode && styles.customerSubtitleDark]}>{customerHeader.subtitle}</Text>
+                </View>
               </View>
               <View style={[styles.customerHeaderBadge, customerDarkMode && styles.customerHeaderBadgeDark]}>
-                <Text style={[styles.customerHeaderBadgeText, customerDarkMode && styles.customerTitleDark]}>{authUser ? (currentUserRecord?.role ?? 'customer').toUpperCase() : 'GUEST'}</Text>
+                <Text style={[styles.customerHeaderBadgeText, customerDarkMode && styles.customerHeaderBadgeTextDark]}>{authUser ? (currentUserRecord?.role ?? 'customer').toUpperCase() : 'GUEST'}</Text>
               </View>
             </View>
+
             <View style={styles.customerHeaderMetaRow}>
-              <Text style={[styles.customerHeaderMetaText, customerDarkMode && styles.customerSubtitleDark]}>{authUser?.email ?? 'Explore first. Sign in only when you need to book.'}</Text>
+              <View style={[styles.customerHeaderSearchPill, customerDarkMode && styles.customerHeaderSearchPillDark]}>
+                <Ionicons name="location-outline" size={16} color={customerDarkMode ? '#C8D3DC' : colors.primary} />
+                <Text style={[styles.customerHeaderMetaText, customerDarkMode && styles.customerSubtitleDark]}>{authUser?.email ?? 'Doha, Qatar · Browse first, sign in only when you book.'}</Text>
+              </View>
               {busy ? <ActivityIndicator color={customerDarkMode ? '#F5F7FA' : colors.primary} /> : null}
             </View>
+
+            <View style={styles.customerHeaderChipRow}>
+              {customerHeaderChips.map((chip) => (
+                <View key={chip} style={[styles.customerHeaderChip, customerDarkMode && styles.customerHeaderChipDark]}>
+                  <Text style={[styles.customerHeaderChipText, customerDarkMode && styles.customerHeaderChipTextDark]}>{chip}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={styles.customerHeaderStatsRow}>
+              {customerHeaderStats.map((stat) => (
+                <View key={stat.label} style={[styles.customerHeaderStatCard, customerDarkMode && styles.customerHeaderStatCardDark]}>
+                  <Text style={[styles.customerHeaderStatValue, customerDarkMode && styles.customerTitleDark]}>{stat.value}</Text>
+                  <Text style={[styles.customerHeaderStatLabel, customerDarkMode && styles.customerSubtitleDark]}>{stat.label}</Text>
+                </View>
+              ))}
+            </View>
+
             {!!authMessage ? <Text style={[styles.customerHeaderMessage, customerDarkMode && styles.customerHeaderMessageDark]}>{authMessage}</Text> : null}
-          </View>
+          </LinearGradient>
 
           <ScrollView style={styles.customerScroll} contentContainerStyle={styles.customerScrollContent} showsVerticalScrollIndicator={false}>
             <CustomerWorkspace
@@ -715,6 +873,7 @@ function WorkspaceScreen() {
               authUser={authUser}
               currentUserRole={currentUserRecord?.role ?? 'customer'}
               marketplaceItems={marketplaceItems}
+              featuredOffers={activeMarketplacePromotions}
               bookingComposer={bookingComposer}
               onBookingComposerChange={setBookingComposer}
               bookingErrors={bookingErrors}
@@ -807,6 +966,8 @@ function WorkspaceScreen() {
             onTabChange={setAdminTab}
             metrics={adminMetrics}
             bookings={bookings}
+            catalogItems={catalogItems}
+            offerPromotions={offerPromotions}
             users={users}
             companies={companies}
             invitations={invitations}
@@ -841,6 +1002,7 @@ function WorkspaceScreen() {
             onSaveSettings={handleCompanySettingsSave}
             banner={companyBanner}
             companyItems={companyItems}
+            companyPromotions={companyPromotions}
             companyBookings={companyBookings}
             ratings={ratings}
             selectedCatalogItem={selectedCatalogItem}
@@ -851,6 +1013,13 @@ function WorkspaceScreen() {
             onSaveCatalog={handleCatalogSave}
             onDeleteCatalogItem={deleteCatalogItem}
             onResetCatalog={resetCatalogDrafts}
+            selectedPromotion={selectedPromotion}
+            offerForm={offerForm}
+            onOfferFormChange={setOfferForm}
+            offerErrors={offerFormErrors}
+            onSelectPromotion={setSelectedPromotionId}
+            onSaveOffer={handleOfferSave}
+            onDeleteOffer={handleOfferDelete}
             onChangeBookingStatus={changeBookingStatus}
             loyaltyForm={loyaltyForm}
             onLoyaltyFormChange={setLoyaltyForm}
@@ -868,10 +1037,12 @@ function WorkspaceScreen() {
 
 type AdminWorkspaceProps = {
   wide: boolean;
-  tab: 'overview' | 'companies' | 'users';
-  onTabChange: (tab: 'overview' | 'companies' | 'users') => void;
+  tab: 'overview' | 'companies' | 'publishing' | 'bookings' | 'users';
+  onTabChange: (tab: 'overview' | 'companies' | 'publishing' | 'bookings' | 'users') => void;
   metrics: Array<{ label: string; value: string }>;
   bookings: Booking[];
+  catalogItems: CatalogItem[];
+  offerPromotions: OfferPromotion[];
   users: Array<{ id: string; fullName: string; role: string; email: string; companyName?: string }>;
   companies: Company[];
   invitations: CompanyInvitation[];
@@ -913,6 +1084,8 @@ function AdminWorkspace({
   onTabChange,
   metrics,
   bookings,
+  catalogItems,
+  offerPromotions,
   users,
   companies,
   invitations,
@@ -944,10 +1117,12 @@ function AdminWorkspace({
         items={[
           { key: 'overview', label: 'Overview' },
           { key: 'companies', label: 'Companies' },
+          { key: 'publishing', label: 'Publishing' },
+          { key: 'bookings', label: 'Bookings' },
           { key: 'users', label: 'Users' },
         ]}
         selectedKey={tab}
-        onChange={(value) => onTabChange(value as 'overview' | 'companies' | 'users')}
+        onChange={(value) => onTabChange(value as 'overview' | 'companies' | 'publishing' | 'bookings' | 'users')}
       />
       {banner ? <StatusBanner tone={banner.tone} text={banner.text} /> : null}
 
@@ -958,8 +1133,13 @@ function AdminWorkspace({
               <MetricCard key={metric.label} label={metric.label} value={metric.value} />
             ))}
           </View>
-          <SectionCard title="Platform bookings" subtitle="Admin sees all booking flow across every company workspace.">
-            {bookings.length ? bookings.map((booking) => <BookingCard key={booking.id} booking={booking} />) : <EmptyState title="No bookings yet" body="Bookings will appear here once customers order published items." />}
+          <SectionCard title="Platform snapshot" subtitle="The admin lands on a summary, then can move into company management, publishing, bookings, and user administration.">
+            <View style={[styles.metricGrid, wide && styles.metricGridWide]}>
+              <MetricCard label="Pending invites" value={String(pendingInvitations.length)} />
+              <MetricCard label="Published offers" value={String(catalogItems.filter((item) => item.isPublished).length)} />
+              <MetricCard label="Live promotions" value={String(offerPromotions.filter((promotion) => promotion.isActive).length)} />
+              <MetricCard label="Company users" value={String(companyUsers.length)} />
+            </View>
           </SectionCard>
         </>
       ) : null}
@@ -1033,6 +1213,41 @@ function AdminWorkspace({
         </View>
       ) : null}
 
+      {tab === 'publishing' ? (
+        <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
+          <View style={styles.columnPane}>
+            <SectionCard title="Published by companies" subtitle="Admins can inspect all products and services companies have pushed live to customers.">
+              {catalogItems.length ? catalogItems.map((item) => (
+                <CatalogCard
+                  key={item.id}
+                  item={item}
+                  actionLabel="Open company"
+                  onAction={() => onSelectCompany(item.companyId)}
+                />
+              )) : <EmptyState title="No published items yet" body="Company products and services will appear here as soon as a partner publishes them." />}
+            </SectionCard>
+          </View>
+
+          <View style={styles.columnPane}>
+            <SectionCard title="Live promotions" subtitle="Promotions are now their own backend records, separate from the base product and service catalog.">
+              {offerPromotions.length ? offerPromotions.map((promotion) => (
+                <InfoRow
+                  key={promotion.id}
+                  title={`${promotion.title} · ${promotion.catalogItemTitle}`}
+                  subtitle={`${promotion.companyName} · ${promotion.isActive ? 'Active' : 'Paused'}${promotion.discountLabel ? ` · ${promotion.discountLabel}` : ''}`}
+                />
+              )) : <EmptyState title="No promotions yet" body="Company promotions will appear here after a company creates them in its offers page." />}
+            </SectionCard>
+          </View>
+        </View>
+      ) : null}
+
+      {tab === 'bookings' ? (
+        <SectionCard title="All company bookings" subtitle="Admins can track the full marketplace booking flow across every partner company.">
+          {bookings.length ? bookings.map((booking) => <BookingCard key={booking.id} booking={booking} />) : <EmptyState title="No bookings yet" body="Bookings will appear here once customers order published items." />}
+        </SectionCard>
+      ) : null}
+
       {tab === 'users' ? (
         <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
           <View style={styles.columnPane}>
@@ -1072,8 +1287,8 @@ function AdminWorkspace({
 
 type CompanyWorkspaceProps = {
   wide: boolean;
-  tab: 'overview' | 'catalog' | 'bookings' | 'loyalty';
-  onTabChange: (tab: 'overview' | 'catalog' | 'bookings' | 'loyalty') => void;
+  tab: 'overview' | 'catalog' | 'offers' | 'bookings' | 'loyalty';
+  onTabChange: (tab: 'overview' | 'catalog' | 'offers' | 'bookings' | 'loyalty') => void;
   currentCompany: Company | null;
   companySettingsForm: {
     name: string;
@@ -1095,6 +1310,7 @@ type CompanyWorkspaceProps = {
   onSaveSettings: () => void;
   banner: BannerState;
   companyItems: CatalogItem[];
+  companyPromotions: OfferPromotion[];
   companyBookings: Booking[];
   ratings: Array<{ id: string; companyId: string }>;
   selectedCatalogItem: CatalogItem | null;
@@ -1131,6 +1347,33 @@ type CompanyWorkspaceProps = {
   onSaveCatalog: () => void;
   onDeleteCatalogItem: (itemId: string) => Promise<void>;
   onResetCatalog: () => void;
+  selectedPromotion: OfferPromotion | null;
+  offerForm: {
+    catalogItemId: string;
+    title: string;
+    headline: string;
+    badgeText: string;
+    discountLabel: string;
+    startsAtLabel: string;
+    endsAtLabel: string;
+    isActive: boolean;
+    sortOrder: string;
+  };
+  onOfferFormChange: React.Dispatch<React.SetStateAction<{
+    catalogItemId: string;
+    title: string;
+    headline: string;
+    badgeText: string;
+    discountLabel: string;
+    startsAtLabel: string;
+    endsAtLabel: string;
+    isActive: boolean;
+    sortOrder: string;
+  }>>;
+  offerErrors: ValidationMap;
+  onSelectPromotion: (promotionId: string | null) => void;
+  onSaveOffer: () => void;
+  onDeleteOffer: (promotionId: string) => Promise<void>;
   onChangeBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
   loyaltyForm: {
     title: string;
@@ -1164,6 +1407,7 @@ function CompanyWorkspace({
   onSaveSettings,
   banner,
   companyItems,
+  companyPromotions,
   companyBookings,
   ratings,
   selectedCatalogItem,
@@ -1174,6 +1418,13 @@ function CompanyWorkspace({
   onSaveCatalog,
   onDeleteCatalogItem,
   onResetCatalog,
+  selectedPromotion,
+  offerForm,
+  onOfferFormChange,
+  offerErrors,
+  onSelectPromotion,
+  onSaveOffer,
+  onDeleteOffer,
   onChangeBookingStatus,
   loyaltyForm,
   onLoyaltyFormChange,
@@ -1187,11 +1438,12 @@ function CompanyWorkspace({
         items={[
           { key: 'overview', label: 'Overview' },
           { key: 'catalog', label: 'Catalog' },
+          { key: 'offers', label: 'Offers' },
           { key: 'bookings', label: 'Bookings' },
           { key: 'loyalty', label: 'Loyalty' },
         ]}
         selectedKey={tab}
-        onChange={(value) => onTabChange(value as 'overview' | 'catalog' | 'bookings' | 'loyalty')}
+        onChange={(value) => onTabChange(value as 'overview' | 'catalog' | 'offers' | 'bookings' | 'loyalty')}
       />
       {banner ? <StatusBanner tone={banner.tone} text={banner.text} /> : null}
 
@@ -1249,7 +1501,6 @@ function CompanyWorkspace({
                 <ChoiceChip label="Service" selected={catalogForm.kind === 'service'} onPress={() => onCatalogFormChange((current) => ({ ...current, kind: 'service' }))} />
                 <ChoiceChip label="Product" selected={catalogForm.kind === 'product'} onPress={() => onCatalogFormChange((current) => ({ ...current, kind: 'product' }))} />
                 <ChoiceChip label="Published" selected={catalogForm.isPublished} onPress={() => onCatalogFormChange((current) => ({ ...current, isPublished: !current.isPublished }))} />
-                <ChoiceChip label="Featured" selected={catalogForm.featured} onPress={() => onCatalogFormChange((current) => ({ ...current, featured: !current.featured }))} />
               </View>
               <PrimaryButton label={selectedCatalogItem ? 'Save item changes' : 'Save item'} onPress={onSaveCatalog} />
               {selectedCatalogItem ? (
@@ -1273,6 +1524,62 @@ function CompanyWorkspace({
                   onSecondaryAction={() => onDeleteCatalogItem(item.id)}
                 />
               )) : <EmptyState title="No catalog items yet" body="The marketplace remains empty until this company publishes something here." />}
+            </SectionCard>
+          </View>
+        </View>
+      ) : null}
+
+      {tab === 'offers' ? (
+        <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
+          <View style={styles.columnPane}>
+            <SectionCard title={selectedPromotion ? 'Edit promotion' : 'Create promotion'} subtitle="Promotions are separate records linked to published catalog items, so offers do not depend on catalog flags anymore.">
+              <Text style={styles.fieldLabel}>Linked item</Text>
+              <View style={styles.toggleRow}>
+                {companyItems.filter((item) => item.isPublished).map((item) => (
+                  <ChoiceChip key={item.id} label={item.title} selected={offerForm.catalogItemId === item.id} onPress={() => onOfferFormChange((current) => ({ ...current, catalogItemId: item.id }))} />
+                ))}
+              </View>
+              {offerErrors.catalogItemId ? <FieldError text={offerErrors.catalogItemId} /> : null}
+              <FormField label="Promotion title" value={offerForm.title} onChangeText={(value) => onOfferFormChange((current) => ({ ...current, title: value }))} error={offerErrors.title} />
+              <FormField label="Headline" value={offerForm.headline} onChangeText={(value) => onOfferFormChange((current) => ({ ...current, headline: value }))} error={offerErrors.headline} multiline />
+              <View style={styles.rowGap}>
+                <FormField label="Badge text" value={offerForm.badgeText} onChangeText={(value) => onOfferFormChange((current) => ({ ...current, badgeText: value }))} />
+                <FormField label="Discount label" value={offerForm.discountLabel} onChangeText={(value) => onOfferFormChange((current) => ({ ...current, discountLabel: value }))} />
+              </View>
+              <View style={styles.rowGap}>
+                <FormField label="Starts" value={offerForm.startsAtLabel} onChangeText={(value) => onOfferFormChange((current) => ({ ...current, startsAtLabel: value }))} />
+                <FormField label="Ends" value={offerForm.endsAtLabel} onChangeText={(value) => onOfferFormChange((current) => ({ ...current, endsAtLabel: value }))} />
+              </View>
+              <View style={styles.rowGap}>
+                <FormField label="Sort order" value={offerForm.sortOrder} onChangeText={(value) => onOfferFormChange((current) => ({ ...current, sortOrder: value }))} error={offerErrors.sortOrder} />
+              </View>
+              <View style={styles.toggleRow}>
+                <ChoiceChip label="Active" selected={offerForm.isActive} onPress={() => onOfferFormChange((current) => ({ ...current, isActive: true }))} />
+                <ChoiceChip label="Paused" selected={!offerForm.isActive} onPress={() => onOfferFormChange((current) => ({ ...current, isActive: false }))} />
+              </View>
+              <PrimaryButton label={selectedPromotion ? 'Save promotion changes' : 'Save promotion'} onPress={onSaveOffer} />
+              {selectedPromotion ? (
+                <View style={styles.rowGap}>
+                  <SecondaryButton label="Cancel editing" onPress={() => onSelectPromotion(null)} />
+                  <SecondaryButton label="Delete promotion" onPress={() => onDeleteOffer(selectedPromotion.id)} />
+                </View>
+              ) : null}
+            </SectionCard>
+          </View>
+
+          <View style={styles.columnPane}>
+            <SectionCard title="Current promotions" subtitle="These are the offers customers will see highlighted on the marketplace home screen.">
+              {companyPromotions.length ? companyPromotions.map((promotion) => (
+                <InfoRow
+                  key={promotion.id}
+                  title={`${promotion.title} · ${promotion.catalogItemTitle}`}
+                  subtitle={`${promotion.isActive ? 'Active' : 'Paused'}${promotion.discountLabel ? ` · ${promotion.discountLabel}` : ''}${promotion.badgeText ? ` · ${promotion.badgeText}` : ''}`}
+                  actionLabel="Edit"
+                  onAction={() => onSelectPromotion(promotion.id)}
+                  secondaryActionLabel="Delete"
+                  onSecondaryAction={() => onDeleteOffer(promotion.id)}
+                />
+              )) : <EmptyState title="No promotions yet" body="Create a promotion here after publishing a product or service in Catalog." />}
             </SectionCard>
           </View>
         </View>
@@ -1321,6 +1628,7 @@ type CustomerWorkspaceProps = {
   authUser: { email: string } | null;
   currentUserRole: string;
   marketplaceItems: CatalogItem[];
+  featuredOffers: Array<{ promotion: OfferPromotion; item: CatalogItem }>;
   bookingComposer: {
     itemId: string;
     companyId: string;
@@ -1380,6 +1688,7 @@ function CustomerWorkspace({
   authUser,
   currentUserRole,
   marketplaceItems,
+  featuredOffers,
   bookingComposer,
   onBookingComposerChange,
   bookingErrors,
@@ -1416,8 +1725,8 @@ function CustomerWorkspace({
   banner,
 }: CustomerWorkspaceProps) {
   const customerItems = marketplaceItems.slice(0, 6);
-  const featuredItems = marketplaceItems.filter((item) => item.featured).slice(0, 3);
-  const displayItems = (featuredItems.length ? featuredItems : customerItems).slice(0, 3);
+  const featuredItems = featuredOffers.slice(0, 3);
+  const displayItems = (featuredItems.length ? featuredItems.map((entry) => entry.item) : customerItems).slice(0, 3);
   const categories = Array.from(new Set(marketplaceItems.map((item) => item.category).filter(Boolean))).slice(0, 6);
   const customerTheme = {
     canvas: darkMode ? styles.customerCanvasDark : undefined,
@@ -1450,10 +1759,13 @@ function CustomerWorkspace({
           >
             <View style={[styles.homeHeroPanel, customerTheme.metaCard]}>
               <View style={styles.infoBodyGrow}>
+                <Text style={styles.customerHeroEyebrow}>Curated for fast booking</Text>
                 <Text style={[styles.homeHeroTitle, customerTheme.title]}>Home cleaning, maintenance, beauty, repairs, and more.</Text>
                 <Text style={[styles.homeHeroBody, customerTheme.subtitle]}>Jahzeen keeps the storefront open to guests and keeps fulfilment inside dedicated admin and company groups.</Text>
               </View>
-              <PrimaryButton label="Explore services" onPress={() => onTabChange('explore')} />
+              <View style={styles.customerHeroActionRow}>
+                <PrimaryButton label="Explore services" onPress={() => onTabChange('explore')} />
+              </View>
             </View>
             <View style={[styles.metricGrid, wide && styles.metricGridWide]}>
               <CustomerMetricCard label="Live companies" value={String(new Set(marketplaceItems.map((item) => item.companyId)).size)} darkMode={darkMode} />
@@ -1490,15 +1802,7 @@ function CustomerWorkspace({
             {displayItems.length ? (
               <View style={[styles.catalogGrid, wide && styles.catalogGridWide]}>
                 {displayItems.map((item) => (
-                  <Pressable key={item.id} style={[styles.marketplaceCard, darkMode && styles.marketplaceCardDark]} onPress={() => { onSelectItem(item); onTabChange('explore'); }}>
-                    <Text style={styles.marketplaceEyebrow}>{item.companyName}</Text>
-                    <Text style={[styles.marketplaceTitle, darkMode && styles.marketplaceTitleDark]}>{item.title}</Text>
-                    <Text style={[styles.marketplaceSummary, darkMode && styles.customerSubtitleDark]}>{item.summary}</Text>
-                    <View style={styles.rowBetween}>
-                      <Text style={[styles.priceText, darkMode && styles.marketplaceTitleDark]}>QAR {item.price.toFixed(0)}</Text>
-                      <Text style={[styles.metaText, darkMode && styles.customerSubtitleDark]}>{item.durationLabel || item.kind}</Text>
-                    </View>
-                  </Pressable>
+                  <CustomerOfferCard key={item.id} item={item} darkMode={darkMode} ctaLabel="View offer" onPress={() => { onSelectItem(item); onTabChange('explore'); }} />
                 ))}
               </View>
             ) : (
@@ -1514,15 +1818,7 @@ function CustomerWorkspace({
             {marketplaceItems.length ? (
               <View style={[styles.catalogGrid, wide && styles.catalogGridWide]}>
                 {marketplaceItems.map((item) => (
-                  <Pressable key={item.id} style={[styles.marketplaceCard, darkMode && styles.marketplaceCardDark]} onPress={() => onSelectItem(item)}>
-                    <Text style={styles.marketplaceEyebrow}>{item.companyName}</Text>
-                    <Text style={[styles.marketplaceTitle, darkMode && styles.marketplaceTitleDark]}>{item.title}</Text>
-                    <Text style={[styles.marketplaceSummary, darkMode && styles.customerSubtitleDark]}>{item.summary}</Text>
-                    <View style={styles.rowBetween}>
-                      <Text style={[styles.priceText, darkMode && styles.marketplaceTitleDark]}>QAR {item.price.toFixed(0)}</Text>
-                      <Text style={[styles.metaText, darkMode && styles.customerSubtitleDark]}>{item.durationLabel || item.kind}</Text>
-                    </View>
-                  </Pressable>
+                  <CustomerOfferCard key={item.id} item={item} darkMode={darkMode} ctaLabel="Book now" onPress={() => onSelectItem(item)} />
                 ))}
               </View>
             ) : (
@@ -1756,6 +2052,20 @@ function validateCatalogDraft(draft: {
   return errors;
 }
 
+function validateOfferDraft(draft: {
+  catalogItemId: string;
+  title: string;
+  headline: string;
+  sortOrder: string;
+}) {
+  const errors: ValidationMap = {};
+  if (!draft.catalogItemId) errors.catalogItemId = 'Select a published catalog item.';
+  if (!draft.title.trim()) errors.title = 'Promotion title is required.';
+  if (!draft.headline.trim()) errors.headline = 'Headline is required.';
+  if (!draft.sortOrder.trim() || Number.isNaN(Number(draft.sortOrder))) errors.sortOrder = 'Sort order must be a valid number.';
+  return errors;
+}
+
 function validateLoyaltyDraft(draft: { title: string; description: string; pointsPerBooking: string; rewardText: string; tierRules: string }) {
   const errors: ValidationMap = {};
   if (!draft.title.trim()) errors.title = 'Program title is required.';
@@ -1950,6 +2260,35 @@ function CustomerMetricCard({ label, value, darkMode }: { label: string; value: 
   );
 }
 
+function CustomerOfferCard({ item, darkMode, ctaLabel, onPress }: { item: CatalogItem; darkMode: boolean; ctaLabel: string; onPress: () => void }) {
+  return (
+    <Pressable style={[styles.marketplaceCard, darkMode && styles.marketplaceCardDark]} onPress={onPress}>
+      <View style={[styles.marketplaceVisual, darkMode && styles.marketplaceVisualDark]}>
+        <View style={styles.marketplaceVisualTopRow}>
+          <Text style={styles.marketplaceEyebrow}>{item.companyName}</Text>
+          <View style={[styles.marketplaceKindBadge, darkMode && styles.marketplaceKindBadgeDark]}>
+            <Text style={[styles.marketplaceKindText, darkMode && styles.marketplaceKindTextDark]}>{item.kind === 'service' ? 'Service' : 'Product'}</Text>
+          </View>
+        </View>
+        <Text style={[styles.marketplaceHint, darkMode && styles.marketplaceHintDark]}>{item.imageHint || item.category || 'Premium home service'}</Text>
+      </View>
+      <View style={styles.marketplaceBody}>
+        <Text style={[styles.marketplaceTitle, darkMode && styles.marketplaceTitleDark]}>{item.title}</Text>
+        <Text style={[styles.marketplaceSummary, darkMode && styles.customerSubtitleDark]} numberOfLines={3}>{item.summary}</Text>
+      </View>
+      <View style={styles.marketplaceFooterRow}>
+        <View>
+          <Text style={[styles.priceText, darkMode && styles.marketplaceTitleDark]}>QAR {item.price.toFixed(0)}</Text>
+          <Text style={[styles.metaText, darkMode && styles.customerSubtitleDark]}>{item.durationLabel || item.category}</Text>
+        </View>
+        <View style={[styles.marketplaceCtaPill, darkMode && styles.marketplaceCtaPillDark]}>
+          <Text style={styles.marketplaceCtaText}>{ctaLabel}</Text>
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
 function BottomNavBar({ items, selectedKey, onChange, containerStyle, itemStyle, textStyle, darkMode }: { items: Array<{ key: string; label: string; icon: string }>; selectedKey: string; onChange: (value: string) => void; containerStyle?: object; itemStyle?: object; textStyle?: object; darkMode: boolean }) {
   return (
     <View style={[styles.bottomNav, containerStyle]}>
@@ -2111,8 +2450,34 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   customerHeaderCardDark: {
-    backgroundColor: '#16202B',
     borderColor: '#273341',
+  },
+  customerBrandLockup: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  customerBrandMonogram: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#145DA0',
+    shadowColor: '#145DA0',
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
+  },
+  customerBrandMonogramDark: {
+    backgroundColor: '#1D74C9',
+  },
+  customerBrandMonogramText: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: '900',
   },
   customerHeaderTopRow: {
     flexDirection: 'row',
@@ -2126,6 +2491,9 @@ const styles = StyleSheet.create({
     color: colors.primary,
     textTransform: 'uppercase',
     letterSpacing: 1,
+  },
+  customerHeaderBrandDark: {
+    color: '#8FC3FF',
   },
   customerHeaderTitle: {
     fontSize: 24,
@@ -2151,14 +2519,86 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontSize: 12,
   },
+  customerHeaderBadgeTextDark: {
+    color: '#F5F7FA',
+  },
   customerHeaderMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
   },
+  customerHeaderSearchPill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 44,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFFC0',
+    borderWidth: 1,
+    borderColor: '#E9DCC3',
+  },
+  customerHeaderSearchPillDark: {
+    backgroundColor: '#203142',
+    borderColor: '#324456',
+  },
   customerHeaderMetaText: {
     flex: 1,
+    color: colors.muted,
+    fontWeight: '600',
+  },
+  customerHeaderChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  customerHeaderChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#FFF9F0',
+    borderWidth: 1,
+    borderColor: '#F0DEC0',
+  },
+  customerHeaderChipDark: {
+    backgroundColor: '#203142',
+    borderColor: '#324456',
+  },
+  customerHeaderChipText: {
+    color: colors.text,
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  customerHeaderChipTextDark: {
+    color: '#DCE3E9',
+  },
+  customerHeaderStatsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  customerHeaderStatCard: {
+    flex: 1,
+    minHeight: 74,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFFA8',
+    borderWidth: 1,
+    borderColor: '#E9DCC3',
+    gap: 4,
+  },
+  customerHeaderStatCardDark: {
+    backgroundColor: '#203142',
+    borderColor: '#324456',
+  },
+  customerHeaderStatValue: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  customerHeaderStatLabel: {
     color: colors.muted,
     fontWeight: '600',
   },
@@ -2485,18 +2925,39 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   marketplaceCard: {
-    backgroundColor: '#FBFAF5',
-    borderRadius: 18,
-    padding: 16,
+    backgroundColor: '#FFFCF6',
+    borderRadius: 22,
+    padding: 14,
     borderWidth: 1,
-    borderColor: colors.border,
-    gap: 8,
+    borderColor: '#E8DDCB',
+    gap: 12,
     minWidth: 240,
     flexGrow: 1,
+    shadowColor: '#B08C51',
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
   },
   marketplaceCardDark: {
     backgroundColor: '#1B2430',
     borderColor: '#2D3A48',
+  },
+  marketplaceVisual: {
+    minHeight: 120,
+    borderRadius: 18,
+    padding: 14,
+    justifyContent: 'space-between',
+    backgroundColor: '#F7E6C9',
+  },
+  marketplaceVisualDark: {
+    backgroundColor: '#223243',
+  },
+  marketplaceVisualTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 10,
   },
   marketplaceEyebrow: {
     color: colors.primary,
@@ -2504,6 +2965,34 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     fontSize: 12,
+  },
+  marketplaceKindBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFFB8',
+  },
+  marketplaceKindBadgeDark: {
+    backgroundColor: '#172431',
+  },
+  marketplaceKindText: {
+    color: colors.text,
+    fontWeight: '800',
+    fontSize: 11,
+  },
+  marketplaceKindTextDark: {
+    color: '#DCE3E9',
+  },
+  marketplaceHint: {
+    color: '#7A5B2B',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  marketplaceHintDark: {
+    color: '#B7C5D1',
+  },
+  marketplaceBody: {
+    gap: 6,
   },
   marketplaceTitle: {
     fontSize: 18,
@@ -2516,6 +3005,26 @@ const styles = StyleSheet.create({
   marketplaceSummary: {
     color: colors.muted,
     lineHeight: 20,
+  },
+  marketplaceFooterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  },
+  marketplaceCtaPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: colors.primary,
+  },
+  marketplaceCtaPillDark: {
+    backgroundColor: '#1D74C9',
+  },
+  marketplaceCtaText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 12,
   },
   priceText: {
     fontWeight: '800',
@@ -2561,6 +3070,20 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 14,
   },
+  offerAdminCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 14,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  offerAdminActions: {
+    minWidth: 150,
+    alignItems: 'flex-end',
+    gap: 8,
+  },
   customerBookingCardDark: {
     backgroundColor: '#1B2632',
     borderWidth: 1,
@@ -2572,6 +3095,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#FBF2E3',
     padding: 18,
   },
+  customerHeroEyebrow: {
+    color: colors.primary,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+    fontSize: 12,
+  },
   homeHeroTitle: {
     fontSize: 22,
     lineHeight: 30,
@@ -2581,6 +3111,9 @@ const styles = StyleSheet.create({
   homeHeroBody: {
     color: colors.muted,
     lineHeight: 22,
+  },
+  customerHeroActionRow: {
+    maxWidth: 220,
   },
   darkModeCard: {
     borderRadius: 18,
