@@ -1,50 +1,32 @@
-export type ServiceCategoryKey = 'cleaning' | 'laundry' | 'carwash' | 'homecare';
+export type AppRole = 'guest' | 'customer' | 'company' | 'admin';
 
 export type PaymentMethod = 'card' | 'cash' | 'applePay';
 
-export type BookingStage = 'confirmed' | 'assigned' | 'enRoute' | 'inProgress' | 'completed';
+export type BookingStatus = 'pending' | 'approved' | 'scheduled' | 'enRoute' | 'inProgress' | 'completed' | 'cancelled';
 
-export interface ServiceExtra {
-  id: string;
-  title: string;
-  price: number;
+export type ItemKind = 'service' | 'product';
+
+export type LoyaltyScope = 'admin' | 'company';
+
+export interface AuthUser {
+  userId: string;
+  email: string;
+  fullName: string;
 }
 
-export interface ServicePackage {
-  id: string;
-  title: string;
-  subtitle: string;
-  duration: string;
-  price: number;
-  features: string[];
+export interface SignUpPayload {
+  fullName: string;
+  email: string;
+  password: string;
+  phone: string;
 }
 
-export interface ServiceCategory {
-  key: ServiceCategoryKey;
-  title: string;
-  subtitle: string;
-  shortDescription: string;
-  accent: string;
-  background: string;
-  icon: string;
-  heroMetric: string;
-  benefits: string[];
-  packages: ServicePackage[];
-  extras: ServiceExtra[];
-}
-
-export interface Offer {
-  id: string;
-  title: string;
-  description: string;
-  code: string;
-}
-
-export interface Testimonial {
-  id: string;
-  quote: string;
-  name: string;
-  service: string;
+export interface UserProfile {
+  fullName: string;
+  email: string;
+  phone: string;
+  preferredLanguage: 'en' | 'ar';
+  defaultPaymentMethod: PaymentMethod;
 }
 
 export interface Address {
@@ -60,6 +42,86 @@ export interface Address {
   isDefault: boolean;
 }
 
+export interface AppUserRecord {
+  id: string;
+  email: string;
+  fullName: string;
+  phone: string;
+  role: Exclude<AppRole, 'guest'>;
+  companyId?: string;
+  companyName?: string;
+  invitedByEmail?: string;
+  status: 'active' | 'invited' | 'disabled';
+}
+
+export interface Company {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  supportEmail: string;
+  supportPhone: string;
+  accentColor: string;
+  logoText: string;
+  ownerEmail: string;
+  isActive: boolean;
+  createdAtLabel: string;
+}
+
+export interface CompanyInvitation {
+  id: string;
+  companyId: string;
+  companyName: string;
+  email: string;
+  invitedByEmail: string;
+  status: 'pending' | 'accepted' | 'revoked';
+  message: string;
+  emailDeliveryStatus: 'pending' | 'sent' | 'failed';
+  emailDeliveryError?: string;
+  emailSentAtLabel?: string;
+}
+
+export interface CatalogItem {
+  id: string;
+  companyId: string;
+  companyName: string;
+  kind: ItemKind;
+  title: string;
+  summary: string;
+  description: string;
+  category: string;
+  price: number;
+  durationLabel: string;
+  isPublished: boolean;
+  featured: boolean;
+  tags: string[];
+  loyaltyPoints: number;
+  imageHint: string;
+}
+
+export interface LoyaltyProgram {
+  id: string;
+  scope: LoyaltyScope;
+  companyId?: string;
+  title: string;
+  description: string;
+  pointsPerBooking: number;
+  rewardText: string;
+  tierRules: string[];
+  isActive: boolean;
+}
+
+export interface Rating {
+  id: string;
+  bookingId: string;
+  companyId: string;
+  itemId: string;
+  customerEmail: string;
+  score: number;
+  review: string;
+  createdAtLabel: string;
+}
+
 export interface BookingTimelineItem {
   id: string;
   title: string;
@@ -70,59 +132,80 @@ export interface BookingTimelineItem {
 export interface Booking {
   id: string;
   bookingNumber: string;
-  serviceKey: ServiceCategoryKey;
-  serviceTitle: string;
-  packageTitle: string;
-  dateLabel: string;
-  timeLabel: string;
-  recurrence: string;
+  customerEmail: string;
+  customerName: string;
+  companyId: string;
+  companyName: string;
+  itemId: string;
+  itemTitle: string;
+  kind: ItemKind;
+  scheduleDate: string;
+  scheduleTime: string;
   addressLabel: string;
   addressLine: string;
   paymentMethod: PaymentMethod;
   notes: string;
+  status: BookingStatus;
   subtotal: number;
   serviceFee: number;
   discount: number;
   total: number;
-  status: BookingStage;
-  extras: string[];
+  loyaltyPointsEarned: number;
+  ratingSubmitted: boolean;
   timeline: BookingTimelineItem[];
 }
 
 export interface BookingDraft {
-  serviceKey: ServiceCategoryKey;
-  serviceTitle: string;
-  packageTitle: string;
-  dateLabel: string;
-  timeLabel: string;
-  recurrence: string;
+  itemId: string;
+  companyId: string;
+  scheduleDate: string;
+  scheduleTime: string;
   addressId: string;
   notes: string;
   paymentMethod: PaymentMethod;
-  extras: string[];
-  subtotal: number;
-  serviceFee: number;
-  discount: number;
-  total: number;
 }
 
-export interface UserProfile {
-  fullName: string;
-  email: string;
-  phone: string;
-  preferredLanguage: 'en' | 'ar';
-  defaultPaymentMethod: PaymentMethod;
+export interface CompanyDraft {
+  name: string;
+  description: string;
+  supportEmail: string;
+  supportPhone: string;
+  accentColor: string;
+  logoText: string;
 }
 
-export interface AuthUser {
-  userId: string;
+export interface InvitationDraft {
+  companyName: string;
   email: string;
-  fullName: string;
+  message: string;
 }
 
-export interface SignUpPayload {
-  fullName: string;
-  email: string;
-  password: string;
-  phone: string;
+export interface CatalogItemDraft {
+  id?: string;
+  kind: ItemKind;
+  title: string;
+  summary: string;
+  description: string;
+  category: string;
+  price: number;
+  durationLabel: string;
+  isPublished: boolean;
+  featured: boolean;
+  tags: string[];
+  loyaltyPoints: number;
+  imageHint: string;
+}
+
+export interface LoyaltyProgramDraft {
+  title: string;
+  description: string;
+  pointsPerBooking: number;
+  rewardText: string;
+  tierRules: string[];
+  isActive: boolean;
+}
+
+export interface MarketplaceMetric {
+  label: string;
+  value: string;
 }

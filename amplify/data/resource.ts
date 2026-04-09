@@ -1,6 +1,27 @@
 import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
 
+import { sendCompanyInvitationEmail } from '../functions/send-company-invitation-email/resource';
+
 const schema = a.schema({
+  InvitationEmailResult: a.customType({
+    success: a.boolean().required(),
+    message: a.string().required(),
+    sentAtLabel: a.string(),
+  }),
+
+  AppUser: a
+    .model({
+      email: a.string().required(),
+      fullName: a.string().required(),
+      phone: a.string(),
+      role: a.string().required(),
+      companyId: a.id(),
+      companyName: a.string(),
+      invitedByEmail: a.string(),
+      status: a.string().required(),
+    })
+    .authorization((allow) => [allow.owner(), allow.guest().to(['read'])]),
+
   UserProfile: a
     .model({
       fullName: a.string().required(),
@@ -10,6 +31,79 @@ const schema = a.schema({
       defaultPaymentMethod: a.string(),
     })
     .authorization((allow) => [allow.owner()]),
+
+  Company: a
+    .model({
+      name: a.string().required(),
+      slug: a.string().required(),
+      description: a.string(),
+      supportEmail: a.string().required(),
+      supportPhone: a.string(),
+      accentColor: a.string(),
+      logoText: a.string(),
+      ownerEmail: a.string().required(),
+      isActive: a.boolean(),
+      createdAtLabel: a.string(),
+    })
+    .authorization((allow) => [allow.owner(), allow.guest().to(['read'])]),
+
+  CompanyInvitation: a
+    .model({
+      companyId: a.id().required(),
+      companyName: a.string().required(),
+      email: a.string().required(),
+      invitedByEmail: a.string().required(),
+      status: a.string().required(),
+      message: a.string(),
+      emailDeliveryStatus: a.string().required(),
+      emailDeliveryError: a.string(),
+      emailSentAtLabel: a.string(),
+    })
+    .authorization((allow) => [allow.owner()]),
+
+  sendCompanyInvitationEmail: a
+    .mutation()
+    .arguments({
+      companyName: a.string().required(),
+      inviteeEmail: a.string().required(),
+      invitedByEmail: a.string().required(),
+      message: a.string(),
+    })
+    .returns(a.ref('InvitationEmailResult'))
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(sendCompanyInvitationEmail)),
+
+  CatalogItem: a
+    .model({
+      companyId: a.id().required(),
+      companyName: a.string().required(),
+      kind: a.string().required(),
+      title: a.string().required(),
+      summary: a.string().required(),
+      description: a.string(),
+      category: a.string().required(),
+      price: a.float().required(),
+      durationLabel: a.string(),
+      isPublished: a.boolean(),
+      featured: a.boolean(),
+      tags: a.string(),
+      loyaltyPoints: a.integer(),
+      imageHint: a.string(),
+    })
+    .authorization((allow) => [allow.owner(), allow.guest().to(['read'])]),
+
+  LoyaltyProgram: a
+    .model({
+      scope: a.string().required(),
+      companyId: a.id(),
+      title: a.string().required(),
+      description: a.string(),
+      pointsPerBooking: a.integer().required(),
+      rewardText: a.string(),
+      tierRules: a.string(),
+      isActive: a.boolean(),
+    })
+    .authorization((allow) => [allow.owner(), allow.guest().to(['read'])]),
 
   Address: a
     .model({
@@ -28,12 +122,15 @@ const schema = a.schema({
   Booking: a
     .model({
       bookingNumber: a.string().required(),
-      serviceKey: a.string().required(),
-      serviceTitle: a.string().required(),
-      packageTitle: a.string().required(),
-      dateLabel: a.string().required(),
-      timeLabel: a.string().required(),
-      recurrence: a.string(),
+      customerEmail: a.string().required(),
+      customerName: a.string().required(),
+      companyId: a.id().required(),
+      companyName: a.string().required(),
+      itemId: a.id().required(),
+      itemTitle: a.string().required(),
+      kind: a.string().required(),
+      scheduleDate: a.string().required(),
+      scheduleTime: a.string().required(),
       addressLabel: a.string().required(),
       addressLine: a.string().required(),
       paymentMethod: a.string().required(),
@@ -43,10 +140,23 @@ const schema = a.schema({
       discount: a.float().required(),
       total: a.float().required(),
       status: a.string().required(),
-      extras: a.string(),
+      loyaltyPointsEarned: a.integer(),
+      ratingSubmitted: a.boolean(),
       timeline: a.string(),
     })
-    .authorization((allow) => [allow.owner()]),
+    .authorization((allow) => [allow.owner(), allow.guest().to(['read'])]),
+
+  Rating: a
+    .model({
+      bookingId: a.id().required(),
+      companyId: a.id().required(),
+      itemId: a.id().required(),
+      customerEmail: a.string().required(),
+      score: a.integer().required(),
+      review: a.string(),
+      createdAtLabel: a.string(),
+    })
+    .authorization((allow) => [allow.owner(), allow.guest().to(['read'])]),
 });
 
 export type Schema = ClientSchema<typeof schema>;
