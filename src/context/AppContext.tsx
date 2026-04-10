@@ -330,9 +330,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   async function safeMutation(mutationName: string, argumentsInput: object) {
     try {
       const response = await (dataClient.mutations as any)?.[mutationName]?.(argumentsInput);
+      const errors = response?.errors as Array<{ message?: string }> | undefined;
+      if (errors?.length) {
+        throw new Error(errors.map((entry) => entry.message).filter(Boolean).join(' | ') || 'Mutation failed.');
+      }
       return response?.data ?? null;
-    } catch {
-      return null;
+    } catch (error) {
+      throw error instanceof Error ? error : new Error('Mutation failed.');
     }
   }
 
@@ -368,11 +372,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       emailSentAtLabel,
     });
 
-    setAuthMessage(
-      result?.success
-        ? `Invitation email sent to ${invitation.email}.`
-        : `Invitation saved, but email delivery failed: ${emailDeliveryError}`,
-    );
+    if (result?.success) {
+      setAuthMessage(`Invitation email sent to ${invitation.email}.`);
+      return;
+    }
+
+    const failureMessage = `Invitation saved, but email delivery failed: ${emailDeliveryError}`;
+    setAuthMessage(failureMessage);
+    throw new Error(emailDeliveryError);
   }
 
   async function createNotification(draft: NotificationDraft) {
@@ -765,7 +772,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await dispatchInvitationEmail(invitation);
     await Promise.all([
       createNotification({ recipientRole: 'admin', title: `Invitation sent to ${invitation.email}`, body: `${invitation.companyName} is waiting for company owner activation.`, kind: 'invitation', destinationTab: 'settings' }),
-      createNotification({ recipientRole: 'company', recipientEmail: invitation.email, companyId: invitation.companyId, title: `You were invited to ${invitation.companyName}`, body: 'Sign in with your invited company account after confirming your email.', kind: 'invitation', destinationTab: 'overview' }),
+      createNotification({ recipientRole: 'company', recipientEmail: invitation.email, companyId: invitation.companyId, title: `You were invited to ${invitation.companyName}`, body: 'Use the email invitation from Cognito to sign in with your temporary password and create a new one.', kind: 'invitation', destinationTab: 'overview' }),
     ]);
   }
 

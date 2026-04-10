@@ -21,8 +21,11 @@ const backend = defineBackend({
 
 backend.sendCompanyInvitationEmail.resources.lambda.addToRolePolicy(
   new iam.PolicyStatement({
-    sid: 'AllowSesInvitationEmails',
-    actions: ['ses:SendEmail', 'ses:SendRawEmail'],
+    sid: 'AllowCompanyUserProvisioning',
+    actions: [
+      'cognito-idp:AdminCreateUser',
+      'cognito-idp:AdminAddUserToGroup',
+    ],
     resources: ['*'],
   }),
 );
@@ -30,16 +33,4 @@ backend.sendCompanyInvitationEmail.resources.lambda.addToRolePolicy(
 (backend.sendCompanyInvitationEmail.resources.lambda as lambda.Function).addEnvironment(
   'USER_POOL_ID',
   backend.auth.resources.userPool.userPoolId,
-);
-
-backend.sendCompanyInvitationEmail.resources.lambda.addToRolePolicy(
-  new iam.PolicyStatement({
-    sid: 'AllowCompanyUserProvisioning',
-    actions: [
-      'cognito-idp:AdminCreateUser',
-      'cognito-idp:AdminAddUserToGroup',
-      'cognito-idp:AdminSetUserPassword',
-    ],
-    resources: ['*'],
-  }),
 );

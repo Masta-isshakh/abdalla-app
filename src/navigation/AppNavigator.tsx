@@ -1269,7 +1269,6 @@ function AdminWorkspace({
 }: AdminWorkspaceProps) {
   const adminUsers = users.filter((user) => user.role === 'admin');
   const companyUsers = users.filter((user) => user.role === 'company');
-  const customerUsers = users.filter((user) => user.role === 'customer');
   const pendingInvitations = invitations.filter((invitation) => invitation.status === 'pending');
   const unreadNotifications = notifications.filter((entry) => !entry.isRead);
   const pausedCompanies = companies.filter((entry) => !entry.isActive);
@@ -1507,7 +1506,7 @@ function AdminWorkspace({
                 <InfoRow
                   key={invitation.id}
                   title={`${invitation.companyName} · ${invitation.email}`}
-                  subtitle={`Delivery: ${invitation.emailDeliveryStatus}${invitation.emailSentAtLabel ? ` · ${invitation.emailSentAtLabel}` : ''}`}
+                  subtitle={`Delivery: ${invitation.emailDeliveryStatus}${invitation.emailSentAtLabel ? ` · ${invitation.emailSentAtLabel}` : ''}${invitation.emailDeliveryError ? ` · ${invitation.emailDeliveryError}` : ''}`}
                   actionLabel="Resend"
                   onAction={() => onResendInvitation(invitation)}
                   secondaryActionLabel="Revoke"
@@ -1518,10 +1517,6 @@ function AdminWorkspace({
           </View>
 
           <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
-            <SectionCard title="Customer accounts" subtitle="Signed-in customer accounts are separated here so company-user administration stays focused.">
-              {customerUsers.length ? customerUsers.map((user) => <InfoRow key={user.id} title={user.fullName} subtitle={user.email} />) : <EmptyState title="No customers yet" body="Customer accounts will appear here after customer sign-up or sign-in." />}
-            </SectionCard>
-
             <SectionCard title="Admin accounts" subtitle="Manual admin accounts survive refresh by resolving the role from Cognito session groups and the approved admin email list.">
               {adminUsers.length ? adminUsers.map((user) => <InfoRow key={user.id} title={user.fullName} subtitle={user.email} />) : <EmptyState title="No admin records yet" body="Manual admin sign-in creates the persistent admin user record after authentication." />}
             </SectionCard>

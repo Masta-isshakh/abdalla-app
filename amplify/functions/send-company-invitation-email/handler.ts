@@ -1,15 +1,12 @@
 import {
   AdminAddUserToGroupCommand,
   AdminCreateUserCommand,
-  AdminSetUserPasswordCommand,
   CognitoIdentityProviderClient,
 } from '@aws-sdk/client-cognito-identity-provider';
-import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 
 import { env } from '$amplify/env/send-company-invitation-email';
 import type { Schema } from '../../data/resource';
 
-const ses = new SESv2Client({});
 const cognito = new CognitoIdentityProviderClient({});
 
 function normalize(value: string) {
@@ -28,7 +25,7 @@ async function provisionCompanyUser(userPoolId: string, email: string, temporary
         UserPoolId: userPoolId,
         Username: email,
         TemporaryPassword: temporaryPassword,
-        MessageAction: 'SUPPRESS',
+        DesiredDeliveryMediums: ['EMAIL'],
         UserAttributes: [
           { Name: 'email', Value: email },
           { Name: 'email_verified', Value: 'true' },
@@ -44,11 +41,12 @@ async function provisionCompanyUser(userPoolId: string, email: string, temporary
     }
 
     await cognito.send(
-      new AdminSetUserPasswordCommand({
+      new AdminCreateUserCommand({
         UserPoolId: userPoolId,
         Username: email,
-        Password: temporaryPassword,
-        Permanent: false,
+        TemporaryPassword: temporaryPassword,
+        MessageAction: 'RESEND',
+        DesiredDeliveryMediums: ['EMAIL'],
       }),
     );
   }
@@ -72,20 +70,11 @@ function escapeHtml(value: string) {
 }
 
 export const handler: Schema['sendCompanyInvitationEmail']['functionHandler'] = async (event) => {
-  const sender = env.INVITATION_SENDER_EMAIL;
   const appName = env.APP_NAME ?? 'Jahzeen';
   const runtimeEnv = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
   const userPoolId = runtimeEnv?.USER_POOL_ID ?? '';
   const { companyName, inviteeEmail, invitedByEmail, message } = event.arguments;
   const normalizedInviteeEmail = normalize(inviteeEmail);
-
-  if (!sender) {
-    return {
-      success: false,
-      message: 'INVITATION_SENDER_EMAIL secret is not configured.',
-      sentAtLabel: '',
-    };
-  }
 
   if (!userPoolId) {
     return {
@@ -110,64 +99,21 @@ export const handler: Schema['sendCompanyInvitationEmail']['functionHandler'] = 
   const safeCompanyName = escapeHtml(companyName);
   const safeInvitedByEmail = escapeHtml(invitedByEmail);
   const safeMessage = escapeHtml(message ?? '');
-  const safeUsername = escapeHtml(normalizedInviteeEmail);
-  const safeTemporaryPassword = escapeHtml(temporaryPassword);
   const sentAtLabel = new Date().toLocaleString('en-GB', {
     dateStyle: 'medium',
     timeStyle: 'short',
   });
 
-  const subject = `${appName}: your ${companyName} workspace invitation`;
-  const textBody = [
-    `You have been invited to manage ${companyName} on ${appName}.`,
-    `Invited by: ${invitedByEmail}`,
-    message ? `Message: ${message}` : '',
-    `Username: ${normalizedInviteeEmail}`,
-    `Temporary password: ${temporaryPassword}`,
-    'Sign in with these credentials. On first sign-in, you will be asked to set a new password.',
-  ]
-    .filter(Boolean)
-    .join('\n\n');
-
-  const htmlBody = `
-    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #17252F;">
-      <h2 style="margin-bottom: 8px;">${appName} company invitation</h2>
-      <p>You have been invited to manage <strong>${safeCompanyName}</strong>.</p>
-      <p><strong>Invited by:</strong> ${safeInvitedByEmail}</p>
-      ${safeMessage ? `<p><strong>Message:</strong> ${safeMessage}</p>` : ''}
-      <p>Use the credentials below to access the company workspace:</p>
-      <p><strong>Username:</strong> ${safeUsername}<br />
-      <strong>Temporary password:</strong> ${safeTemporaryPassword}</p>
-      <p>On first sign-in, the app will prompt you to create a new password.</p>
-    </div>
-  `;
-
   try {
-    await ses.send(
-      new SendEmailCommand({
-        FromEmailAddress: sender,
-        Destination: {
-          ToAddresses: [normalizedInviteeEmail],
-        },
-        Content: {
-          Simple: {
-            Subject: { Data: subject },
-            Body: {
-              Text: { Data: textBody },
-              Html: { Data: htmlBody },
-            },
-          },
-        },
-      }),
-    );
-
     return {
       success: true,
-      message: `Invitation email sent to ${normalizedInviteeEmail}.`,
+      message: `Invitation email sent to ${normalizedInviteeEmail} through Cognito.` +
+        (safeMessage ? ` Message saved: ${safeMessage}` : '') +
+        ` Invited by ${safeInvitedByEmail} for ${safeCompanyName} on ${appName}.`,
       sentAtLabel,
     };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : 'Unknown SES error';
+    const reason = error instanceof Error ? error.message : 'Unknown invitation delivery error';
     return {
       success: false,
       message: reason,
