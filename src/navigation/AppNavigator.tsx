@@ -1247,7 +1247,7 @@ function AdminWorkspace({
             <MetricCard label="Action needed" value={String(pendingInvitations.length + pausedCompanies.length)} />
           </View>
           <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
-            <View style={styles.columnPane}>
+            <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
               <SectionCard title="Operations pulse" subtitle="Use the dashboard to spot onboarding blockers, marketplace issues, and unread updates before you dive into forms.">
                 <View style={[styles.metricGrid, wide && styles.metricGridWide]}>
                   <MetricCard label="Pending invites" value={String(pendingInvitations.length)} />
@@ -1278,7 +1278,7 @@ function AdminWorkspace({
               </SectionCard>
             </View>
 
-            <View style={styles.columnPane}>
+            <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
               <SectionCard title="Notification center" subtitle="Unread and recent updates from invitations, bookings, reviews, and publishing appear here.">
                 {notifications.length ? notifications.slice(0, 6).map((notification) => (
                   <NotificationRow key={notification.id} notification={notification} onOpen={() => onOpenNotification(notification)} />
@@ -1297,7 +1297,7 @@ function AdminWorkspace({
 
       {tab === 'companies' ? (
         <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
-          <View style={styles.columnPane}>
+          <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
             <SectionCard title="Company operations" subtitle="Create and edit partner workspaces with stronger hierarchy, faster scanning, and clearer destructive states.">
               <View style={styles.overviewBadgeRow}>
                 <CompactBadge label="Companies" value={String(companies.length)} />
@@ -1332,7 +1332,7 @@ function AdminWorkspace({
             </SectionCard>
           </View>
 
-          <View style={styles.columnPane}>
+          <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
             <SectionCard title="Partner companies" subtitle="Admins can inspect, pause, or reopen any company workspace.">
               {companies.length ? companies.map((company) => (
                 <CompanyCard
@@ -1365,7 +1365,7 @@ function AdminWorkspace({
 
       {tab === 'publishing' ? (
         <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
-          <View style={styles.columnPane}>
+          <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
             <SectionCard title="Published by companies" subtitle="Admins can inspect all products and services companies have pushed live to customers.">
               {catalogItems.length ? catalogItems.map((item) => (
                 <CatalogCard
@@ -1378,7 +1378,7 @@ function AdminWorkspace({
             </SectionCard>
           </View>
 
-          <View style={styles.columnPane}>
+          <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
             <SectionCard title="Live promotions" subtitle="Promotions are now their own backend records, separate from the base product and service catalog.">
               {offerPromotions.length ? offerPromotions.map((promotion) => (
                 <InfoRow
@@ -1400,7 +1400,7 @@ function AdminWorkspace({
 
       {tab === 'settings' ? (
         <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
-          <View style={styles.columnPane}>
+          <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
             <SectionCard title="Access command" subtitle="Keep owner invitations, activation status, and partner account follow-up in one place.">
               <View style={styles.overviewBadgeRow}>
                 <CompactBadge label="Pending" value={String(pendingInvitations.length)} />
@@ -1437,7 +1437,7 @@ function AdminWorkspace({
             </SectionCard>
           </View>
 
-          <View style={styles.columnPane}>
+          <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
             <SectionCard title="Customer accounts" subtitle="Signed-in customer accounts are separated here so company-user administration stays focused.">
               {customerUsers.length ? customerUsers.map((user) => <InfoRow key={user.id} title={user.fullName} subtitle={user.email} />) : <EmptyState title="No customers yet" body="Customer accounts will appear here after customer sign-up or sign-in." />}
             </SectionCard>
@@ -1689,7 +1689,7 @@ function CompanyWorkspace({
           </View>
 
           <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
-            <View style={styles.columnPane}>
+            <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
               <SectionCard title={currentCompany?.name ?? 'Company workspace'} subtitle="A polished operations view should surface bookings, promotions, and unread activity before editing settings.">
                 <View style={[styles.metricGrid, wide && styles.metricGridWide]}>
                   <MetricCard label="Pending bookings" value={String(pendingBookings.length)} />
@@ -1711,7 +1711,7 @@ function CompanyWorkspace({
               </SectionCard>
             </View>
 
-            <View style={styles.columnPane}>
+            <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
               <SectionCard title="Workspace profile" subtitle="Support, branding, and contact settings still live here, but they no longer crowd the top of the dashboard.">
                 {currentCompany ? (
                   <>
@@ -1738,7 +1738,7 @@ function CompanyWorkspace({
 
       {tab === 'catalog' ? (
         <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
-          <View style={styles.columnPane}>
+          <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
             <SectionCard title="Catalog studio" subtitle="Build listings with a clearer publishing flow, stronger visibility states, and a more premium editing surface.">
               <View style={styles.overviewBadgeRow}>
                 <CompactBadge label="Items" value={String(companyItems.length)} />
@@ -1778,7 +1778,7 @@ function CompanyWorkspace({
             </SectionCard>
           </View>
 
-          <View style={styles.columnPane}>
+          <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
             <SectionCard title="Current catalog" subtitle="Only this company's items appear in this operational view.">
               <View style={styles.catalogFilterRow}>
                 <CatalogFilterChip label="All" count={companyItems.length} selected={catalogFilter === 'all'} onPress={() => setCatalogFilter('all')} />
@@ -1802,7 +1802,7 @@ function CompanyWorkspace({
 
       {tab === 'offers' ? (
         <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
-          <View style={styles.columnPane}>
+          <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
             <SectionCard title={selectedPromotion ? 'Edit promotion' : 'Create promotion'} subtitle="Promotions are separate records linked to published catalog items, so offers do not depend on catalog flags anymore.">
               <Text style={styles.fieldLabel}>Linked item</Text>
               <View style={styles.toggleRow}>
@@ -1838,7 +1838,7 @@ function CompanyWorkspace({
             </SectionCard>
           </View>
 
-          <View style={styles.columnPane}>
+          <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
             <SectionCard title="Current promotions" subtitle="These are the offers customers will see highlighted on the marketplace home screen.">
               {companyPromotions.length ? companyPromotions.map((promotion) => (
                 <InfoRow
@@ -2236,7 +2236,7 @@ function CustomerWorkspace({
           </>
         ) : (
           <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
-            <View style={styles.columnPane}>
+            <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
               <SectionCard title="Profile" subtitle={`Signed in as ${currentUserRole}`} cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
                 <View style={[styles.darkModeCard, customerTheme.metaCard]}>
                   <View style={styles.infoBodyGrow}>
@@ -2257,7 +2257,7 @@ function CustomerWorkspace({
               </SectionCard>
             </View>
 
-            <View style={styles.columnPane}>
+            <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
               <SectionCard title="Default address" subtitle="Used as the default destination for future bookings." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
                 <View style={styles.rowGap}>
                   <FormField label="Label" value={addressForm.label} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, label: value }))} error={addressErrors.label} theme={customerTheme.inputTheme} />
@@ -3287,8 +3287,12 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   columnPane: {
-    flex: 1,
     gap: 16,
+    width: '100%',
+  },
+  columnPaneWide: {
+    flex: 1,
+    width: undefined,
   },
   sectionCard: {
     backgroundColor: colors.surface,
