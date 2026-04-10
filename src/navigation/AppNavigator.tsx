@@ -8,6 +8,7 @@ import {
   Image,
   Alert,
   Animated,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -205,6 +206,8 @@ function WorkspaceScreen() {
   const [selectedCatalogItemId, setSelectedCatalogItemId] = useState<string | null>(null);
   const [selectedPromotionId, setSelectedPromotionId] = useState<string | null>(null);
   const [catalogSubmitting, setCatalogSubmitting] = useState(false);
+  const [inviteSubmitting, setInviteSubmitting] = useState(false);
+  const [successPopupText, setSuccessPopupText] = useState<string | null>(null);
 
   const [companyFormErrors, setCompanyFormErrors] = useState<ValidationMap>({});
   const [inviteFormErrors, setInviteFormErrors] = useState<ValidationMap>({});
@@ -220,6 +223,29 @@ function WorkspaceScreen() {
   const [adminBanner, setAdminBanner] = useState<BannerState>(null);
   const [companyBanner, setCompanyBanner] = useState<BannerState>(null);
   const [customerBanner, setCustomerBanner] = useState<BannerState>(null);
+
+  useEffect(() => {
+    const nextSuccessMessage = customerBanner?.tone === 'success'
+      ? customerBanner.text
+      : companyBanner?.tone === 'success'
+        ? companyBanner.text
+        : adminBanner?.tone === 'success'
+          ? adminBanner.text
+          : null;
+
+    if (nextSuccessMessage) {
+      setSuccessPopupText(nextSuccessMessage);
+    }
+  }, [adminBanner, companyBanner, customerBanner]);
+
+  useEffect(() => {
+    if (!successPopupText) {
+      return undefined;
+    }
+
+    const timeout = setTimeout(() => setSuccessPopupText(null), 2200);
+    return () => clearTimeout(timeout);
+  }, [successPopupText]);
 
   useEffect(() => {
     setProfileForm(profile);
@@ -560,13 +586,16 @@ function WorkspaceScreen() {
       return;
     }
 
+    setInviteSubmitting(true);
     try {
       await inviteCompany(inviteForm);
       setInviteForm({ companyName: '', email: '', message: '' });
       setInviteFormErrors({});
-      setAdminBanner({ tone: 'success', text: 'Invitation saved and queued for delivery.' });
+      setAdminBanner({ tone: 'success', text: 'Company invitation sent with username and temporary password.' });
     } catch (error) {
       setAdminBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to send invitation.' });
+    } finally {
+      setInviteSubmitting(false);
     }
   }
 
@@ -1048,6 +1077,8 @@ function WorkspaceScreen() {
               darkMode={customerDarkMode}
             />
           </View>
+
+          <SuccessPopup visible={!!successPopupText} text={successPopupText ?? ''} onClose={() => setSuccessPopupText(null)} />
         </View>
       </SafeAreaView>
     );
@@ -1099,6 +1130,7 @@ function WorkspaceScreen() {
             inviteForm={inviteForm}
             onInviteFormChange={setInviteForm}
             inviteErrors={inviteFormErrors}
+            inviteSubmitting={inviteSubmitting}
             onInvite={handleInvitationSend}
             onResendInvitation={handleInvitationResend}
             onRevokeInvitation={handleInvitationRevoke}
@@ -1153,6 +1185,7 @@ function WorkspaceScreen() {
 
         {busy ? <ActivityIndicator color={colors.primary} style={styles.busyIndicator} /> : null}
       </ScrollView>
+      <SuccessPopup visible={!!successPopupText} text={successPopupText ?? ''} onClose={() => setSuccessPopupText(null)} />
     </SafeAreaView>
   );
 }
@@ -1195,6 +1228,7 @@ type AdminWorkspaceProps = {
   inviteForm: { companyName: string; email: string; message: string };
   onInviteFormChange: React.Dispatch<React.SetStateAction<{ companyName: string; email: string; message: string }>>;
   inviteErrors: ValidationMap;
+  inviteSubmitting: boolean;
   onInvite: () => void;
   onResendInvitation: (invitation: CompanyInvitation) => void;
   onRevokeInvitation: (invitation: CompanyInvitation) => void;
@@ -1226,6 +1260,7 @@ function AdminWorkspace({
   inviteForm,
   onInviteFormChange,
   inviteErrors,
+  inviteSubmitting,
   onInvite,
   onResendInvitation,
   onRevokeInvitation,
@@ -1331,8 +1366,8 @@ function AdminWorkspace({
                       key={company.id}
                       title={company.name}
                       subtitle={`${company.isActive ? 'Active' : 'Paused'} · ${companyCatalogCount} published items · ${companyPromotionCount} live promotions`}
-                      actionLabel="Open"
-                      onAction={() => onSelectCompany(company.id)}
+                              actionLabel="Manage"
+                              onAction={() => onTabChange('companies')}
                     />
                   );
                 }) : <EmptyState title="No companies yet" body="Create the first partner workspace to start marketplace operations." />}
@@ -1359,7 +1394,7 @@ function AdminWorkspace({
       {tab === 'companies' ? (
         <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
           <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
-            <SectionCard title="Company operations" subtitle="Create and edit partner workspaces with stronger hierarchy, faster scanning, and clearer destructive states.">
+            <SectionCard title="Company management" subtitle="Use this tab only to manage existing companies: review status, deactivate or reactivate access, and remove a company when needed.">
               <View style={styles.overviewBadgeRow}>
                 <CompactBadge label="Companies" value={String(companies.length)} />
                 <CompactBadge label="Paused" value={String(pausedCompanies.length)} />
@@ -1367,44 +1402,27 @@ function AdminWorkspace({
               </View>
             </SectionCard>
 
-            <SectionCard title={selectedCompany ? 'Edit company' : 'Create company'} subtitle="Provision partner workspaces with stricter validation and cleaner editing states.">
-              <FormField label="Company name" value={form.name} onChangeText={(value) => onFormChange((current) => ({ ...current, name: value }))} error={formErrors.name} />
-              <FormField label="Description" value={form.description} onChangeText={(value) => onFormChange((current) => ({ ...current, description: value }))} error={formErrors.description} multiline />
-              <View style={styles.rowGap}>
-                <FormField label="Support email" value={form.supportEmail} onChangeText={(value) => onFormChange((current) => ({ ...current, supportEmail: value }))} error={formErrors.supportEmail} />
-                <FormField label="Support phone" value={form.supportPhone} onChangeText={(value) => onFormChange((current) => ({ ...current, supportPhone: value }))} error={formErrors.supportPhone} />
+            <SectionCard title="Management rules" subtitle="Company creation now happens through invitations in Settings. This page is dedicated to operational management only.">
+              <View style={styles.managementRuleList}>
+                <ManagementRule text="Deactivate a company to remove its published items from the customer marketplace." />
+                <ManagementRule text="Reactivate a company to restore its storefront immediately." />
+                <ManagementRule text="Delete a company only when you want to remove its workspace and linked records." />
               </View>
-              <View style={styles.rowGap}>
-                <FormField label="Accent color" value={form.accentColor} onChangeText={(value) => onFormChange((current) => ({ ...current, accentColor: value }))} error={formErrors.accentColor} placeholder="#145DA0" />
-                <FormField label="Logo text" value={form.logoText} onChangeText={(value) => onFormChange((current) => ({ ...current, logoText: value }))} error={formErrors.logoText} />
-              </View>
-              {selectedCompany ? (
-                <View style={styles.toggleRow}>
-                  <ChoiceChip label={selectedCompany.isActive ? 'Active' : 'Paused'} selected={selectedCompany.isActive} onPress={() => onToggleCompany(selectedCompany.id, !selectedCompany.isActive)} />
-                </View>
-              ) : null}
-              <PrimaryButton label={selectedCompany ? 'Save company changes' : 'Create company'} onPress={onSaveCompany} />
-              {selectedCompany ? (
-                <View style={styles.rowGap}>
-                  <SecondaryButton label="Cancel editing" onPress={onResetCompany} />
-                  <SecondaryButton label="Remove company" tone="danger" onPress={() => onDeleteCompany(selectedCompany.id)} />
-                </View>
-              ) : null}
             </SectionCard>
           </View>
 
           <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
-            <SectionCard title="Partner companies" subtitle="Admins can inspect, pause, or reopen any company workspace.">
+            <SectionCard title="Partner companies" subtitle="Admins can inspect every company and switch each workspace active or inactive without entering an edit form.">
               {companies.length ? companies.map((company) => (
                 <CompanyCard
                   key={company.id}
                   company={company}
-                  actionLabel="Edit"
-                  onAction={() => onSelectCompany(company.id)}
-                  secondaryActionLabel={company.isActive ? 'Pause' : 'Activate'}
-                  onSecondaryAction={() => onToggleCompany(company.id, !company.isActive)}
+                  actionLabel={company.isActive ? 'Set inactive' : 'Set active'}
+                  onAction={() => onToggleCompany(company.id, !company.isActive)}
+                  secondaryActionLabel="Delete"
+                  onSecondaryAction={() => onDeleteCompany(company.id)}
                 />
-              )) : <EmptyState title="No companies yet" body="Create a company or invite a partner to populate the marketplace." />}
+              )) : <EmptyState title="No companies yet" body="Invite a company owner from Settings to create and populate the marketplace." />}
             </SectionCard>
 
             <SectionCard title="Invitation delivery" subtitle="Track invite acceptance and whether delivery succeeded or failed.">
@@ -1476,7 +1494,8 @@ function AdminWorkspace({
                 <FormField label="Invite email" value={inviteForm.email} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, email: value }))} error={inviteErrors.email} />
               </View>
               <FormField label="Message" value={inviteForm.message} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, message: value }))} multiline />
-              <PrimaryButton label="Send invitation" onPress={onInvite} />
+              <Text style={styles.helperText}>Sending the invitation creates the company auth user, assigns the `company` role, and emails the username plus a temporary password.</Text>
+              <PrimaryButton label="Send invitation" onPress={onInvite} loading={inviteSubmitting} disabled={inviteSubmitting} />
             </SectionCard>
 
             <SectionCard title="Company user management" subtitle="Invite company owners, monitor pending activations, and manage every partner account from one admin page.">
@@ -2775,6 +2794,32 @@ function StatusBanner({ tone, text }: { tone: BannerTone; text: string }) {
       >
         {text}
       </Text>
+    </View>
+  );
+}
+
+function SuccessPopup({ visible, text, onClose }: { visible: boolean; text: string; onClose: () => void }) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.successPopupBackdrop} onPress={onClose}>
+        <Pressable style={styles.successPopupCard} onPress={() => undefined}>
+          <View style={styles.successPopupIconWrap}>
+            <Ionicons name="checkmark" size={28} color="#FFFFFF" />
+          </View>
+          <Text style={styles.successPopupTitle}>Success</Text>
+          <Text style={styles.successPopupBody}>{text}</Text>
+          <SecondaryButton label="Done" tone="contrast" onPress={onClose} />
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+function ManagementRule({ text }: { text: string }) {
+  return (
+    <View style={styles.managementRuleRow}>
+      <View style={styles.managementRuleDot} />
+      <Text style={styles.managementRuleText}>{text}</Text>
     </View>
   );
 }
@@ -4278,6 +4323,66 @@ const styles = StyleSheet.create({
     color: colors.muted,
     lineHeight: 20,
     fontWeight: '600',
+  },
+  managementRuleList: {
+    gap: 12,
+  },
+  managementRuleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  managementRuleDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    backgroundColor: colors.primary,
+    marginTop: 6,
+  },
+  managementRuleText: {
+    flex: 1,
+    color: colors.text,
+    lineHeight: 21,
+    fontWeight: '600',
+  },
+  successPopupBackdrop: {
+    flex: 1,
+    backgroundColor: '#17252F66',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  successPopupCard: {
+    width: '100%',
+    maxWidth: 360,
+    borderRadius: 28,
+    backgroundColor: '#FFFFFF',
+    padding: 24,
+    alignItems: 'center',
+    gap: 14,
+    shadowColor: '#12385E',
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 5,
+  },
+  successPopupIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 999,
+    backgroundColor: colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  successPopupTitle: {
+    color: colors.text,
+    fontSize: 24,
+    fontWeight: '900',
+  },
+  successPopupBody: {
+    color: colors.muted,
+    textAlign: 'center',
+    lineHeight: 22,
   },
   catalogFilterRow: {
     flexDirection: 'row',

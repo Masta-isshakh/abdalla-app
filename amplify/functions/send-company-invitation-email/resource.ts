@@ -6,5 +6,6 @@ export const sendCompanyInvitationEmail = defineFunction({
   environment: {
     INVITATION_SENDER_EMAIL: secret('INVITATION_SENDER_EMAIL'),
     APP_NAME: 'Jahzeen',
+    USER_POOL_ID: '',
   },
 });

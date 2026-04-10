@@ -399,6 +399,45 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const matchingInvitation = invitations.find((entry) => entry.email.toLowerCase() === email && entry.status === 'pending');
 
     if (existingUser) {
+      if (matchingInvitation || existingUser.status !== 'active') {
+        const nextRole = MANUAL_ADMIN_EMAILS.includes(email) ? 'admin' : matchingInvitation ? 'company' : existingUser.role;
+        const nextCompanyId = matchingInvitation?.companyId ?? existingUser.companyId;
+        const nextCompanyName = matchingInvitation?.companyName ?? existingUser.companyName;
+        const nextInvitedByEmail = matchingInvitation?.invitedByEmail ?? existingUser.invitedByEmail;
+
+        setUsers((current) =>
+          current.map((entry) =>
+            entry.id === existingUser.id
+              ? {
+                  ...entry,
+                  fullName: nextAuthUser.fullName,
+                  role: nextRole,
+                  companyId: nextCompanyId,
+                  companyName: nextCompanyName,
+                  invitedByEmail: nextInvitedByEmail,
+                  status: 'active',
+                }
+              : entry,
+          ),
+        );
+        await safeUpdate('AppUser', {
+          id: existingUser.id,
+          fullName: nextAuthUser.fullName,
+          role: nextRole,
+          companyId: nextCompanyId,
+          companyName: nextCompanyName,
+          invitedByEmail: nextInvitedByEmail,
+          status: 'active',
+        });
+
+        if (matchingInvitation) {
+          setInvitations((current) => current.map((entry) => (entry.id === matchingInvitation.id ? { ...entry, status: 'accepted' } : entry)));
+          setCompanies((current) => current.map((entry) => (entry.id === matchingInvitation.companyId ? { ...entry, ownerEmail: email } : entry)));
+          await safeUpdate('CompanyInvitation', { id: matchingInvitation.id, status: 'accepted' });
+          await safeUpdate('Company', { id: matchingInvitation.companyId, ownerEmail: email });
+        }
+      }
+
       return;
     }
 
@@ -705,6 +744,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const invitation: CompanyInvitation = { id: `invite-${Date.now()}`, companyId: company.id, companyName: company.name, email: draft.email.trim().toLowerCase(), invitedByEmail: authUser?.email ?? 'admin@jahzeen.app', status: 'pending', message: draft.message, emailDeliveryStatus: 'pending' };
     setInvitations((current) => [invitation, ...current]);
     await safeCreate('CompanyInvitation', { ...invitation });
+
+    const existingCompanyUser = users.find((entry) => entry.email.toLowerCase() === invitation.email);
+    if (!existingCompanyUser) {
+      const invitedUser: AppUserRecord = {
+        id: `user-${Date.now()}`,
+        email: invitation.email,
+        fullName: `${company.name} owner`,
+        phone: '',
+        role: 'company',
+        companyId: company.id,
+        companyName: company.name,
+        invitedByEmail: invitation.invitedByEmail,
+        status: 'invited',
+      };
+      setUsers((current) => [invitedUser, ...current]);
+      await safeCreate('AppUser', { ...invitedUser });
+    }
+
     await dispatchInvitationEmail(invitation);
     await Promise.all([
       createNotification({ recipientRole: 'admin', title: `Invitation sent to ${invitation.email}`, body: `${invitation.companyName} is waiting for company owner activation.`, kind: 'invitation', destinationTab: 'settings' }),
