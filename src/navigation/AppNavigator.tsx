@@ -1725,6 +1725,14 @@ function CompanyWorkspace({
       {tab === 'catalog' ? (
         <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
           <View style={styles.columnPane}>
+            <SectionCard title="Catalog studio" subtitle="Build listings with a clearer publishing flow, stronger visibility states, and a more premium editing surface.">
+              <View style={styles.overviewBadgeRow}>
+                <CompactBadge label="Items" value={String(companyItems.length)} />
+                <CompactBadge label="Published" value={String(publishedItems)} />
+                <CompactBadge label="Draft focus" value={selectedCatalogItem ? 'Editing' : 'New'} />
+              </View>
+            </SectionCard>
+
             <SectionCard title={selectedCatalogItem ? 'Edit catalog item' : 'Publish catalog item'} subtitle="Validation now blocks incomplete listings before they reach the marketplace.">
               <View style={styles.rowGap}>
                 <FormField label="Title" value={catalogForm.title} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, title: value }))} error={catalogErrors.title} />
@@ -1746,7 +1754,7 @@ function CompanyWorkspace({
                 <ChoiceChip label="Product" selected={catalogForm.kind === 'product'} onPress={() => onCatalogFormChange((current) => ({ ...current, kind: 'product' }))} />
                 <ChoiceChip label="Published" selected={catalogForm.isPublished} onPress={() => onCatalogFormChange((current) => ({ ...current, isPublished: !current.isPublished }))} />
               </View>
-              <PrimaryButton label={selectedCatalogItem ? 'Save item changes' : 'Save item'} onPress={onSaveCatalog} />
+              <SecondaryButton label={selectedCatalogItem ? 'Save item changes' : 'Publish catalog item'} tone="contrast" onPress={onSaveCatalog} />
               {selectedCatalogItem ? (
                 <View style={styles.rowGap}>
                   <SecondaryButton label="Cancel editing" onPress={onResetCatalog} />
@@ -1759,12 +1767,10 @@ function CompanyWorkspace({
           <View style={styles.columnPane}>
             <SectionCard title="Current catalog" subtitle="Only this company's items appear in this operational view.">
               {companyItems.length ? companyItems.map((item) => (
-                <CatalogCard
+                <CompanyCatalogCard
                   key={item.id}
                   item={item}
-                  actionLabel="Edit"
                   onAction={() => onSelectCatalogItem(item.id)}
-                  secondaryActionLabel="Delete"
                   onSecondaryAction={() => onDeleteCatalogItem(item.id)}
                 />
               )) : <EmptyState title="No catalog items yet" body="The marketplace remains empty until this company publishes something here." />}
@@ -2693,6 +2699,71 @@ function CatalogCard({ item, actionLabel, onAction, secondaryActionLabel, onSeco
   );
 }
 
+function CompanyCatalogCard({ item, onAction, onSecondaryAction }: { item: CatalogItem; onAction?: () => void; onSecondaryAction?: () => void }) {
+  const stateLabel = item.isPublished ? 'Live in marketplace' : 'Draft in studio';
+  const stateHint = item.isPublished
+    ? 'Customers can discover and book this listing right now.'
+    : 'Complete the details and publish when the listing is ready.';
+  const gradientColors: [string, string, string] = item.isPublished ? ['#D9EEFF', '#EEF8FF', '#FFFFFF'] : ['#FFF0DD', '#FFF7ED', '#FFFFFF'];
+
+  return (
+    <View style={styles.companyCatalogCard}>
+      <Pressable style={({ pressed }) => [styles.companyCatalogCardPressable, pressed && styles.companyCatalogCardPressablePressed]} onPress={onAction} disabled={!onAction}>
+        <LinearGradient colors={gradientColors} style={styles.companyCatalogCardVisual}>
+          <View style={[styles.companyCatalogCardAura, item.isPublished ? styles.companyCatalogCardAuraPublished : styles.companyCatalogCardAuraDraft]} />
+          <View style={[styles.companyCatalogCardAccentLine, item.isPublished ? styles.companyCatalogCardAccentLinePublished : styles.companyCatalogCardAccentLineDraft]} />
+          <View style={styles.companyCatalogCardTopRow}>
+            <View style={[styles.companyCatalogCardStatePill, item.isPublished ? styles.companyCatalogCardStatePillPublished : styles.companyCatalogCardStatePillDraft]}>
+              <Text style={styles.companyCatalogCardStateText}>{item.isPublished ? 'Published' : 'Draft'}</Text>
+            </View>
+            <View style={[styles.companyCatalogCardKindPill, item.kind === 'product' && styles.companyCatalogCardKindPillProduct]}>
+              <Text style={styles.companyCatalogCardKindText}>{item.kind === 'service' ? 'Service' : 'Product'}</Text>
+            </View>
+          </View>
+          <Text style={styles.companyCatalogCardCategory}>{item.category || 'Marketplace listing'}</Text>
+          <Text style={styles.companyCatalogCardHint}>{item.imageHint || item.durationLabel || 'Optimized for premium discovery'}</Text>
+          <Text style={styles.companyCatalogCardStateHeadline}>{stateLabel}</Text>
+          <Text style={styles.companyCatalogCardStateBody}>{stateHint}</Text>
+        </LinearGradient>
+
+        <View style={styles.companyCatalogCardBody}>
+          <View style={styles.companyCatalogCardTitleRow}>
+            <Text style={styles.companyCatalogCardTitle}>{item.title}</Text>
+            {onAction ? (
+              <View style={styles.companyCatalogCardTapPill}>
+                <Text style={styles.companyCatalogCardTapPillText}>Tap to edit</Text>
+              </View>
+            ) : null}
+          </View>
+          <Text style={styles.companyCatalogCardSummary} numberOfLines={3}>{item.summary}</Text>
+
+          <View style={styles.companyCatalogMetaRow}>
+            <CompactBadge label="Price" value={`QAR ${item.price.toFixed(0)}`} />
+            <CompactBadge label="Duration" value={item.durationLabel || 'Custom'} />
+            <CompactBadge label="Points" value={String(item.loyaltyPoints)} />
+          </View>
+
+          <View style={styles.companyCatalogSignalRow}>
+            <View style={styles.companyCatalogSignalCard}>
+              <Text style={styles.companyCatalogSignalLabel}>Visibility</Text>
+              <Text style={styles.companyCatalogSignalValue}>{item.isPublished ? 'Customer-facing' : 'Internal only'}</Text>
+            </View>
+            <View style={styles.companyCatalogSignalCard}>
+              <Text style={styles.companyCatalogSignalLabel}>Experience</Text>
+              <Text style={styles.companyCatalogSignalValue}>{item.kind === 'service' ? 'Scheduled service' : 'Shoppable product'}</Text>
+            </View>
+          </View>
+        </View>
+      </Pressable>
+
+      <View style={styles.companyCatalogActionRow}>
+        {onAction ? <SecondaryButton label="Edit item" tone="contrast" onPress={onAction} /> : null}
+        {onSecondaryAction ? <SecondaryButton label="Delete" tone="danger" onPress={onSecondaryAction} /> : null}
+      </View>
+    </View>
+  );
+}
+
 function BookingCard({ booking, darkMode = false }: { booking: Booking; darkMode?: boolean }) {
   return (
     <View style={[styles.bookingCard, darkMode && styles.customerBookingCardDark]}>
@@ -3594,6 +3665,198 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 12,
     fontWeight: '700',
+  },
+  companyCatalogCard: {
+    borderRadius: 24,
+    overflow: 'hidden',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#DFE7EF',
+    shadowColor: '#12385E',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
+    gap: 0,
+  },
+  companyCatalogCardPressable: {
+    backgroundColor: '#FFFFFF',
+  },
+  companyCatalogCardPressablePressed: {
+    opacity: 0.96,
+    transform: [{ scale: 0.988 }],
+  },
+  companyCatalogCardVisual: {
+    padding: 16,
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E4EDF5',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  companyCatalogCardAura: {
+    position: 'absolute',
+    width: 180,
+    height: 180,
+    borderRadius: 999,
+    top: -70,
+    right: -50,
+  },
+  companyCatalogCardAuraPublished: {
+    backgroundColor: '#9FD1FF55',
+  },
+  companyCatalogCardAuraDraft: {
+    backgroundColor: '#FFD6A555',
+  },
+  companyCatalogCardAccentLine: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    top: 0,
+    height: 4,
+    borderBottomLeftRadius: 999,
+    borderBottomRightRadius: 999,
+  },
+  companyCatalogCardAccentLinePublished: {
+    backgroundColor: '#2B86D1',
+  },
+  companyCatalogCardAccentLineDraft: {
+    backgroundColor: '#D99233',
+  },
+  companyCatalogCardTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10,
+  },
+  companyCatalogCardStatePill: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+  },
+  companyCatalogCardStatePillPublished: {
+    backgroundColor: '#12385E',
+  },
+  companyCatalogCardStatePillDraft: {
+    backgroundColor: '#A96516',
+  },
+  companyCatalogCardStateText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  companyCatalogCardKindPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: '#DDEEFE',
+  },
+  companyCatalogCardKindPillProduct: {
+    backgroundColor: '#FDE6D8',
+  },
+  companyCatalogCardKindText: {
+    color: colors.text,
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  companyCatalogCardCategory: {
+    color: colors.primary,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+    fontSize: 12,
+  },
+  companyCatalogCardHint: {
+    color: colors.muted,
+    lineHeight: 20,
+  },
+  companyCatalogCardStateHeadline: {
+    color: colors.text,
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: '900',
+    marginTop: 8,
+  },
+  companyCatalogCardStateBody: {
+    color: colors.muted,
+    lineHeight: 20,
+  },
+  companyCatalogCardBody: {
+    padding: 16,
+    gap: 14,
+  },
+  companyCatalogCardTitleRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10,
+  },
+  companyCatalogCardTitle: {
+    color: colors.text,
+    fontSize: 20,
+    lineHeight: 26,
+    fontWeight: '900',
+    flex: 1,
+    minWidth: 180,
+  },
+  companyCatalogCardTapPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#EDF4FB',
+    borderWidth: 1,
+    borderColor: '#D7E7F6',
+  },
+  companyCatalogCardTapPillText: {
+    color: colors.primary,
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  companyCatalogCardSummary: {
+    color: colors.muted,
+    lineHeight: 21,
+  },
+  companyCatalogMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  companyCatalogActionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    paddingTop: 2,
+  },
+  companyCatalogSignalRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  companyCatalogSignalCard: {
+    flex: 1,
+    minWidth: 150,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 18,
+    backgroundColor: '#F7FAFD',
+    borderWidth: 1,
+    borderColor: '#DFEAF4',
+    gap: 4,
+  },
+  companyCatalogSignalLabel: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  companyCatalogSignalValue: {
+    color: colors.text,
+    fontWeight: '800',
+    lineHeight: 20,
   },
   catalogGrid: {
     gap: 12,
