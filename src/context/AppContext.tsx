@@ -746,7 +746,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   async function saveCatalogItem(companyId: string, draft: CatalogItemDraft) {
     const company = companies.find((entry) => entry.id === companyId);
     if (!company) {
-      return;
+      throw new Error('No active company workspace was found for this catalog item.');
     }
     const item: CatalogItem = { id: draft.id ?? `item-${Date.now()}`, companyId, companyName: company.name, kind: draft.kind, title: draft.title, summary: draft.summary, description: draft.description, category: draft.category, price: draft.price, durationLabel: draft.durationLabel, isPublished: draft.isPublished, featured: draft.featured, tags: draft.tags, loyaltyPoints: draft.loyaltyPoints, imageUrl: draft.imageUrl, imageHint: draft.imageHint };
     setCatalogItems((current) => draft.id ? current.map((entry) => (entry.id === draft.id ? item : entry)) : [item, ...current]);

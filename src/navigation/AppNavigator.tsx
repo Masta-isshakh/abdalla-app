@@ -204,6 +204,7 @@ function WorkspaceScreen() {
   const [selectedAdminCompanyId, setSelectedAdminCompanyId] = useState<string | null>(null);
   const [selectedCatalogItemId, setSelectedCatalogItemId] = useState<string | null>(null);
   const [selectedPromotionId, setSelectedPromotionId] = useState<string | null>(null);
+  const [catalogSubmitting, setCatalogSubmitting] = useState(false);
 
   const [companyFormErrors, setCompanyFormErrors] = useState<ValidationMap>({});
   const [inviteFormErrors, setInviteFormErrors] = useState<ValidationMap>({});
@@ -608,6 +609,7 @@ function WorkspaceScreen() {
 
   async function handleCatalogSave() {
     if (!currentCompany) {
+      setCompanyBanner({ tone: 'error', text: 'No company workspace is active. Sign in again and retry.' });
       return;
     }
 
@@ -618,6 +620,7 @@ function WorkspaceScreen() {
       return;
     }
 
+    setCatalogSubmitting(true);
     try {
       await saveCatalogItem(currentCompany.id, {
         id: selectedCatalogItem?.id,
@@ -635,10 +638,19 @@ function WorkspaceScreen() {
         imageUrl: catalogForm.imageUrl.trim(),
         imageHint: catalogForm.imageHint.trim(),
       });
-      setCompanyBanner({ tone: 'success', text: selectedCatalogItem ? 'Catalog item updated.' : 'Catalog item saved.' });
+      setCompanyBanner({
+        tone: 'success',
+        text: selectedCatalogItem
+          ? 'Catalog item updated. Customers can now see the latest version.'
+          : catalogForm.isPublished
+            ? 'Catalog item published and visible to customers.'
+            : 'Catalog item saved as a draft.',
+      });
       resetCatalogDrafts();
     } catch (error) {
       setCompanyBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to save catalog item.' });
+    } finally {
+      setCatalogSubmitting(false);
     }
   }
 
@@ -1117,6 +1129,7 @@ function WorkspaceScreen() {
             catalogErrors={catalogFormErrors}
             onSelectCatalogItem={setSelectedCatalogItemId}
             onSaveCatalog={handleCatalogSave}
+            catalogSubmitting={catalogSubmitting}
             onPickCatalogImage={handleCatalogImagePick}
             onClearCatalogImage={handleCatalogImageClear}
             onDeleteCatalogItem={deleteCatalogItem}
@@ -1563,6 +1576,7 @@ type CompanyWorkspaceProps = {
   catalogErrors: ValidationMap;
   onSelectCatalogItem: (itemId: string | null) => void;
   onSaveCatalog: () => void;
+  catalogSubmitting: boolean;
   onPickCatalogImage: () => void;
   onClearCatalogImage: () => void;
   onDeleteCatalogItem: (itemId: string) => Promise<void>;
@@ -1638,6 +1652,7 @@ function CompanyWorkspace({
   catalogErrors,
   onSelectCatalogItem,
   onSaveCatalog,
+  catalogSubmitting,
   onPickCatalogImage,
   onClearCatalogImage,
   onDeleteCatalogItem,
@@ -1838,7 +1853,8 @@ function CompanyWorkspace({
                   <ChoiceChip label="Product" selected={catalogForm.kind === 'product'} onPress={() => onCatalogFormChange((current) => ({ ...current, kind: 'product' }))} />
                   <ChoiceChip label="Published" selected={catalogForm.isPublished} onPress={() => onCatalogFormChange((current) => ({ ...current, isPublished: !current.isPublished }))} />
                 </View>
-                <SecondaryButton label={selectedCatalogItem ? 'Save item changes' : 'Publish catalog item'} tone="contrast" onPress={onSaveCatalog} />
+                <SecondaryButton label={selectedCatalogItem ? 'Save item changes' : 'Publish catalog item'} tone="contrast" onPress={onSaveCatalog} loading={catalogSubmitting} disabled={catalogSubmitting} />
+                <Text style={styles.catalogSubmitHint}>{catalogForm.isPublished ? 'Published items appear immediately in the customer marketplace for active companies.' : 'Draft items stay private until you switch them to published.'}</Text>
                 {selectedCatalogItem ? (
                   <View style={styles.rowGap}>
                     <SecondaryButton label="Cancel editing" onPress={onResetCatalog} />
@@ -1914,7 +1930,8 @@ function CompanyWorkspace({
                 <ChoiceChip label="Product" selected={catalogForm.kind === 'product'} onPress={() => onCatalogFormChange((current) => ({ ...current, kind: 'product' }))} />
                 <ChoiceChip label="Published" selected={catalogForm.isPublished} onPress={() => onCatalogFormChange((current) => ({ ...current, isPublished: !current.isPublished }))} />
               </View>
-              <SecondaryButton label={selectedCatalogItem ? 'Save item changes' : 'Publish catalog item'} tone="contrast" onPress={onSaveCatalog} />
+              <SecondaryButton label={selectedCatalogItem ? 'Save item changes' : 'Publish catalog item'} tone="contrast" onPress={onSaveCatalog} loading={catalogSubmitting} disabled={catalogSubmitting} />
+              <Text style={styles.catalogSubmitHint}>{catalogForm.isPublished ? 'Published items appear immediately in the customer marketplace for active companies.' : 'Draft items stay private until you switch them to published.'}</Text>
               {selectedCatalogItem ? (
                 <View style={styles.rowGap}>
                   <SecondaryButton label="Cancel editing" onPress={onResetCatalog} />
@@ -4256,6 +4273,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
+  },
+  catalogSubmitHint: {
+    color: colors.muted,
+    lineHeight: 20,
+    fontWeight: '600',
   },
   catalogFilterRow: {
     flexDirection: 'row',
