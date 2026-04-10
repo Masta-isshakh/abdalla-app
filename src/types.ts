@@ -8,6 +8,10 @@ export type ItemKind = 'service' | 'product';
 
 export type LoyaltyScope = 'admin' | 'company';
 
+export type NotificationAudience = 'admin' | 'company' | 'customer';
+
+export type NotificationKind = 'booking' | 'promotion' | 'invitation' | 'system';
+
 export interface AuthUser {
   userId: string;
   email: string;
@@ -113,6 +117,19 @@ export interface OfferPromotion {
   endsAtLabel: string;
   isActive: boolean;
   sortOrder: number;
+}
+
+export interface AppNotification {
+  id: string;
+  recipientRole: NotificationAudience;
+  recipientEmail?: string;
+  companyId?: string;
+  title: string;
+  body: string;
+  kind: NotificationKind;
+  destinationTab: string;
+  isRead: boolean;
+  createdAtLabel: string;
 }
 
 export interface LoyaltyProgram {
@@ -223,6 +240,17 @@ export interface OfferPromotionDraft {
   endsAtLabel: string;
   isActive: boolean;
   sortOrder: number;
+}
+
+export interface NotificationDraft {
+  recipientRole: NotificationAudience;
+  recipientEmail?: string;
+  companyId?: string;
+  title: string;
+  body: string;
+  kind: NotificationKind;
+  destinationTab: string;
+  isRead?: boolean;
 }
 
 export interface LoyaltyProgramDraft {

@@ -13,6 +13,7 @@ import {
 import { dataClient } from '../lib/amplify';
 import {
   Address,
+  AppNotification,
   AppRole,
   AppUserRecord,
   AuthUser,
@@ -27,13 +28,14 @@ import {
   InvitationDraft,
   LoyaltyProgram,
   LoyaltyProgramDraft,
+  NotificationDraft,
   OfferPromotion,
   OfferPromotionDraft,
   SignUpPayload,
   UserProfile,
 } from '../app-types';
 
-const STORAGE_KEY = 'jahzeen-platform-state-v3';
+const STORAGE_KEY = 'jahzeen-platform-state-v4';
 const MANUAL_ADMIN_EMAILS = ['owner@jahzeen.app', 'admin@jahzeen.app'];
 
 const starterProfile: UserProfile = {
@@ -65,6 +67,7 @@ type PersistedState = {
   invitations: CompanyInvitation[];
   catalogItems: CatalogItem[];
   offerPromotions: OfferPromotion[];
+  notifications: AppNotification[];
   bookings: Booking[];
   ratings: Array<{ id: string; bookingId: string; companyId: string; itemId: string; customerEmail: string; score: number; review: string; createdAtLabel: string }>;
   loyaltyPrograms: LoyaltyProgram[];
@@ -84,6 +87,7 @@ interface AppContextValue {
   invitations: CompanyInvitation[];
   catalogItems: CatalogItem[];
   offerPromotions: OfferPromotion[];
+  notifications: AppNotification[];
   bookings: Booking[];
   ratings: PersistedState['ratings'];
   loyaltyPrograms: LoyaltyProgram[];
@@ -107,6 +111,7 @@ interface AppContextValue {
   deleteCatalogItem: (itemId: string) => Promise<void>;
   saveOfferPromotion: (companyId: string, draft: OfferPromotionDraft) => Promise<void>;
   deleteOfferPromotion: (promotionId: string) => Promise<void>;
+  markNotificationRead: (notificationId: string) => Promise<void>;
   saveLoyaltyProgram: (scope: 'admin' | 'company', companyId: string | undefined, draft: LoyaltyProgramDraft) => Promise<void>;
   placeBooking: (draft: BookingDraft) => Promise<Booking>;
   changeBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
@@ -176,6 +181,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [invitations, setInvitations] = useState<CompanyInvitation[]>([]);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [offerPromotions, setOfferPromotions] = useState<OfferPromotion[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [ratings, setRatings] = useState<PersistedState['ratings']>([]);
   const [loyaltyPrograms, setLoyaltyPrograms] = useState<LoyaltyProgram[]>([]);
@@ -195,6 +201,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setInvitations(parsed.invitations ?? []);
           setCatalogItems(parsed.catalogItems ?? []);
           setOfferPromotions(parsed.offerPromotions ?? []);
+          setNotifications(parsed.notifications ?? []);
           setBookings(parsed.bookings ?? []);
           setRatings(parsed.ratings ?? []);
           setLoyaltyPrograms(parsed.loyaltyPrograms ?? []);
@@ -231,6 +238,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         invitations,
         catalogItems,
         offerPromotions,
+        notifications,
         bookings,
         ratings,
         loyaltyPrograms,
@@ -238,7 +246,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ).catch(() => {
       // Ignore persistence errors.
     });
-  }, [initialized, profile, addresses, users, companies, invitations, catalogItems, offerPromotions, bookings, ratings, loyaltyPrograms]);
+  }, [initialized, profile, addresses, users, companies, invitations, catalogItems, offerPromotions, notifications, bookings, ratings, loyaltyPrograms]);
 
   const currentUserRecord = useMemo(() => {
     if (!authUser) {
@@ -363,6 +371,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
   }
 
+  async function createNotification(draft: NotificationDraft) {
+    const notification: AppNotification = {
+      id: `notification-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      recipientRole: draft.recipientRole,
+      recipientEmail: draft.recipientEmail,
+      companyId: draft.companyId,
+      title: draft.title,
+      body: draft.body,
+      kind: draft.kind,
+      destinationTab: draft.destinationTab,
+      isRead: draft.isRead ?? false,
+      createdAtLabel: nowLabel(),
+    };
+
+    setNotifications((current) => [notification, ...current]);
+    await safeCreate('AppNotification', { ...notification });
+  }
+
   async function ensureUserRecord(nextAuthUser: AuthUser) {
     const email = nextAuthUser.email.trim().toLowerCase();
     const existingUser = users.find((entry) => entry.email.toLowerCase() === email);
@@ -431,12 +457,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   async function syncCloudRecords() {
     try {
-      const [remoteUsers, remoteCompanies, remoteInvitations, remoteItems, remotePromotions, remoteBookings, remoteRatings, remotePrograms, remoteAddresses, remoteProfiles] = await Promise.all([
+      const [remoteUsers, remoteCompanies, remoteInvitations, remoteItems, remotePromotions, remoteNotifications, remoteBookings, remoteRatings, remotePrograms, remoteAddresses, remoteProfiles] = await Promise.all([
         safeList('AppUser'),
         safeList('Company'),
         safeList('CompanyInvitation'),
         safeList('CatalogItem'),
         safeList('OfferPromotion'),
+        safeList('AppNotification'),
         safeList('Booking'),
         safeList('Rating'),
         safeList('LoyaltyProgram'),
@@ -458,6 +485,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       if (remotePromotions.length) {
         setOfferPromotions(remotePromotions.map((entry: any) => ({ id: entry.id, companyId: entry.companyId, companyName: entry.companyName, catalogItemId: entry.catalogItemId, catalogItemTitle: entry.catalogItemTitle, title: entry.title, headline: entry.headline ?? '', badgeText: entry.badgeText ?? '', discountLabel: entry.discountLabel ?? '', startsAtLabel: entry.startsAtLabel ?? '', endsAtLabel: entry.endsAtLabel ?? '', isActive: !!entry.isActive, sortOrder: Number(entry.sortOrder ?? 0) })));
+      }
+      if (remoteNotifications.length) {
+        setNotifications(remoteNotifications.map((entry: any) => ({ id: entry.id, recipientRole: entry.recipientRole, recipientEmail: entry.recipientEmail ?? undefined, companyId: entry.companyId ?? undefined, title: entry.title, body: entry.body ?? '', kind: entry.kind, destinationTab: entry.destinationTab ?? 'overview', isRead: !!entry.isRead, createdAtLabel: entry.createdAtLabel ?? nowLabel() })));
       }
       if (remoteBookings.length) {
         setBookings(remoteBookings.map((entry: any) => ({ id: entry.id, bookingNumber: entry.bookingNumber, customerEmail: entry.customerEmail, customerName: entry.customerName, companyId: entry.companyId, companyName: entry.companyName, itemId: entry.itemId, itemTitle: entry.itemTitle, kind: entry.kind, scheduleDate: entry.scheduleDate, scheduleTime: entry.scheduleTime, addressLabel: entry.addressLabel, addressLine: entry.addressLine, paymentMethod: entry.paymentMethod, notes: entry.notes ?? '', status: entry.status, subtotal: Number(entry.subtotal ?? 0), serviceFee: Number(entry.serviceFee ?? 0), discount: Number(entry.discount ?? 0), total: Number(entry.total ?? 0), loyaltyPointsEarned: Number(entry.loyaltyPointsEarned ?? 0), ratingSubmitted: !!entry.ratingSubmitted, timeline: parseTimeline(entry.timeline) })));
@@ -622,6 +652,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setCompanies((current) => current.filter((entry) => entry.id !== companyId));
     setCatalogItems((current) => current.filter((entry) => entry.companyId !== companyId));
     setOfferPromotions((current) => current.filter((entry) => entry.companyId !== companyId));
+    setNotifications((current) => current.filter((entry) => entry.companyId !== companyId));
     setBookings((current) => current.filter((entry) => entry.companyId !== companyId));
     setUsers((current) => current.filter((entry) => entry.companyId !== companyId));
     setInvitations((current) => current.filter((entry) => entry.companyId !== companyId));
@@ -636,6 +667,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setInvitations((current) => [invitation, ...current]);
     await safeCreate('CompanyInvitation', { ...invitation });
     await dispatchInvitationEmail(invitation);
+    await Promise.all([
+      createNotification({ recipientRole: 'admin', title: `Invitation sent to ${invitation.email}`, body: `${invitation.companyName} is waiting for company owner activation.`, kind: 'invitation', destinationTab: 'settings' }),
+      createNotification({ recipientRole: 'company', recipientEmail: invitation.email, companyId: invitation.companyId, title: `You were invited to ${invitation.companyName}`, body: 'Sign in with your invited company account after confirming your email.', kind: 'invitation', destinationTab: 'overview' }),
+    ]);
   }
 
   async function resendCompanyInvitation(invitationId: string) {
@@ -657,11 +692,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       emailDeliveryError: undefined,
     });
     await dispatchInvitationEmail({ ...invitation, emailDeliveryStatus: 'pending', emailDeliveryError: undefined });
+    await createNotification({ recipientRole: 'admin', title: `Invitation resent to ${invitation.email}`, body: `${invitation.companyName} invitation delivery was retried.`, kind: 'invitation', destinationTab: 'settings' });
   }
 
   async function revokeInvitation(invitationId: string) {
+    const invitation = invitations.find((entry) => entry.id === invitationId);
     setInvitations((current) => current.map((entry) => (entry.id === invitationId ? { ...entry, status: 'revoked' } : entry)));
     await safeUpdate('CompanyInvitation', { id: invitationId, status: 'revoked' });
+    if (invitation) {
+      await createNotification({ recipientRole: 'admin', title: `Invitation revoked for ${invitation.email}`, body: `${invitation.companyName} invitation has been revoked.`, kind: 'invitation', destinationTab: 'settings' });
+    }
   }
 
   async function saveCatalogItem(companyId: string, draft: CatalogItemDraft) {
@@ -716,11 +756,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } else {
       await safeCreate('OfferPromotion', { ...nextPromotion });
     }
+
+    await Promise.all([
+      createNotification({ recipientRole: 'company', companyId, title: `${nextPromotion.title} is ${nextPromotion.isActive ? 'live' : 'saved'}`, body: `Promotion linked to ${nextPromotion.catalogItemTitle}.`, kind: 'promotion', destinationTab: 'offers' }),
+      ...(nextPromotion.isActive
+        ? [createNotification({ recipientRole: 'customer', title: `${nextPromotion.title} is now live`, body: nextPromotion.headline, kind: 'promotion', destinationTab: 'explore' })]
+        : []),
+    ]);
   }
 
   async function deleteOfferPromotion(promotionId: string) {
     setOfferPromotions((current) => current.filter((entry) => entry.id !== promotionId));
     await safeDelete('OfferPromotion', promotionId);
+  }
+
+  async function markNotificationRead(notificationId: string) {
+    setNotifications((current) => current.map((entry) => (entry.id === notificationId ? { ...entry, isRead: true } : entry)));
+    await safeUpdate('AppNotification', { id: notificationId, isRead: true });
   }
 
   async function saveLoyaltyProgram(scope: 'admin' | 'company', companyId: string | undefined, draft: LoyaltyProgramDraft) {
@@ -747,6 +799,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const booking: Booking = { id: `booking-${Date.now()}`, bookingNumber: `JHZ-${String(Date.now()).slice(-6)}`, customerEmail: authUser.email, customerName: profile.fullName || authUser.fullName, companyId: item.companyId, companyName: item.companyName, itemId: item.id, itemTitle: item.title, kind: item.kind, scheduleDate: draft.scheduleDate, scheduleTime: draft.scheduleTime, addressLabel: address.label, addressLine: formatAddress(address), paymentMethod: draft.paymentMethod, notes: draft.notes, status: 'pending', subtotal: item.price, serviceFee: item.kind === 'service' ? 10 : 0, discount: 0, total: item.price + (item.kind === 'service' ? 10 : 0), loyaltyPointsEarned: companyProgram?.pointsPerBooking ?? item.loyaltyPoints, ratingSubmitted: false, timeline: [{ id: 'pending', title: 'Booking requested', time: 'Just now', done: true }, { id: 'approval', title: 'Awaiting company approval', time: 'Pending', done: false }, { id: 'service', title: 'Service or delivery window', time: `${draft.scheduleDate} · ${draft.scheduleTime}`, done: false }] };
     setBookings((current) => [booking, ...current]);
     await safeCreate('Booking', { ...booking, timeline: JSON.stringify(booking.timeline) });
+    await Promise.all([
+      createNotification({ recipientRole: 'customer', recipientEmail: authUser.email, title: `Booking ${booking.bookingNumber} submitted`, body: `${booking.itemTitle} is waiting for company approval.`, kind: 'booking', destinationTab: 'orders' }),
+      createNotification({ recipientRole: 'company', companyId: booking.companyId, title: `New booking for ${booking.itemTitle}`, body: `${booking.customerName} placed ${booking.bookingNumber}.`, kind: 'booking', destinationTab: 'bookings' }),
+      createNotification({ recipientRole: 'admin', title: `New marketplace booking ${booking.bookingNumber}`, body: `${booking.companyName} received a new booking.`, kind: 'booking', destinationTab: 'bookings' }),
+    ]);
     return booking;
   }
 
@@ -756,6 +813,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (booking) {
       const nextTimeline = booking.timeline.map((item: Booking['timeline'][number], index: number) => ({ ...item, done: status === 'completed' ? true : index === 0 ? true : status === 'approved' ? index <= 1 : status === 'enRoute' ? index <= 2 : item.done }));
       await safeUpdate('Booking', { id: bookingId, status, timeline: JSON.stringify(nextTimeline) });
+      await Promise.all([
+        createNotification({ recipientRole: 'customer', recipientEmail: booking.customerEmail, title: `${booking.itemTitle} is ${readableBookingStatus(status).toLowerCase()}`, body: `Booking ${booking.bookingNumber} moved to ${readableBookingStatus(status)}.`, kind: 'booking', destinationTab: 'orders' }),
+        createNotification({ recipientRole: 'admin', title: `${booking.bookingNumber} moved to ${readableBookingStatus(status)}`, body: `${booking.companyName} updated ${booking.itemTitle}.`, kind: 'booking', destinationTab: 'bookings' }),
+      ]);
     }
   }
 
@@ -769,10 +830,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setBookings((current) => current.map((entry) => (entry.id === bookingId ? { ...entry, ratingSubmitted: true } : entry)));
     await safeCreate('Rating', rating);
     await safeUpdate('Booking', { id: bookingId, ratingSubmitted: true });
+    await Promise.all([
+      createNotification({ recipientRole: 'company', companyId: booking.companyId, title: `New rating for ${booking.itemTitle}`, body: `${authUser.fullName} left a ${score}/5 review.`, kind: 'system', destinationTab: 'overview' }),
+      createNotification({ recipientRole: 'admin', title: `Customer review submitted`, body: `${booking.companyName} received a ${score}/5 rating for ${booking.itemTitle}.`, kind: 'system', destinationTab: 'overview' }),
+    ]);
   }
 
   return (
-    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, activeRole, profile, addresses, users, companies, invitations, catalogItems, offerPromotions, bookings, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, signInWithEmail, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, deleteCatalogItem, saveOfferPromotion, deleteOfferPromotion, saveLoyaltyProgram, placeBooking, changeBookingStatus, submitRating }}>
+    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, activeRole, profile, addresses, users, companies, invitations, catalogItems, offerPromotions, notifications, bookings, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, signInWithEmail, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, deleteCatalogItem, saveOfferPromotion, deleteOfferPromotion, markNotificationRead, saveLoyaltyProgram, placeBooking, changeBookingStatus, submitRating }}>
       {children}
     </AppContext.Provider>
   );

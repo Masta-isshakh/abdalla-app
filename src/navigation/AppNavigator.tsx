@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { readableBookingStatus, useAppState } from '../context/AppContext';
 import {
   Address,
+  AppNotification,
   AppRole,
   Booking,
   BookingStatus,
@@ -96,6 +97,7 @@ function WorkspaceScreen() {
     inviteCompany,
     loyaltyPrograms,
     marketplaceItems,
+    notifications,
     needsConfirmation,
     offerPromotions,
     placeBooking,
@@ -116,11 +118,12 @@ function WorkspaceScreen() {
     updateCompany,
     users,
     deleteOfferPromotion,
+    markNotificationRead,
   } = useAppState();
 
   const [adminTab, setAdminTab] = useState<'overview' | 'companies' | 'publishing' | 'bookings' | 'settings'>('overview');
   const [companyTab, setCompanyTab] = useState<'overview' | 'catalog' | 'offers' | 'bookings' | 'loyalty'>('overview');
-  const [customerTab, setCustomerTab] = useState<'home' | 'explore' | 'orders' | 'profile'>('home');
+  const [customerTab, setCustomerTab] = useState<'home' | 'explore' | 'orders' | 'profile' | 'notifications'>('home');
   const [customerDarkMode, setCustomerDarkMode] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
 
@@ -415,25 +418,26 @@ function WorkspaceScreen() {
     { key: 'profile', label: 'Profile', icon: 'person-outline' },
   ];
 
-  const customerNotificationItems = useMemo(
+  const adminNotifications = useMemo(
+    () => notifications.filter((entry) => entry.recipientRole === 'admin'),
+    [notifications],
+  );
+  const companyNotifications = useMemo(
+    () => notifications.filter((entry) => entry.recipientRole === 'company' && entry.companyId === currentCompany?.id),
+    [currentCompany?.id, notifications],
+  );
+  const customerNotifications = useMemo(
     () =>
       authUser
-        ? customerBookings
-            .filter((booking) => booking.status !== 'pending')
-            .map((booking) => ({
-              id: booking.id,
-              title: `${booking.itemTitle} is ${readableBookingStatus(booking.status).toLowerCase()}`,
-              destination: 'orders' as const,
-            }))
-        : activeMarketplacePromotions.slice(0, 5).map((entry) => ({
-            id: entry.promotion.id,
-            title: `${entry.promotion.title} is live now`,
-            destination: 'explore' as const,
-          })),
-    [activeMarketplacePromotions, authUser, customerBookings],
+        ? notifications.filter(
+            (entry) =>
+              entry.recipientRole === 'customer' && (!entry.recipientEmail || entry.recipientEmail.toLowerCase() === authUser.email.toLowerCase()),
+          )
+        : [],
+    [authUser, notifications],
   );
   const customerCartCount = authUser ? customerBookings.length : 0;
-  const customerNotificationCount = customerNotificationItems.length;
+  const customerNotificationCount = customerNotifications.filter((entry) => !entry.isRead).length;
 
   const activeWorkspaceLabel =
     activeRole === 'admin'
@@ -703,15 +707,37 @@ function WorkspaceScreen() {
     }
   }
 
+  async function handleNotificationOpen(notification: AppNotification) {
+    if (!notification.isRead) {
+      await markNotificationRead(notification.id);
+    }
+
+    if (activeRole === 'admin') {
+      setAdminTab((['overview', 'companies', 'publishing', 'bookings', 'settings'] as const).includes(notification.destinationTab as any)
+        ? (notification.destinationTab as 'overview' | 'companies' | 'publishing' | 'bookings' | 'settings')
+        : 'overview');
+      return;
+    }
+
+    if (activeRole === 'company') {
+      setCompanyTab((['overview', 'catalog', 'offers', 'bookings', 'loyalty'] as const).includes(notification.destinationTab as any)
+        ? (notification.destinationTab as 'overview' | 'catalog' | 'offers' | 'bookings' | 'loyalty')
+        : 'overview');
+      return;
+    }
+
+    setCustomerTab((['home', 'explore', 'orders', 'profile', 'notifications'] as const).includes(notification.destinationTab as any)
+      ? (notification.destinationTab as 'home' | 'explore' | 'orders' | 'profile' | 'notifications')
+      : 'notifications');
+  }
+
   function handleNotificationPress() {
-    if (!customerNotificationItems.length) {
+    if (!customerNotifications.length) {
       setCustomerBanner({ tone: 'info', text: authUser ? 'No new notifications right now.' : 'Sign in to receive booking updates and personal notifications.' });
       return;
     }
 
-    const latest = customerNotificationItems[0];
-    setCustomerTab(latest.destination);
-    setCustomerBanner({ tone: 'info', text: latest.title });
+    setCustomerTab('notifications');
   }
 
   async function handleConfirmCode() {
@@ -869,6 +895,7 @@ function WorkspaceScreen() {
               currentUserRole={currentUserRecord?.role ?? 'customer'}
               marketplaceItems={marketplaceItems}
               featuredOffers={activeMarketplacePromotions}
+              notifications={customerNotifications}
               bookingComposer={bookingComposer}
               onBookingComposerChange={setBookingComposer}
               bookingErrors={bookingErrors}
@@ -905,6 +932,7 @@ function WorkspaceScreen() {
               needsConfirmation={needsConfirmation}
               onAuthAction={handleAuthAction}
               onConfirmCode={handleConfirmCode}
+              onOpenNotification={handleNotificationOpen}
               authBusy={busy}
               darkMode={customerDarkMode}
               onToggleDarkMode={() => setCustomerDarkMode((current) => !current)}
@@ -967,6 +995,7 @@ function WorkspaceScreen() {
             bookings={bookings}
             catalogItems={catalogItems}
             offerPromotions={offerPromotions}
+            notifications={adminNotifications}
             users={users}
             companies={companies}
             invitations={invitations}
@@ -985,6 +1014,7 @@ function WorkspaceScreen() {
             onInvite={handleInvitationSend}
             onResendInvitation={handleInvitationResend}
             onRevokeInvitation={handleInvitationRevoke}
+            onOpenNotification={handleNotificationOpen}
             banner={adminBanner}
           />
         ) : null}
@@ -1002,6 +1032,7 @@ function WorkspaceScreen() {
             banner={companyBanner}
             companyItems={companyItems}
             companyPromotions={companyPromotions}
+            notifications={companyNotifications}
             companyBookings={companyBookings}
             ratings={ratings}
             selectedCatalogItem={selectedCatalogItem}
@@ -1019,6 +1050,7 @@ function WorkspaceScreen() {
             onSelectPromotion={setSelectedPromotionId}
             onSaveOffer={handleOfferSave}
             onDeleteOffer={handleOfferDelete}
+            onOpenNotification={handleNotificationOpen}
             onChangeBookingStatus={changeBookingStatus}
             loyaltyForm={loyaltyForm}
             onLoyaltyFormChange={setLoyaltyForm}
@@ -1042,6 +1074,7 @@ type AdminWorkspaceProps = {
   bookings: Booking[];
   catalogItems: CatalogItem[];
   offerPromotions: OfferPromotion[];
+  notifications: AppNotification[];
   users: Array<{ id: string; fullName: string; role: string; email: string; companyName?: string }>;
   companies: Company[];
   invitations: CompanyInvitation[];
@@ -1074,6 +1107,7 @@ type AdminWorkspaceProps = {
   onInvite: () => void;
   onResendInvitation: (invitation: CompanyInvitation) => void;
   onRevokeInvitation: (invitation: CompanyInvitation) => void;
+  onOpenNotification: (notification: AppNotification) => void;
   banner: BannerState;
 };
 
@@ -1085,6 +1119,7 @@ function AdminWorkspace({
   bookings,
   catalogItems,
   offerPromotions,
+  notifications,
   users,
   companies,
   invitations,
@@ -1103,12 +1138,16 @@ function AdminWorkspace({
   onInvite,
   onResendInvitation,
   onRevokeInvitation,
+  onOpenNotification,
   banner,
 }: AdminWorkspaceProps) {
   const adminUsers = users.filter((user) => user.role === 'admin');
   const companyUsers = users.filter((user) => user.role === 'company');
   const customerUsers = users.filter((user) => user.role === 'customer');
   const pendingInvitations = invitations.filter((invitation) => invitation.status === 'pending');
+  const unreadNotifications = notifications.filter((entry) => !entry.isRead);
+  const pausedCompanies = companies.filter((entry) => !entry.isActive);
+  const recentBookings = bookings.slice(0, 4);
 
   return (
     <>
@@ -1132,14 +1171,52 @@ function AdminWorkspace({
               <MetricCard key={metric.label} label={metric.label} value={metric.value} />
             ))}
           </View>
-          <SectionCard title="Platform snapshot" subtitle="The admin lands on a summary, then can move into company management, publishing, bookings, and user administration.">
-            <View style={[styles.metricGrid, wide && styles.metricGridWide]}>
-              <MetricCard label="Pending invites" value={String(pendingInvitations.length)} />
-              <MetricCard label="Published offers" value={String(catalogItems.filter((item) => item.isPublished).length)} />
-              <MetricCard label="Live promotions" value={String(offerPromotions.filter((promotion) => promotion.isActive).length)} />
-              <MetricCard label="Company users" value={String(companyUsers.length)} />
+          <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
+            <View style={styles.columnPane}>
+              <SectionCard title="Operations pulse" subtitle="Use the dashboard to spot onboarding blockers, marketplace issues, and unread updates before you dive into forms.">
+                <View style={[styles.metricGrid, wide && styles.metricGridWide]}>
+                  <MetricCard label="Pending invites" value={String(pendingInvitations.length)} />
+                  <MetricCard label="Paused companies" value={String(pausedCompanies.length)} />
+                  <MetricCard label="Unread alerts" value={String(unreadNotifications.length)} />
+                  <MetricCard label="Live promotions" value={String(offerPromotions.filter((promotion) => promotion.isActive).length)} />
+                </View>
+                <View style={styles.rowGap}>
+                  <SecondaryButton label="Review settings" onPress={() => onTabChange('settings')} />
+                  <SecondaryButton label="Open bookings" onPress={() => onTabChange('bookings')} />
+                </View>
+              </SectionCard>
+
+              <SectionCard title="Partner health" subtitle="A quick view of partner readiness, publishing volume, and support posture.">
+                {companies.length ? companies.slice(0, 4).map((company) => {
+                  const companyCatalogCount = catalogItems.filter((item) => item.companyId === company.id && item.isPublished).length;
+                  const companyPromotionCount = offerPromotions.filter((promotion) => promotion.companyId === company.id && promotion.isActive).length;
+                  return (
+                    <InfoRow
+                      key={company.id}
+                      title={company.name}
+                      subtitle={`${company.isActive ? 'Active' : 'Paused'} · ${companyCatalogCount} published items · ${companyPromotionCount} live promotions`}
+                      actionLabel="Open"
+                      onAction={() => onSelectCompany(company.id)}
+                    />
+                  );
+                }) : <EmptyState title="No companies yet" body="Create the first partner workspace to start marketplace operations." />}
+              </SectionCard>
             </View>
-          </SectionCard>
+
+            <View style={styles.columnPane}>
+              <SectionCard title="Notification center" subtitle="Unread and recent updates from invitations, bookings, reviews, and publishing appear here.">
+                {notifications.length ? notifications.slice(0, 6).map((notification) => (
+                  <NotificationRow key={notification.id} notification={notification} onOpen={() => onOpenNotification(notification)} />
+                )) : <EmptyState title="No notifications yet" body="Marketplace activity will start appearing here as soon as admins and companies take action." />}
+              </SectionCard>
+
+              <SectionCard title="Latest bookings" subtitle="Keep an eye on the freshest marketplace requests without leaving the dashboard.">
+                {recentBookings.length ? recentBookings.map((booking) => (
+                  <InfoRow key={booking.id} title={`${booking.bookingNumber} · ${booking.itemTitle}`} subtitle={`${booking.companyName} · ${readableBookingStatus(booking.status)} · ${booking.scheduleDate}`} actionLabel="View" onAction={() => onTabChange('bookings')} />
+                )) : <EmptyState title="No bookings yet" body="Bookings will appear here once customers start placing orders." />}
+              </SectionCard>
+            </View>
+          </View>
         </>
       ) : null}
 
@@ -1169,15 +1246,6 @@ function AdminWorkspace({
                   <SecondaryButton label="Remove company" onPress={() => onDeleteCompany(selectedCompany.id)} />
                 </View>
               ) : null}
-            </SectionCard>
-
-            <SectionCard title="Invite company owner" subtitle="Invitation records are stored even if SES delivery is not configured yet.">
-              <View style={styles.rowGap}>
-                <FormField label="Company name" value={inviteForm.companyName} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, companyName: value }))} error={inviteErrors.companyName} />
-                <FormField label="Invite email" value={inviteForm.email} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, email: value }))} error={inviteErrors.email} />
-              </View>
-              <FormField label="Message" value={inviteForm.message} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, message: value }))} multiline />
-              <PrimaryButton label="Send invitation" onPress={onInvite} />
             </SectionCard>
           </View>
 
@@ -1319,6 +1387,7 @@ type CompanyWorkspaceProps = {
   banner: BannerState;
   companyItems: CatalogItem[];
   companyPromotions: OfferPromotion[];
+  notifications: AppNotification[];
   companyBookings: Booking[];
   ratings: Array<{ id: string; companyId: string }>;
   selectedCatalogItem: CatalogItem | null;
@@ -1382,6 +1451,7 @@ type CompanyWorkspaceProps = {
   onSelectPromotion: (promotionId: string | null) => void;
   onSaveOffer: () => void;
   onDeleteOffer: (promotionId: string) => Promise<void>;
+  onOpenNotification: (notification: AppNotification) => void;
   onChangeBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
   loyaltyForm: {
     title: string;
@@ -1416,6 +1486,7 @@ function CompanyWorkspace({
   banner,
   companyItems,
   companyPromotions,
+  notifications,
   companyBookings,
   ratings,
   selectedCatalogItem,
@@ -1433,6 +1504,7 @@ function CompanyWorkspace({
   onSelectPromotion,
   onSaveOffer,
   onDeleteOffer,
+  onOpenNotification,
   onChangeBookingStatus,
   loyaltyForm,
   onLoyaltyFormChange,
@@ -1440,6 +1512,10 @@ function CompanyWorkspace({
   onSaveLoyalty,
   currentProgram,
 }: CompanyWorkspaceProps) {
+  const unreadNotifications = notifications.filter((entry) => !entry.isRead);
+  const pendingBookings = companyBookings.filter((entry) => entry.status === 'pending');
+  const activePromotions = companyPromotions.filter((entry) => entry.isActive);
+
   return (
     <>
       <SegmentControl
@@ -1457,31 +1533,57 @@ function CompanyWorkspace({
 
       {tab === 'overview' ? (
         <>
-          <SectionCard title={currentCompany?.name ?? 'Company workspace'} subtitle="Only your own workspace can be edited from this role.">
-            {currentCompany ? (
-              <>
-                <FormField label="Company name" value={companySettingsForm.name} onChangeText={(value) => onCompanySettingsFormChange((current) => ({ ...current, name: value }))} error={companyErrors.name} />
-                <FormField label="Description" value={companySettingsForm.description} onChangeText={(value) => onCompanySettingsFormChange((current) => ({ ...current, description: value }))} error={companyErrors.description} multiline />
-                <View style={styles.rowGap}>
-                  <FormField label="Support email" value={companySettingsForm.supportEmail} onChangeText={(value) => onCompanySettingsFormChange((current) => ({ ...current, supportEmail: value }))} error={companyErrors.supportEmail} />
-                  <FormField label="Support phone" value={companySettingsForm.supportPhone} onChangeText={(value) => onCompanySettingsFormChange((current) => ({ ...current, supportPhone: value }))} error={companyErrors.supportPhone} />
-                </View>
-                <View style={styles.rowGap}>
-                  <FormField label="Accent color" value={companySettingsForm.accentColor} onChangeText={(value) => onCompanySettingsFormChange((current) => ({ ...current, accentColor: value }))} error={companyErrors.accentColor} />
-                  <FormField label="Logo text" value={companySettingsForm.logoText} onChangeText={(value) => onCompanySettingsFormChange((current) => ({ ...current, logoText: value }))} error={companyErrors.logoText} />
-                </View>
-                <PrimaryButton label="Save workspace changes" onPress={onSaveSettings} />
-              </>
-            ) : (
-              <EmptyState title="No company linked" body="Use the invited company owner email to open a company workspace." />
-            )}
-          </SectionCard>
-
           <View style={[styles.metricGrid, wide && styles.metricGridWide]}>
             <MetricCard label="Catalog items" value={String(companyItems.length)} />
             <MetricCard label="Published" value={String(companyItems.filter((entry) => entry.isPublished).length)} />
             <MetricCard label="Bookings" value={String(companyBookings.length)} />
             <MetricCard label="Ratings" value={String(ratings.filter((entry) => entry.companyId === currentCompany?.id).length)} />
+          </View>
+
+          <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
+            <View style={styles.columnPane}>
+              <SectionCard title={currentCompany?.name ?? 'Company workspace'} subtitle="A polished operations view should surface bookings, promotions, and unread activity before editing settings.">
+                <View style={[styles.metricGrid, wide && styles.metricGridWide]}>
+                  <MetricCard label="Pending bookings" value={String(pendingBookings.length)} />
+                  <MetricCard label="Active offers" value={String(activePromotions.length)} />
+                  <MetricCard label="Unread alerts" value={String(unreadNotifications.length)} />
+                  <MetricCard label="Loyalty" value={currentProgram?.isActive ? 'Live' : 'Paused'} />
+                </View>
+                <View style={styles.rowGap}>
+                  <SecondaryButton label="Catalog" onPress={() => onTabChange('catalog')} />
+                  <SecondaryButton label="Offers" onPress={() => onTabChange('offers')} />
+                  <SecondaryButton label="Bookings" onPress={() => onTabChange('bookings')} />
+                </View>
+              </SectionCard>
+
+              <SectionCard title="Recent workspace activity" subtitle="Use recent activity to respond faster to bookings, publishing changes, and reviews.">
+                {notifications.length ? notifications.slice(0, 6).map((notification) => (
+                  <NotificationRow key={notification.id} notification={notification} onOpen={() => onOpenNotification(notification)} />
+                )) : <EmptyState title="No activity yet" body="Notifications will appear here when customers book, rate, or respond to your offers." />}
+              </SectionCard>
+            </View>
+
+            <View style={styles.columnPane}>
+              <SectionCard title="Workspace profile" subtitle="Support, branding, and contact settings still live here, but they no longer crowd the top of the dashboard.">
+                {currentCompany ? (
+                  <>
+                    <FormField label="Company name" value={companySettingsForm.name} onChangeText={(value) => onCompanySettingsFormChange((current) => ({ ...current, name: value }))} error={companyErrors.name} />
+                    <FormField label="Description" value={companySettingsForm.description} onChangeText={(value) => onCompanySettingsFormChange((current) => ({ ...current, description: value }))} error={companyErrors.description} multiline />
+                    <View style={styles.rowGap}>
+                      <FormField label="Support email" value={companySettingsForm.supportEmail} onChangeText={(value) => onCompanySettingsFormChange((current) => ({ ...current, supportEmail: value }))} error={companyErrors.supportEmail} />
+                      <FormField label="Support phone" value={companySettingsForm.supportPhone} onChangeText={(value) => onCompanySettingsFormChange((current) => ({ ...current, supportPhone: value }))} error={companyErrors.supportPhone} />
+                    </View>
+                    <View style={styles.rowGap}>
+                      <FormField label="Accent color" value={companySettingsForm.accentColor} onChangeText={(value) => onCompanySettingsFormChange((current) => ({ ...current, accentColor: value }))} error={companyErrors.accentColor} />
+                      <FormField label="Logo text" value={companySettingsForm.logoText} onChangeText={(value) => onCompanySettingsFormChange((current) => ({ ...current, logoText: value }))} error={companyErrors.logoText} />
+                    </View>
+                    <PrimaryButton label="Save workspace changes" onPress={onSaveSettings} />
+                  </>
+                ) : (
+                  <EmptyState title="No company linked" body="Use the invited company owner email to open a company workspace." />
+                )}
+              </SectionCard>
+            </View>
           </View>
         </>
       ) : null}
@@ -1631,12 +1733,13 @@ function CompanyWorkspace({
 
 type CustomerWorkspaceProps = {
   wide: boolean;
-  tab: 'home' | 'explore' | 'orders' | 'profile';
-  onTabChange: (tab: 'home' | 'explore' | 'orders' | 'profile') => void;
+  tab: 'home' | 'explore' | 'orders' | 'profile' | 'notifications';
+  onTabChange: (tab: 'home' | 'explore' | 'orders' | 'profile' | 'notifications') => void;
   authUser: { email: string } | null;
   currentUserRole: string;
   marketplaceItems: CatalogItem[];
   featuredOffers: Array<{ promotion: OfferPromotion; item: CatalogItem }>;
+  notifications: AppNotification[];
   bookingComposer: {
     itemId: string;
     companyId: string;
@@ -1675,6 +1778,7 @@ type CustomerWorkspaceProps = {
   needsConfirmation: boolean;
   onAuthAction: () => void;
   onConfirmCode: () => void;
+  onOpenNotification: (notification: AppNotification) => void;
   authBusy: boolean;
   darkMode: boolean;
   onToggleDarkMode: () => void;
@@ -1698,6 +1802,7 @@ function CustomerWorkspace({
   currentUserRole,
   marketplaceItems,
   featuredOffers,
+  notifications,
   bookingComposer,
   onBookingComposerChange,
   bookingErrors,
@@ -1720,6 +1825,7 @@ function CustomerWorkspace({
   needsConfirmation,
   onAuthAction,
   onConfirmCode,
+  onOpenNotification,
   authBusy,
   darkMode,
   onToggleDarkMode,
@@ -1895,6 +2001,18 @@ function CustomerWorkspace({
             )) : <EmptyState title="No bookings yet" body="Place a booking from Explore after a company publishes services or products." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
           ) : (
             <EmptyState title="Sign in required" body="Open the Profile tab to sign in, then your orders and ratings will appear here." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
+          )}
+        </SectionCard>
+      ) : null}
+
+      {tab === 'notifications' ? (
+        <SectionCard title="Notification center" subtitle="Unread and read updates from bookings, offers, and account activity live here." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+          {authUser ? (
+            notifications.length ? notifications.map((notification) => (
+              <NotificationRow key={notification.id} notification={notification} onOpen={() => onOpenNotification(notification)} darkMode={darkMode} />
+            )) : <EmptyState title="No notifications yet" body="When bookings move, promotions go live, or your account needs attention, updates will appear here." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
+          ) : (
+            <EmptyState title="Sign in required" body="Notifications are available after you sign in to your customer account." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
           )}
         </SectionCard>
       ) : null}
@@ -2411,6 +2529,24 @@ function InfoRow({ title, subtitle, actionLabel, onAction, secondaryActionLabel,
         ) : null}
       </View>
     </View>
+  );
+}
+
+function NotificationRow({ notification, onOpen, darkMode = false }: { notification: AppNotification; onOpen: () => void; darkMode?: boolean }) {
+  return (
+    <Pressable style={[styles.notificationRow, darkMode && styles.notificationRowDark]} onPress={onOpen}>
+      <View style={styles.notificationBodyWrap}>
+        <View style={styles.notificationTitleRow}>
+          {!notification.isRead ? <View style={styles.notificationUnreadDot} /> : null}
+          <Text style={[styles.infoTitle, darkMode && styles.customerTitleDark]}>{notification.title}</Text>
+        </View>
+        <Text style={[styles.helperText, darkMode && styles.customerSubtitleDark]}>{notification.body}</Text>
+        <Text style={[styles.notificationMeta, darkMode && styles.customerSubtitleDark]}>{`${notification.createdAtLabel} · ${notification.kind}`}</Text>
+      </View>
+      <View style={[styles.marketplaceCtaPill, darkMode && styles.marketplaceCtaPillDark]}>
+        <Text style={styles.marketplaceCtaText}>{notification.isRead ? 'Open' : 'Read'}</Text>
+      </View>
+    </Pressable>
   );
 }
 
@@ -2995,6 +3131,39 @@ const styles = StyleSheet.create({
   },
   infoSubtitle: {
     color: colors.muted,
+  },
+  notificationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  notificationRowDark: {
+    borderBottomColor: '#2D3A48',
+  },
+  notificationBodyWrap: {
+    flex: 1,
+    gap: 6,
+  },
+  notificationTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  notificationUnreadDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    backgroundColor: colors.accent,
+  },
+  notificationMeta: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'capitalize',
   },
   helperText: {
     color: colors.muted,

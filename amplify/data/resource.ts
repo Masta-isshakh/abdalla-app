@@ -127,6 +127,24 @@ const schema = a.schema({
       allow.guest().to(['read']),
     ]),
 
+  AppNotification: a
+    .model({
+      recipientRole: a.string().required(),
+      recipientEmail: a.string(),
+      companyId: a.id(),
+      title: a.string().required(),
+      body: a.string().required(),
+      kind: a.string().required(),
+      destinationTab: a.string().required(),
+      isRead: a.boolean(),
+      createdAtLabel: a.string().required(),
+    })
+    .authorization((allow) => [
+      allow.group('admin'),
+      allow.group('company'),
+      allow.group('customer'),
+    ]),
+
   LoyaltyProgram: a
     .model({
       scope: a.string().required(),
