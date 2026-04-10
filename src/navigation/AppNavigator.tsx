@@ -92,6 +92,7 @@ function WorkspaceScreen() {
     currentUserRecord,
     deleteCatalogItem,
     deleteCompany,
+    completeNewPassword,
     initialized,
     invitations,
     inviteCompany,
@@ -99,6 +100,7 @@ function WorkspaceScreen() {
     marketplaceItems,
     notifications,
     needsConfirmation,
+    signInChallenge,
     offerPromotions,
     placeBooking,
     profile,
@@ -130,6 +132,7 @@ function WorkspaceScreen() {
   const [signInForm, setSignInForm] = useState({ email: '', password: '' });
   const [signUpForm, setSignUpForm] = useState({ fullName: '', email: '', password: '', phone: '' });
   const [confirmCode, setConfirmCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
 
   const [profileForm, setProfileForm] = useState<UserProfile>(profile);
   const [addressForm, setAddressForm] = useState<Address>(addresses[0] ?? emptyAddress());
@@ -692,6 +695,28 @@ function WorkspaceScreen() {
     }
   }
 
+  async function handleCompleteNewPassword() {
+    const trimmedPassword = newPassword.trim();
+    if (trimmedPassword.length < 8) {
+      setAuthErrors((current) => ({ ...current, newPassword: 'New password must be at least 8 characters.' }));
+      setCustomerBanner({ tone: 'error', text: 'Enter a valid new password to complete sign-in.' });
+      return;
+    }
+
+    try {
+      await completeNewPassword(trimmedPassword);
+      setAuthErrors((current) => {
+        const next = { ...current };
+        delete next.newPassword;
+        return next;
+      });
+      setNewPassword('');
+      setCustomerBanner({ tone: 'success', text: 'Password updated. You are now signed in.' });
+    } catch (error) {
+      setCustomerBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to set a new password.' });
+    }
+  }
+
   async function handleSignOut() {
     try {
       await signOutCurrentUser();
@@ -930,8 +955,12 @@ function WorkspaceScreen() {
               confirmCode={confirmCode}
               onConfirmCodeChange={setConfirmCode}
               needsConfirmation={needsConfirmation}
+              signInChallenge={signInChallenge}
+              newPassword={newPassword}
+              onNewPasswordChange={setNewPassword}
               onAuthAction={handleAuthAction}
               onConfirmCode={handleConfirmCode}
+              onCompleteNewPassword={handleCompleteNewPassword}
               onOpenNotification={handleNotificationOpen}
               authBusy={busy}
               darkMode={customerDarkMode}
@@ -1776,8 +1805,12 @@ type CustomerWorkspaceProps = {
   confirmCode: string;
   onConfirmCodeChange: (value: string) => void;
   needsConfirmation: boolean;
+  signInChallenge: 'none' | 'newPasswordRequired';
+  newPassword: string;
+  onNewPasswordChange: (value: string) => void;
   onAuthAction: () => void;
   onConfirmCode: () => void;
+  onCompleteNewPassword: () => void;
   onOpenNotification: (notification: AppNotification) => void;
   authBusy: boolean;
   darkMode: boolean;
@@ -1823,8 +1856,12 @@ function CustomerWorkspace({
   confirmCode,
   onConfirmCodeChange,
   needsConfirmation,
+  signInChallenge,
+  newPassword,
+  onNewPasswordChange,
   onAuthAction,
   onConfirmCode,
+  onCompleteNewPassword,
   onOpenNotification,
   authBusy,
   darkMode,
@@ -2047,7 +2084,15 @@ function CustomerWorkspace({
                 <FormField label="Password" value={signUpForm.password} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, password: value }))} error={authErrors.password} secureTextEntry theme={customerTheme.inputTheme} />
               </>
             )}
-            <PrimaryButton label={authMode === 'signin' ? 'Sign in' : 'Create account'} onPress={onAuthAction} loading={authBusy} disabled={authBusy} />
+            {signInChallenge === 'newPasswordRequired' && authMode === 'signin' ? (
+              <View style={[styles.verificationCard, customerTheme.verificationCard]}>
+                <Text style={[styles.verificationTitle, customerTheme.title]}>New password required</Text>
+                <Text style={[styles.helperText, customerTheme.subtitle]}>This Cognito user was created with a temporary password. Set a new password once, then the account will continue into the correct role workspace.</Text>
+                <FormField label="New password" value={newPassword} onChangeText={onNewPasswordChange} error={authErrors.newPassword} secureTextEntry theme={customerTheme.inputTheme} />
+                <PrimaryButton label="Set new password" onPress={onCompleteNewPassword} loading={authBusy} disabled={authBusy} />
+              </View>
+            ) : null}
+            <PrimaryButton label={authMode === 'signin' ? 'Sign in' : 'Create account'} onPress={onAuthAction} loading={authBusy} disabled={authBusy || (authMode === 'signin' && signInChallenge === 'newPasswordRequired')} />
             {needsConfirmation ? (
               <View style={[styles.verificationCard, customerTheme.verificationCard]}>
                 <Text style={[styles.verificationTitle, customerTheme.title]}>Email verification required</Text>

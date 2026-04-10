@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import {
+  confirmSignIn,
   confirmSignUp,
   fetchAuthSession,
   fetchUserAttributes,
@@ -79,6 +80,7 @@ interface AppContextValue {
   authUser: AuthUser | null;
   authMessage: string;
   needsConfirmation: boolean;
+  signInChallenge: 'none' | 'newPasswordRequired';
   activeRole: AppRole;
   profile: UserProfile;
   addresses: Address[];
@@ -95,6 +97,7 @@ interface AppContextValue {
   currentCompany: Company | null;
   marketplaceItems: CatalogItem[];
   signInWithEmail: (email: string, password: string) => Promise<void>;
+  completeNewPassword: (newPassword: string) => Promise<void>;
   signUpWithEmail: (payload: SignUpPayload) => Promise<void>;
   confirmEmailCode: (code: string) => Promise<void>;
   signOutCurrentUser: () => Promise<void>;
@@ -173,6 +176,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [authGroups, setAuthGroups] = useState<string[]>([]);
   const [authMessage, setAuthMessage] = useState('');
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
+  const [signInChallenge, setSignInChallenge] = useState<'none' | 'newPasswordRequired'>('none');
   const [pendingEmail, setPendingEmail] = useState('');
   const [profile, setProfile] = useState<UserProfile>(starterProfile);
   const [addresses, setAddresses] = useState<Address[]>([starterAddress]);
@@ -446,12 +450,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       };
       setAuthUser(nextAuthUser);
       setAuthGroups(nextGroups);
+      setSignInChallenge('none');
       setProfile((current: UserProfile) => ({ ...current, fullName: nextAuthUser.fullName || current.fullName, email: nextAuthUser.email || current.email }));
       await ensureUserRecord(nextAuthUser);
       setAuthMessage('');
     } catch {
       setAuthUser(null);
       setAuthGroups([]);
+      setSignInChallenge('none');
     }
   }
 
@@ -512,6 +518,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   async function signInWithEmail(email: string, password: string) {
     setBusy(true);
     setAuthMessage('');
+    setSignInChallenge('none');
     try {
       const normalizedEmail = email.trim().toLowerCase();
       const response = await signIn({ username: normalizedEmail, password });
@@ -522,10 +529,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           throw new Error('Confirm your email before signing in.');
         }
 
+        if (response.nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
+          setPendingEmail(normalizedEmail);
+          setSignInChallenge('newPasswordRequired');
+          setAuthMessage('Set a new password to finish signing in.');
+          return;
+        }
+
         throw new Error('Sign-in could not be completed. Please try again.');
       }
 
       setNeedsConfirmation(false);
+      setSignInChallenge('none');
       await refreshAuthUser();
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : 'Unable to sign in.');
@@ -535,9 +550,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  async function completeNewPassword(newPassword: string) {
+    setBusy(true);
+    setAuthMessage('');
+    try {
+      const response = await confirmSignIn({ challengeResponse: newPassword.trim() });
+
+      if (!response.isSignedIn) {
+        throw new Error('Password update could not be completed. Try again.');
+      }
+
+      setSignInChallenge('none');
+      setNeedsConfirmation(false);
+      await refreshAuthUser();
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : 'Unable to set a new password.');
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function signUpWithEmail(payload: SignUpPayload) {
     setBusy(true);
     setAuthMessage('');
+    setSignInChallenge('none');
     try {
       const normalizedEmail = payload.email.trim().toLowerCase();
 
@@ -566,6 +603,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     setBusy(true);
     setAuthMessage('');
+    setSignInChallenge('none');
     try {
       const normalizedPendingEmail = pendingEmail.trim().toLowerCase();
       const invitedCompanyUser = invitations.some(
@@ -602,6 +640,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setAuthGroups([]);
       setPendingEmail('');
       setNeedsConfirmation(false);
+      setSignInChallenge('none');
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : 'Unable to sign out.');
       throw error;
@@ -837,7 +876,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, activeRole, profile, addresses, users, companies, invitations, catalogItems, offerPromotions, notifications, bookings, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, signInWithEmail, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, deleteCatalogItem, saveOfferPromotion, deleteOfferPromotion, markNotificationRead, saveLoyaltyProgram, placeBooking, changeBookingStatus, submitRating }}>
+    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, signInChallenge, activeRole, profile, addresses, users, companies, invitations, catalogItems, offerPromotions, notifications, bookings, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, signInWithEmail, completeNewPassword, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, deleteCatalogItem, saveOfferPromotion, deleteOfferPromotion, markNotificationRead, saveLoyaltyProgram, placeBooking, changeBookingStatus, submitRating }}>
       {children}
     </AppContext.Provider>
   );

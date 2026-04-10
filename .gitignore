@@ -45,4 +45,5 @@ yarn-error.*
 node_modules
 .amplify
 amplify_outputs*
+!amplify_outputs.json
 amplifyconfiguration*
