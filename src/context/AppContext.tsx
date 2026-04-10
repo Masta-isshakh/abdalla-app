@@ -487,7 +487,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setInvitations(remoteInvitations.map((entry: any) => ({ id: entry.id, companyId: entry.companyId, companyName: entry.companyName, email: entry.email, invitedByEmail: entry.invitedByEmail, status: entry.status, message: entry.message ?? '', emailDeliveryStatus: entry.emailDeliveryStatus ?? 'pending', emailDeliveryError: entry.emailDeliveryError ?? undefined, emailSentAtLabel: entry.emailSentAtLabel ?? undefined })));
       }
       if (remoteItems.length) {
-        setCatalogItems(remoteItems.map((entry: any) => ({ id: entry.id, companyId: entry.companyId, companyName: entry.companyName, kind: entry.kind, title: entry.title, summary: entry.summary, description: entry.description ?? '', category: entry.category, price: Number(entry.price ?? 0), durationLabel: entry.durationLabel ?? '', isPublished: !!entry.isPublished, featured: !!entry.featured, tags: parseList(entry.tags), loyaltyPoints: Number(entry.loyaltyPoints ?? 0), imageHint: entry.imageHint ?? '' })));
+        setCatalogItems(remoteItems.map((entry: any) => ({ id: entry.id, companyId: entry.companyId, companyName: entry.companyName, kind: entry.kind, title: entry.title, summary: entry.summary, description: entry.description ?? '', category: entry.category, price: Number(entry.price ?? 0), durationLabel: entry.durationLabel ?? '', isPublished: !!entry.isPublished, featured: !!entry.featured, tags: parseList(entry.tags), loyaltyPoints: Number(entry.loyaltyPoints ?? 0), imageUrl: entry.imageUrl ?? '', imageHint: entry.imageHint ?? '' })));
       }
       if (remotePromotions.length) {
         setOfferPromotions(remotePromotions.map((entry: any) => ({ id: entry.id, companyId: entry.companyId, companyName: entry.companyName, catalogItemId: entry.catalogItemId, catalogItemTitle: entry.catalogItemTitle, title: entry.title, headline: entry.headline ?? '', badgeText: entry.badgeText ?? '', discountLabel: entry.discountLabel ?? '', startsAtLabel: entry.startsAtLabel ?? '', endsAtLabel: entry.endsAtLabel ?? '', isActive: !!entry.isActive, sortOrder: Number(entry.sortOrder ?? 0) })));
@@ -748,7 +748,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!company) {
       return;
     }
-    const item: CatalogItem = { id: draft.id ?? `item-${Date.now()}`, companyId, companyName: company.name, kind: draft.kind, title: draft.title, summary: draft.summary, description: draft.description, category: draft.category, price: draft.price, durationLabel: draft.durationLabel, isPublished: draft.isPublished, featured: draft.featured, tags: draft.tags, loyaltyPoints: draft.loyaltyPoints, imageHint: draft.imageHint };
+    const item: CatalogItem = { id: draft.id ?? `item-${Date.now()}`, companyId, companyName: company.name, kind: draft.kind, title: draft.title, summary: draft.summary, description: draft.description, category: draft.category, price: draft.price, durationLabel: draft.durationLabel, isPublished: draft.isPublished, featured: draft.featured, tags: draft.tags, loyaltyPoints: draft.loyaltyPoints, imageUrl: draft.imageUrl, imageHint: draft.imageHint };
     setCatalogItems((current) => draft.id ? current.map((entry) => (entry.id === draft.id ? item : entry)) : [item, ...current]);
     if (draft.id) {
       await safeUpdate('CatalogItem', { ...item, tags: JSON.stringify(item.tags) });

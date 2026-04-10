@@ -1,4 +1,5 @@
 import { LinearGradient } from 'expo-linear-gradient';
+import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -168,6 +169,7 @@ function WorkspaceScreen() {
     isPublished: true,
     featured: false,
     loyaltyPoints: '10',
+    imageUrl: '',
     imageHint: '',
   });
   const [companySettingsForm, setCompanySettingsForm] = useState({
@@ -332,6 +334,7 @@ function WorkspaceScreen() {
         isPublished: selectedCatalogItem.isPublished,
         featured: selectedCatalogItem.featured,
         loyaltyPoints: String(selectedCatalogItem.loyaltyPoints),
+        imageUrl: selectedCatalogItem.imageUrl,
         imageHint: selectedCatalogItem.imageHint,
       });
       return;
@@ -349,6 +352,7 @@ function WorkspaceScreen() {
       isPublished: true,
       featured: false,
       loyaltyPoints: '10',
+      imageUrl: '',
       imageHint: '',
     });
   }, [selectedCatalogItem]);
@@ -480,8 +484,49 @@ function WorkspaceScreen() {
       isPublished: true,
       featured: false,
       loyaltyPoints: '10',
+      imageUrl: '',
       imageHint: '',
     });
+  }
+
+  async function handleCatalogImagePick() {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setCompanyBanner({ tone: 'error', text: 'Allow photo access to upload a catalog image.' });
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.65,
+        base64: true,
+      });
+
+      if (result.canceled || !result.assets[0]) {
+        return;
+      }
+
+      const asset = result.assets[0];
+      const mimeType = asset.mimeType || 'image/jpeg';
+      const imageUrl = asset.base64 ? `data:${mimeType};base64,${asset.base64}` : asset.uri;
+
+      setCatalogForm((current) => ({
+        ...current,
+        imageUrl,
+        imageHint: current.imageHint || asset.fileName || `${current.title || 'Catalog'} photo`,
+      }));
+      setCompanyBanner({ tone: 'success', text: 'Catalog image selected.' });
+    } catch (error) {
+      setCompanyBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to select an image.' });
+    }
+  }
+
+  function handleCatalogImageClear() {
+    setCatalogForm((current) => ({ ...current, imageUrl: '' }));
+    setCompanyBanner({ tone: 'info', text: 'Catalog image removed from this draft.' });
   }
 
   async function handleCompanySave() {
@@ -587,6 +632,7 @@ function WorkspaceScreen() {
         featured: catalogForm.featured,
         tags: parseCommaList(catalogForm.tags),
         loyaltyPoints: Number(catalogForm.loyaltyPoints),
+        imageUrl: catalogForm.imageUrl.trim(),
         imageHint: catalogForm.imageHint.trim(),
       });
       setCompanyBanner({ tone: 'success', text: selectedCatalogItem ? 'Catalog item updated.' : 'Catalog item saved.' });
@@ -1071,6 +1117,8 @@ function WorkspaceScreen() {
             catalogErrors={catalogFormErrors}
             onSelectCatalogItem={setSelectedCatalogItemId}
             onSaveCatalog={handleCatalogSave}
+            onPickCatalogImage={handleCatalogImagePick}
+            onClearCatalogImage={handleCatalogImageClear}
             onDeleteCatalogItem={deleteCatalogItem}
             onResetCatalog={resetCatalogDrafts}
             selectedPromotion={selectedPromotion}
@@ -1494,6 +1542,7 @@ type CompanyWorkspaceProps = {
     isPublished: boolean;
     featured: boolean;
     loyaltyPoints: string;
+    imageUrl: string;
     imageHint: string;
   };
   onCatalogFormChange: React.Dispatch<React.SetStateAction<{
@@ -1508,11 +1557,14 @@ type CompanyWorkspaceProps = {
     isPublished: boolean;
     featured: boolean;
     loyaltyPoints: string;
+    imageUrl: string;
     imageHint: string;
   }>>;
   catalogErrors: ValidationMap;
   onSelectCatalogItem: (itemId: string | null) => void;
   onSaveCatalog: () => void;
+  onPickCatalogImage: () => void;
+  onClearCatalogImage: () => void;
   onDeleteCatalogItem: (itemId: string) => Promise<void>;
   onResetCatalog: () => void;
   selectedPromotion: OfferPromotion | null;
@@ -1586,6 +1638,8 @@ function CompanyWorkspace({
   catalogErrors,
   onSelectCatalogItem,
   onSaveCatalog,
+  onPickCatalogImage,
+  onClearCatalogImage,
   onDeleteCatalogItem,
   onResetCatalog,
   selectedPromotion,
@@ -1761,6 +1815,21 @@ function CompanyWorkspace({
               <View style={styles.rowGap}>
                 <FormField label="Tags" value={catalogForm.tags} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, tags: value }))} placeholder="eco, premium" />
                 <FormField label="Loyalty points" value={catalogForm.loyaltyPoints} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, loyaltyPoints: value }))} error={catalogErrors.loyaltyPoints} />
+              </View>
+              <View style={styles.catalogUploadPanel}>
+                {catalogForm.imageUrl ? (
+                  <Image source={{ uri: catalogForm.imageUrl }} style={styles.catalogUploadPreviewImage} resizeMode="cover" />
+                ) : (
+                  <View style={styles.catalogUploadPlaceholder}>
+                    <Ionicons name="image-outline" size={30} color={colors.primary} />
+                    <Text style={styles.catalogUploadPlaceholderTitle}>Upload a real storefront image</Text>
+                    <Text style={styles.catalogUploadPlaceholderBody}>Use product or service photography so the catalog feels closer to a customer-facing marketplace.</Text>
+                  </View>
+                )}
+                <View style={styles.catalogUploadActions}>
+                  <SecondaryButton label={catalogForm.imageUrl ? 'Replace image' : 'Upload image'} tone="contrast" onPress={onPickCatalogImage} />
+                  {catalogForm.imageUrl ? <SecondaryButton label="Remove image" onPress={onClearCatalogImage} /> : null}
+                </View>
               </View>
               <FormField label="Image hint" value={catalogForm.imageHint} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, imageHint: value }))} />
               <View style={styles.toggleRow}>
@@ -2641,6 +2710,8 @@ function CustomerOfferCard({ item, darkMode, ctaLabel, onPress }: { item: Catalo
   return (
     <Pressable style={[styles.marketplaceCard, darkMode && styles.marketplaceCardDark]} onPress={onPress}>
       <View style={[styles.marketplaceVisual, darkMode && styles.marketplaceVisualDark]}>
+        {item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.marketplaceVisualImage} resizeMode="cover" /> : null}
+        <View style={styles.marketplaceVisualOverlay} />
         <View style={styles.marketplaceVisualTopRow}>
           <Text style={styles.marketplaceEyebrow}>{item.companyName}</Text>
           <View style={[styles.marketplaceKindBadge, darkMode && styles.marketplaceKindBadgeDark]}>
@@ -2783,9 +2854,13 @@ function CompanyCatalogCard({ item, index, onAction, onSecondaryAction }: { item
             </View>
           </View>
           <View style={styles.companyCatalogVisualHero}>
-            <View style={[styles.companyCatalogIllustrationBadge, item.isPublished ? styles.companyCatalogIllustrationBadgePublished : styles.companyCatalogIllustrationBadgeDraft]}>
-              <Text style={styles.companyCatalogIllustrationBadgeText}>{monogram}</Text>
-            </View>
+            {item.imageUrl ? (
+              <Image source={{ uri: item.imageUrl }} style={styles.companyCatalogPhotoThumb} resizeMode="cover" />
+            ) : (
+              <View style={[styles.companyCatalogIllustrationBadge, item.isPublished ? styles.companyCatalogIllustrationBadgePublished : styles.companyCatalogIllustrationBadgeDraft]}>
+                <Text style={styles.companyCatalogIllustrationBadgeText}>{monogram}</Text>
+              </View>
+            )}
             <View style={styles.companyCatalogIllustrationPanel}>
               <View style={[styles.companyCatalogIllustrationOrb, item.isPublished ? styles.companyCatalogIllustrationOrbPublished : styles.companyCatalogIllustrationOrbDraft]}>
                 <Ionicons name={illustrationIcon as keyof typeof Ionicons.glyphMap} size={28} color={item.isPublished ? '#145DA0' : '#B56A17'} />
@@ -3836,6 +3911,14 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '900',
   },
+  companyCatalogPhotoThumb: {
+    width: 58,
+    height: 58,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#DCE8F3',
+    backgroundColor: '#FFFFFF',
+  },
   companyCatalogIllustrationPanel: {
     flex: 1,
     minHeight: 72,
@@ -4005,6 +4088,48 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     lineHeight: 20,
   },
+  catalogUploadPanel: {
+    gap: 12,
+    padding: 14,
+    borderRadius: 22,
+    backgroundColor: '#F8FBFE',
+    borderWidth: 1,
+    borderColor: '#DAE7F2',
+  },
+  catalogUploadPreviewImage: {
+    width: '100%',
+    height: 180,
+    borderRadius: 18,
+    backgroundColor: '#E8EEF4',
+  },
+  catalogUploadPlaceholder: {
+    minHeight: 160,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#D5E2ED',
+    borderStyle: 'dashed',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    gap: 8,
+  },
+  catalogUploadPlaceholderTitle: {
+    color: colors.text,
+    fontWeight: '800',
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  catalogUploadPlaceholderBody: {
+    color: colors.muted,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  catalogUploadActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
   catalogFilterRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -4084,6 +4209,7 @@ const styles = StyleSheet.create({
     padding: 14,
     justifyContent: 'space-between',
     backgroundColor: '#F7E6C9',
+    overflow: 'hidden',
   },
   marketplaceVisualDark: {
     backgroundColor: '#223243',
@@ -4093,6 +4219,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     gap: 10,
+    zIndex: 2,
+  },
+  marketplaceVisualImage: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  marketplaceVisualOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#11385C33',
   },
   marketplaceEyebrow: {
     color: colors.primary,

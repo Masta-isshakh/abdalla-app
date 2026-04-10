@@ -98,6 +98,7 @@ const schema = a.schema({
       featured: a.boolean(),
       tags: a.string(),
       loyaltyPoints: a.integer(),
+      imageUrl: a.string(),
       imageHint: a.string(),
     })
     .authorization((allow) => [

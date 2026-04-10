@@ -100,6 +100,7 @@ export interface CatalogItem {
   featured: boolean;
   tags: string[];
   loyaltyPoints: number;
+  imageUrl: string;
   imageHint: string;
 }
 
@@ -226,6 +227,7 @@ export interface CatalogItemDraft {
   featured: boolean;
   tags: string[];
   loyaltyPoints: number;
+  imageUrl: string;
   imageHint: string;
 }
 
