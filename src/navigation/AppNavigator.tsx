@@ -1791,8 +1791,85 @@ function CompanyWorkspace({
       ) : null}
 
       {tab === 'catalog' ? (
-        <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
-          <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
+        wide ? (
+          <View style={[styles.workspaceColumns, styles.workspaceColumnsWide]}>
+            <View style={[styles.columnPane, styles.columnPaneWide]}>
+              <SectionCard title="Catalog studio" subtitle="Build listings with a clearer publishing flow, stronger visibility states, and a more premium editing surface.">
+                <View style={styles.overviewBadgeRow}>
+                  <CompactBadge label="Items" value={String(companyItems.length)} />
+                  <CompactBadge label="Published" value={String(publishedItems)} />
+                  <CompactBadge label="Draft focus" value={selectedCatalogItem ? 'Editing' : 'New'} />
+                </View>
+              </SectionCard>
+
+              <SectionCard title={selectedCatalogItem ? 'Edit catalog item' : 'Publish catalog item'} subtitle="Validation now blocks incomplete listings before they reach the marketplace.">
+                <View style={styles.rowGap}>
+                  <FormField label="Title" value={catalogForm.title} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, title: value }))} error={catalogErrors.title} />
+                  <FormField label="Category" value={catalogForm.category} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, category: value }))} error={catalogErrors.category} />
+                </View>
+                <FormField label="Summary" value={catalogForm.summary} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, summary: value }))} error={catalogErrors.summary} />
+                <FormField label="Description" value={catalogForm.description} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, description: value }))} error={catalogErrors.description} multiline />
+                <View style={styles.rowGap}>
+                  <FormField label="Price" value={catalogForm.price} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, price: value }))} error={catalogErrors.price} />
+                  <FormField label="Duration" value={catalogForm.durationLabel} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, durationLabel: value }))} error={catalogErrors.durationLabel} />
+                </View>
+                <View style={styles.rowGap}>
+                  <FormField label="Tags" value={catalogForm.tags} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, tags: value }))} placeholder="eco, premium" />
+                  <FormField label="Loyalty points" value={catalogForm.loyaltyPoints} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, loyaltyPoints: value }))} error={catalogErrors.loyaltyPoints} />
+                </View>
+                <View style={styles.catalogUploadPanel}>
+                  {catalogForm.imageUrl ? (
+                    <Image source={{ uri: catalogForm.imageUrl }} style={styles.catalogUploadPreviewImage} resizeMode="cover" />
+                  ) : (
+                    <View style={styles.catalogUploadPlaceholder}>
+                      <Ionicons name="image-outline" size={30} color={colors.primary} />
+                      <Text style={styles.catalogUploadPlaceholderTitle}>Upload a real storefront image</Text>
+                      <Text style={styles.catalogUploadPlaceholderBody}>Use product or service photography so the catalog feels closer to a customer-facing marketplace.</Text>
+                    </View>
+                  )}
+                  <View style={styles.catalogUploadActions}>
+                    <SecondaryButton label={catalogForm.imageUrl ? 'Replace image' : 'Upload image'} tone="contrast" onPress={onPickCatalogImage} />
+                    {catalogForm.imageUrl ? <SecondaryButton label="Remove image" onPress={onClearCatalogImage} /> : null}
+                  </View>
+                </View>
+                <FormField label="Image hint" value={catalogForm.imageHint} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, imageHint: value }))} />
+                <View style={styles.toggleRow}>
+                  <ChoiceChip label="Service" selected={catalogForm.kind === 'service'} onPress={() => onCatalogFormChange((current) => ({ ...current, kind: 'service' }))} />
+                  <ChoiceChip label="Product" selected={catalogForm.kind === 'product'} onPress={() => onCatalogFormChange((current) => ({ ...current, kind: 'product' }))} />
+                  <ChoiceChip label="Published" selected={catalogForm.isPublished} onPress={() => onCatalogFormChange((current) => ({ ...current, isPublished: !current.isPublished }))} />
+                </View>
+                <SecondaryButton label={selectedCatalogItem ? 'Save item changes' : 'Publish catalog item'} tone="contrast" onPress={onSaveCatalog} />
+                {selectedCatalogItem ? (
+                  <View style={styles.rowGap}>
+                    <SecondaryButton label="Cancel editing" onPress={onResetCatalog} />
+                    <SecondaryButton label="Delete item" tone="danger" onPress={() => onDeleteCatalogItem(selectedCatalogItem.id)} />
+                  </View>
+                ) : null}
+              </SectionCard>
+            </View>
+
+            <View style={[styles.columnPane, styles.columnPaneWide]}>
+              <SectionCard title="Current catalog" subtitle="Only this company's items appear in this operational view.">
+                <View style={styles.catalogFilterRow}>
+                  <CatalogFilterChip label="All" count={companyItems.length} selected={catalogFilter === 'all'} onPress={() => setCatalogFilter('all')} />
+                  <CatalogFilterChip label="Published" count={publishedItems} selected={catalogFilter === 'published'} onPress={() => setCatalogFilter('published')} />
+                  <CatalogFilterChip label="Draft" count={draftItems} selected={catalogFilter === 'draft'} onPress={() => setCatalogFilter('draft')} />
+                </View>
+
+                {filteredCompanyItems.length ? filteredCompanyItems.map((item, index) => (
+                  <CompanyCatalogCard
+                    key={item.id}
+                    item={item}
+                    index={index}
+                    onAction={() => onSelectCatalogItem(item.id)}
+                    onSecondaryAction={() => onDeleteCatalogItem(item.id)}
+                  />
+                )) : <EmptyState title="No items in this filter" body={catalogFilter === 'draft' ? 'Every current listing is already published.' : catalogFilter === 'published' ? 'Publish a listing to make it visible here.' : 'The marketplace remains empty until this company publishes something here.'} />}
+              </SectionCard>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.columnPane}>
             <SectionCard title="Catalog studio" subtitle="Build listings with a clearer publishing flow, stronger visibility states, and a more premium editing surface.">
               <View style={styles.overviewBadgeRow}>
                 <CompactBadge label="Items" value={String(companyItems.length)} />
@@ -1845,9 +1922,7 @@ function CompanyWorkspace({
                 </View>
               ) : null}
             </SectionCard>
-          </View>
 
-          <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
             <SectionCard title="Current catalog" subtitle="Only this company's items appear in this operational view.">
               <View style={styles.catalogFilterRow}>
                 <CatalogFilterChip label="All" count={companyItems.length} selected={catalogFilter === 'all'} onPress={() => setCatalogFilter('all')} />
@@ -1866,12 +1941,66 @@ function CompanyWorkspace({
               )) : <EmptyState title="No items in this filter" body={catalogFilter === 'draft' ? 'Every current listing is already published.' : catalogFilter === 'published' ? 'Publish a listing to make it visible here.' : 'The marketplace remains empty until this company publishes something here.'} />}
             </SectionCard>
           </View>
-        </View>
+        )
       ) : null}
 
       {tab === 'offers' ? (
-        <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
-          <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
+        wide ? (
+          <View style={[styles.workspaceColumns, styles.workspaceColumnsWide]}>
+            <View style={[styles.columnPane, styles.columnPaneWide]}>
+              <SectionCard title={selectedPromotion ? 'Edit promotion' : 'Create promotion'} subtitle="Promotions are separate records linked to published catalog items, so offers do not depend on catalog flags anymore.">
+                <Text style={styles.fieldLabel}>Linked item</Text>
+                <View style={styles.toggleRow}>
+                  {companyItems.filter((item) => item.isPublished).map((item) => (
+                    <ChoiceChip key={item.id} label={item.title} selected={offerForm.catalogItemId === item.id} onPress={() => onOfferFormChange((current) => ({ ...current, catalogItemId: item.id }))} />
+                  ))}
+                </View>
+                {offerErrors.catalogItemId ? <FieldError text={offerErrors.catalogItemId} /> : null}
+                <FormField label="Promotion title" value={offerForm.title} onChangeText={(value) => onOfferFormChange((current) => ({ ...current, title: value }))} error={offerErrors.title} />
+                <FormField label="Headline" value={offerForm.headline} onChangeText={(value) => onOfferFormChange((current) => ({ ...current, headline: value }))} error={offerErrors.headline} multiline />
+                <View style={styles.rowGap}>
+                  <FormField label="Badge text" value={offerForm.badgeText} onChangeText={(value) => onOfferFormChange((current) => ({ ...current, badgeText: value }))} />
+                  <FormField label="Discount label" value={offerForm.discountLabel} onChangeText={(value) => onOfferFormChange((current) => ({ ...current, discountLabel: value }))} />
+                </View>
+                <View style={styles.rowGap}>
+                  <FormField label="Starts" value={offerForm.startsAtLabel} onChangeText={(value) => onOfferFormChange((current) => ({ ...current, startsAtLabel: value }))} />
+                  <FormField label="Ends" value={offerForm.endsAtLabel} onChangeText={(value) => onOfferFormChange((current) => ({ ...current, endsAtLabel: value }))} />
+                </View>
+                <View style={styles.rowGap}>
+                  <FormField label="Sort order" value={offerForm.sortOrder} onChangeText={(value) => onOfferFormChange((current) => ({ ...current, sortOrder: value }))} error={offerErrors.sortOrder} />
+                </View>
+                <View style={styles.toggleRow}>
+                  <ChoiceChip label="Active" selected={offerForm.isActive} onPress={() => onOfferFormChange((current) => ({ ...current, isActive: true }))} />
+                  <ChoiceChip label="Paused" selected={!offerForm.isActive} onPress={() => onOfferFormChange((current) => ({ ...current, isActive: false }))} />
+                </View>
+                <PrimaryButton label={selectedPromotion ? 'Save promotion changes' : 'Save promotion'} onPress={onSaveOffer} />
+                {selectedPromotion ? (
+                  <View style={styles.rowGap}>
+                    <SecondaryButton label="Cancel editing" onPress={() => onSelectPromotion(null)} />
+                    <SecondaryButton label="Delete promotion" tone="danger" onPress={() => onDeleteOffer(selectedPromotion.id)} />
+                  </View>
+                ) : null}
+              </SectionCard>
+            </View>
+
+            <View style={[styles.columnPane, styles.columnPaneWide]}>
+              <SectionCard title="Current promotions" subtitle="These are the offers customers will see highlighted on the marketplace home screen.">
+                {companyPromotions.length ? companyPromotions.map((promotion) => (
+                  <InfoRow
+                    key={promotion.id}
+                    title={`${promotion.title} · ${promotion.catalogItemTitle}`}
+                    subtitle={`${promotion.isActive ? 'Active' : 'Paused'}${promotion.discountLabel ? ` · ${promotion.discountLabel}` : ''}${promotion.badgeText ? ` · ${promotion.badgeText}` : ''}`}
+                    actionLabel="Edit"
+                    onAction={() => onSelectPromotion(promotion.id)}
+                    secondaryActionLabel="Delete"
+                    onSecondaryAction={() => onDeleteOffer(promotion.id)}
+                  />
+                )) : <EmptyState title="No promotions yet" body="Create a promotion here after publishing a product or service in Catalog." />}
+              </SectionCard>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.columnPane}>
             <SectionCard title={selectedPromotion ? 'Edit promotion' : 'Create promotion'} subtitle="Promotions are separate records linked to published catalog items, so offers do not depend on catalog flags anymore.">
               <Text style={styles.fieldLabel}>Linked item</Text>
               <View style={styles.toggleRow}>
@@ -1905,9 +2034,7 @@ function CompanyWorkspace({
                 </View>
               ) : null}
             </SectionCard>
-          </View>
 
-          <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
             <SectionCard title="Current promotions" subtitle="These are the offers customers will see highlighted on the marketplace home screen.">
               {companyPromotions.length ? companyPromotions.map((promotion) => (
                 <InfoRow
@@ -1922,7 +2049,7 @@ function CompanyWorkspace({
               )) : <EmptyState title="No promotions yet" body="Create a promotion here after publishing a product or service in Catalog." />}
             </SectionCard>
           </View>
-        </View>
+        )
       ) : null}
 
       {tab === 'bookings' ? (
