@@ -1177,6 +1177,8 @@ function AdminWorkspace({
   const unreadNotifications = notifications.filter((entry) => !entry.isRead);
   const pausedCompanies = companies.filter((entry) => !entry.isActive);
   const recentBookings = bookings.slice(0, 4);
+  const livePromotions = offerPromotions.filter((promotion) => promotion.isActive).length;
+  const publishedCatalogCount = catalogItems.filter((item) => item.isPublished).length;
 
   return (
     <>
@@ -1195,10 +1197,53 @@ function AdminWorkspace({
 
       {tab === 'overview' ? (
         <>
+          <LinearGradient colors={['#12385E', '#1D5F97', '#2F84C8']} style={styles.workspaceShowcase}>
+            <View style={styles.workspaceShowcaseTopRow}>
+              <View style={styles.workspaceShowcaseTextWrap}>
+                <Text style={styles.workspaceShowcaseEyebrow}>Admin workspace</Text>
+                <Text style={styles.workspaceShowcaseTitle}>Command the marketplace from one mobile-first control center.</Text>
+                <Text style={styles.workspaceShowcaseBody}>
+                  Monitor onboarding, publishing health, booking flow, and operator alerts without losing your place in the workflow.
+                </Text>
+              </View>
+              <View style={styles.workspaceShowcaseGlow} />
+            </View>
+
+            <View style={styles.workspaceShowcaseBadgeRow}>
+              <ShowcaseBadge label="Pending invites" value={String(pendingInvitations.length)} />
+              <ShowcaseBadge label="Paused companies" value={String(pausedCompanies.length)} />
+              <ShowcaseBadge label="Unread alerts" value={String(unreadNotifications.length)} />
+              <ShowcaseBadge label="Live promotions" value={String(livePromotions)} />
+            </View>
+
+            <View style={styles.workspaceActionDeck}>
+              <WorkspaceActionTile
+                eyebrow="Ops"
+                title="Partner companies"
+                body="Create, edit, pause, and reopen company workspaces with clearer controls."
+                onPress={() => onTabChange('companies')}
+              />
+              <WorkspaceActionTile
+                eyebrow="Publishing"
+                title="Marketplace review"
+                body="Inspect what companies have pushed live before customers see it."
+                onPress={() => onTabChange('publishing')}
+              />
+              <WorkspaceActionTile
+                eyebrow="Control"
+                title="Invites and access"
+                body="Send owner invitations and resolve account readiness from settings."
+                onPress={() => onTabChange('settings')}
+              />
+            </View>
+          </LinearGradient>
+
           <View style={[styles.metricGrid, wide && styles.metricGridWide]}>
             {metrics.map((metric) => (
               <MetricCard key={metric.label} label={metric.label} value={metric.value} />
             ))}
+            <MetricCard label="Catalog live" value={String(publishedCatalogCount)} />
+            <MetricCard label="Action needed" value={String(pendingInvitations.length + pausedCompanies.length)} />
           </View>
           <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
             <View style={styles.columnPane}>
@@ -1207,7 +1252,7 @@ function AdminWorkspace({
                   <MetricCard label="Pending invites" value={String(pendingInvitations.length)} />
                   <MetricCard label="Paused companies" value={String(pausedCompanies.length)} />
                   <MetricCard label="Unread alerts" value={String(unreadNotifications.length)} />
-                  <MetricCard label="Live promotions" value={String(offerPromotions.filter((promotion) => promotion.isActive).length)} />
+                  <MetricCard label="Live promotions" value={String(livePromotions)} />
                 </View>
                 <View style={styles.rowGap}>
                   <SecondaryButton label="Review settings" onPress={() => onTabChange('settings')} />
@@ -1252,6 +1297,14 @@ function AdminWorkspace({
       {tab === 'companies' ? (
         <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
           <View style={styles.columnPane}>
+            <SectionCard title="Company operations" subtitle="Create and edit partner workspaces with stronger hierarchy, faster scanning, and clearer destructive states.">
+              <View style={styles.overviewBadgeRow}>
+                <CompactBadge label="Companies" value={String(companies.length)} />
+                <CompactBadge label="Paused" value={String(pausedCompanies.length)} />
+                <CompactBadge label="Invites" value={String(invitations.length)} />
+              </View>
+            </SectionCard>
+
             <SectionCard title={selectedCompany ? 'Edit company' : 'Create company'} subtitle="Provision partner workspaces with stricter validation and cleaner editing states.">
               <FormField label="Company name" value={form.name} onChangeText={(value) => onFormChange((current) => ({ ...current, name: value }))} error={formErrors.name} />
               <FormField label="Description" value={form.description} onChangeText={(value) => onFormChange((current) => ({ ...current, description: value }))} error={formErrors.description} multiline />
@@ -1272,7 +1325,7 @@ function AdminWorkspace({
               {selectedCompany ? (
                 <View style={styles.rowGap}>
                   <SecondaryButton label="Cancel editing" onPress={onResetCompany} />
-                  <SecondaryButton label="Remove company" onPress={() => onDeleteCompany(selectedCompany.id)} />
+                  <SecondaryButton label="Remove company" tone="danger" onPress={() => onDeleteCompany(selectedCompany.id)} />
                 </View>
               ) : null}
             </SectionCard>
@@ -1347,6 +1400,14 @@ function AdminWorkspace({
       {tab === 'settings' ? (
         <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
           <View style={styles.columnPane}>
+            <SectionCard title="Access command" subtitle="Keep owner invitations, activation status, and partner account follow-up in one place.">
+              <View style={styles.overviewBadgeRow}>
+                <CompactBadge label="Pending" value={String(pendingInvitations.length)} />
+                <CompactBadge label="Company users" value={String(companyUsers.length)} />
+                <CompactBadge label="Admins" value={String(adminUsers.length)} />
+              </View>
+            </SectionCard>
+
             <SectionCard title="Invite company owner" subtitle="Admins can invite and manage partner access directly from settings.">
               <View style={styles.rowGap}>
                 <FormField label="Company name" value={inviteForm.companyName} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, companyName: value }))} error={inviteErrors.companyName} />
@@ -1544,6 +1605,8 @@ function CompanyWorkspace({
   const unreadNotifications = notifications.filter((entry) => !entry.isRead);
   const pendingBookings = companyBookings.filter((entry) => entry.status === 'pending');
   const activePromotions = companyPromotions.filter((entry) => entry.isActive);
+  const publishedItems = companyItems.filter((entry) => entry.isPublished).length;
+  const currentAccent = currentCompany?.accentColor?.trim() || colors.primary;
 
   return (
     <>
@@ -1562,11 +1625,53 @@ function CompanyWorkspace({
 
       {tab === 'overview' ? (
         <>
+          <LinearGradient colors={[currentAccent, '#113B60', '#0E7A8A']} style={styles.workspaceShowcase}>
+            <View style={styles.workspaceShowcaseTopRow}>
+              <View style={styles.workspaceShowcaseTextWrap}>
+                <Text style={styles.workspaceShowcaseEyebrow}>Company workspace</Text>
+                <Text style={styles.workspaceShowcaseTitle}>{currentCompany?.name ?? 'Company workspace'} is ready to operate like a premium mobile dashboard.</Text>
+                <Text style={styles.workspaceShowcaseBody}>
+                  Keep bookings moving, push offers faster, and keep your brand details close without burying the revenue actions.
+                </Text>
+              </View>
+              <View style={styles.workspaceShowcaseGlow} />
+            </View>
+
+            <View style={styles.workspaceShowcaseBadgeRow}>
+              <ShowcaseBadge label="Pending bookings" value={String(pendingBookings.length)} />
+              <ShowcaseBadge label="Published" value={String(publishedItems)} />
+              <ShowcaseBadge label="Unread alerts" value={String(unreadNotifications.length)} />
+              <ShowcaseBadge label="Loyalty" value={currentProgram?.isActive ? 'Live' : 'Paused'} />
+            </View>
+
+            <View style={styles.workspaceActionDeck}>
+              <WorkspaceActionTile
+                eyebrow="Catalog"
+                title="Ship listings"
+                body="Create or update products and services with clear mobile controls."
+                onPress={() => onTabChange('catalog')}
+              />
+              <WorkspaceActionTile
+                eyebrow="Offers"
+                title="Run promotions"
+                body="Launch campaigns that stay separate from your base catalog records."
+                onPress={() => onTabChange('offers')}
+              />
+              <WorkspaceActionTile
+                eyebrow="Fulfilment"
+                title="Handle bookings"
+                body="Move jobs through the status flow without leaving the workspace."
+                onPress={() => onTabChange('bookings')}
+              />
+            </View>
+          </LinearGradient>
+
           <View style={[styles.metricGrid, wide && styles.metricGridWide]}>
             <MetricCard label="Catalog items" value={String(companyItems.length)} />
-            <MetricCard label="Published" value={String(companyItems.filter((entry) => entry.isPublished).length)} />
+            <MetricCard label="Published" value={String(publishedItems)} />
             <MetricCard label="Bookings" value={String(companyBookings.length)} />
             <MetricCard label="Ratings" value={String(ratings.filter((entry) => entry.companyId === currentCompany?.id).length)} />
+            <MetricCard label="Live offers" value={String(activePromotions.length)} />
           </View>
 
           <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
@@ -1645,7 +1750,7 @@ function CompanyWorkspace({
               {selectedCatalogItem ? (
                 <View style={styles.rowGap}>
                   <SecondaryButton label="Cancel editing" onPress={onResetCatalog} />
-                  <SecondaryButton label="Delete item" onPress={() => onDeleteCatalogItem(selectedCatalogItem.id)} />
+                  <SecondaryButton label="Delete item" tone="danger" onPress={() => onDeleteCatalogItem(selectedCatalogItem.id)} />
                 </View>
               ) : null}
             </SectionCard>
@@ -1700,7 +1805,7 @@ function CompanyWorkspace({
               {selectedPromotion ? (
                 <View style={styles.rowGap}>
                   <SecondaryButton label="Cancel editing" onPress={() => onSelectPromotion(null)} />
-                  <SecondaryButton label="Delete promotion" onPress={() => onDeleteOffer(selectedPromotion.id)} />
+                  <SecondaryButton label="Delete promotion" tone="danger" onPress={() => onDeleteOffer(selectedPromotion.id)} />
                 </View>
               ) : null}
             </SectionCard>
@@ -2327,6 +2432,38 @@ function SectionCard({ title, subtitle, children, cardStyle, titleStyle, subtitl
   );
 }
 
+function ShowcaseBadge({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.workspaceShowcaseBadge}>
+      <Text style={styles.workspaceShowcaseBadgeValue}>{value}</Text>
+      <Text style={styles.workspaceShowcaseBadgeLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function CompactBadge({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.compactBadge}>
+      <Text style={styles.compactBadgeValue}>{value}</Text>
+      <Text style={styles.compactBadgeLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function WorkspaceActionTile({ eyebrow, title, body, onPress }: { eyebrow: string; title: string; body: string; onPress: () => void }) {
+  return (
+    <Pressable style={styles.workspaceActionTile} onPress={onPress}>
+      <Text style={styles.workspaceActionEyebrow}>{eyebrow}</Text>
+      <Text style={styles.workspaceActionTitle}>{title}</Text>
+      <Text style={styles.workspaceActionBody}>{body}</Text>
+      <View style={styles.workspaceActionFooter}>
+        <Text style={styles.workspaceActionFooterText}>Open</Text>
+        <Ionicons name="arrow-forward" size={16} color={colors.primary} />
+      </View>
+    </Pressable>
+  );
+}
+
 function FormField({
   label,
   value,
@@ -2399,10 +2536,39 @@ function PrimaryButton({ label, onPress, loading = false, disabled = false }: { 
   );
 }
 
-function SecondaryButton({ label, onPress, loading = false, disabled = false }: { label: string; onPress: () => void; loading?: boolean; disabled?: boolean }) {
+function SecondaryButton({ label, onPress, loading = false, disabled = false, tone = 'default' }: { label: string; onPress: () => void; loading?: boolean; disabled?: boolean; tone?: 'default' | 'danger' | 'contrast' }) {
   return (
-    <Pressable style={[styles.secondaryButton, (loading || disabled) && styles.buttonDisabled]} onPress={onPress} disabled={loading || disabled}>
-      {loading ? <ActivityIndicator color={colors.primary} /> : <Text style={styles.secondaryButtonText}>{label}</Text>}
+    <Pressable
+      style={[
+        styles.secondaryButton,
+        tone === 'danger' && styles.secondaryButtonDanger,
+        tone === 'contrast' && styles.secondaryButtonContrast,
+        (loading || disabled) && styles.buttonDisabled,
+      ]}
+      onPress={onPress}
+      disabled={loading || disabled}
+    >
+      {loading ? (
+        <ActivityIndicator color={tone === 'contrast' ? '#FFFFFF' : tone === 'danger' ? '#FFFFFF' : colors.primary} />
+      ) : (
+        <Text
+          style={[
+            styles.secondaryButtonText,
+            tone === 'danger' && styles.secondaryButtonTextDanger,
+            tone === 'contrast' && styles.secondaryButtonTextContrast,
+          ]}
+        >
+          {label}
+        </Text>
+      )}
+    </Pressable>
+  );
+}
+
+function InlineActionButton({ label, onPress, tone = 'default' }: { label: string; onPress: () => void; tone?: 'default' | 'danger' | 'neutral' }) {
+  return (
+    <Pressable style={[styles.inlineAction, tone === 'danger' && styles.inlineActionDanger, tone === 'neutral' && styles.inlineActionNeutral]} onPress={onPress}>
+      <Text style={[styles.inlineActionText, tone === 'danger' && styles.inlineActionTextDanger, tone === 'neutral' && styles.inlineActionTextNeutral]}>{label}</Text>
     </Pressable>
   );
 }
@@ -2497,14 +2663,10 @@ function CompanyCard({ company, actionLabel, onAction, secondaryActionLabel, onS
       </View>
       <View style={styles.inlineActionGroup}>
         {actionLabel && onAction ? (
-          <Pressable style={styles.inlineAction} onPress={onAction}>
-            <Text style={styles.inlineActionText}>{actionLabel}</Text>
-          </Pressable>
+          <InlineActionButton label={actionLabel} onPress={onAction} />
         ) : null}
         {secondaryActionLabel && onSecondaryAction ? (
-          <Pressable style={styles.inlineAction} onPress={onSecondaryAction}>
-            <Text style={styles.inlineActionText}>{secondaryActionLabel}</Text>
-          </Pressable>
+          <InlineActionButton label={secondaryActionLabel} onPress={onSecondaryAction} tone={secondaryActionLabel === 'Pause' ? 'neutral' : 'default'} />
         ) : null}
       </View>
     </View>
@@ -2521,14 +2683,10 @@ function CatalogCard({ item, actionLabel, onAction, secondaryActionLabel, onSeco
       </View>
       <View style={styles.inlineActionGroup}>
         {actionLabel && onAction ? (
-          <Pressable style={styles.inlineAction} onPress={onAction}>
-            <Text style={styles.inlineActionText}>{actionLabel}</Text>
-          </Pressable>
+          <InlineActionButton label={actionLabel} onPress={onAction} />
         ) : null}
         {secondaryActionLabel && onSecondaryAction ? (
-          <Pressable style={styles.inlineAction} onPress={onSecondaryAction}>
-            <Text style={styles.inlineActionText}>{secondaryActionLabel}</Text>
-          </Pressable>
+          <InlineActionButton label={secondaryActionLabel} onPress={onSecondaryAction} tone="danger" />
         ) : null}
       </View>
     </View>
@@ -2563,14 +2721,14 @@ function InfoRow({ title, subtitle, actionLabel, onAction, secondaryActionLabel,
       </View>
       <View style={styles.inlineActionGroup}>
         {actionLabel && onAction ? (
-          <Pressable style={styles.inlineAction} onPress={onAction}>
-            <Text style={styles.inlineActionText}>{actionLabel}</Text>
-          </Pressable>
+          <InlineActionButton label={actionLabel} onPress={onAction} />
         ) : null}
         {secondaryActionLabel && onSecondaryAction ? (
-          <Pressable style={styles.inlineAction} onPress={onSecondaryAction}>
-            <Text style={styles.inlineActionText}>{secondaryActionLabel}</Text>
-          </Pressable>
+          <InlineActionButton
+            label={secondaryActionLabel}
+            onPress={onSecondaryAction}
+            tone={/revoke|delete|remove/i.test(secondaryActionLabel) ? 'danger' : secondaryActionLabel === 'Pause' ? 'neutral' : 'default'}
+          />
         ) : null}
       </View>
     </View>
@@ -2987,11 +3145,16 @@ const styles = StyleSheet.create({
   },
   sectionCard: {
     backgroundColor: colors.surface,
-    borderRadius: 22,
-    padding: 18,
+    borderRadius: 24,
+    padding: 20,
     borderWidth: 1,
     borderColor: colors.border,
     gap: 12,
+    shadowColor: '#1A3651',
+    shadowOpacity: 0.06,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
   },
   sectionTitle: {
     fontSize: 20,
@@ -3007,6 +3170,7 @@ const styles = StyleSheet.create({
   },
   fieldWrap: {
     flex: 1,
+    minWidth: 150,
     gap: 6,
   },
   fieldLabel: {
@@ -3073,6 +3237,13 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingVertical: 14,
     alignItems: 'center',
+    minHeight: 52,
+    justifyContent: 'center',
+    shadowColor: '#145DA0',
+    shadowOpacity: 0.16,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
   },
   buttonDisabled: {
     opacity: 0.6,
@@ -3082,18 +3253,40 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   secondaryButton: {
-    backgroundColor: colors.paleBlue,
+    backgroundColor: '#F4F8FC',
     borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#C8DCEE',
     paddingVertical: 14,
+    paddingHorizontal: 14,
     alignItems: 'center',
     flex: 1,
+    minHeight: 52,
+    minWidth: 138,
+    justifyContent: 'center',
+  },
+  secondaryButtonDanger: {
+    backgroundColor: '#F25F4C',
+    borderColor: '#F25F4C',
+  },
+  secondaryButtonContrast: {
+    backgroundColor: '#12385E',
+    borderColor: '#12385E',
   },
   secondaryButtonText: {
     color: colors.primary,
     fontWeight: '800',
   },
+  secondaryButtonTextDanger: {
+    color: '#FFFFFF',
+  },
+  secondaryButtonTextContrast: {
+    color: '#FFFFFF',
+  },
   rowGap: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'stretch',
     gap: 12,
   },
   toggleRow: {
@@ -3140,13 +3333,18 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   metricCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 20,
+    backgroundColor: '#FFFCF8',
+    borderRadius: 22,
     padding: 18,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: '#E7DCCB',
     minWidth: 150,
     gap: 4,
+    shadowColor: '#11385C',
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
   },
   metricValue: {
     fontSize: 28,
@@ -3160,13 +3358,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+    flexWrap: 'wrap',
     gap: 12,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    padding: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#E9E0D0',
+    backgroundColor: '#FBF8F2',
   },
   infoBodyGrow: {
     flex: 1,
+    minWidth: 180,
     gap: 4,
   },
   infoTitle: {
@@ -3181,10 +3383,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    flexWrap: 'wrap',
     gap: 12,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    padding: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#E8E0D3',
+    backgroundColor: '#FBF8F3',
   },
   notificationRowDark: {
     borderBottomColor: '#2D3A48',
@@ -3215,17 +3420,179 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   inlineAction: {
-    backgroundColor: '#FDEBE7',
+    minHeight: 42,
+    minWidth: 92,
+    backgroundColor: '#EAF3FB',
+    borderWidth: 1,
+    borderColor: '#C6DBEF',
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inlineActionDanger: {
+    backgroundColor: '#F25F4C',
+    borderColor: '#F25F4C',
+  },
+  inlineActionNeutral: {
+    backgroundColor: '#F8E6C9',
+    borderColor: '#EBC98D',
   },
   inlineActionGroup: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
-    alignItems: 'flex-end',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
   },
   inlineActionText: {
-    color: colors.accent,
+    color: colors.primary,
+    fontWeight: '700',
+  },
+  inlineActionTextDanger: {
+    color: '#FFFFFF',
+  },
+  inlineActionTextNeutral: {
+    color: '#8B5A12',
+  },
+  workspaceShowcase: {
+    borderRadius: 30,
+    padding: 22,
+    gap: 18,
+    overflow: 'hidden',
+    shadowColor: '#12385E',
+    shadowOpacity: 0.18,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
+  },
+  workspaceShowcaseTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 14,
+  },
+  workspaceShowcaseTextWrap: {
+    flex: 1,
+    gap: 8,
+  },
+  workspaceShowcaseEyebrow: {
+    color: '#D2E8FF',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  workspaceShowcaseTitle: {
+    fontSize: 28,
+    lineHeight: 34,
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
+  workspaceShowcaseBody: {
+    color: '#E3F0FC',
+    lineHeight: 22,
+    fontSize: 15,
+  },
+  workspaceShowcaseGlow: {
+    width: 74,
+    height: 74,
+    borderRadius: 26,
+    backgroundColor: '#FFFFFF22',
+    borderWidth: 1,
+    borderColor: '#FFFFFF22',
+  },
+  workspaceShowcaseBadgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  workspaceShowcaseBadge: {
+    minWidth: 120,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF1A',
+    borderWidth: 1,
+    borderColor: '#FFFFFF24',
+    gap: 2,
+  },
+  workspaceShowcaseBadgeValue: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '900',
+  },
+  workspaceShowcaseBadgeLabel: {
+    color: '#D7E8F8',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  workspaceActionDeck: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  workspaceActionTile: {
+    flex: 1,
+    minWidth: 190,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    padding: 16,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#D8E7F5',
+  },
+  workspaceActionEyebrow: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  workspaceActionTitle: {
+    color: colors.text,
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '800',
+  },
+  workspaceActionBody: {
+    color: colors.muted,
+    lineHeight: 20,
+  },
+  workspaceActionFooter: {
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  workspaceActionFooterText: {
+    color: colors.primary,
+    fontWeight: '800',
+  },
+  overviewBadgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  compactBadge: {
+    minWidth: 104,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 18,
+    backgroundColor: '#F6F9FC',
+    borderWidth: 1,
+    borderColor: '#DAE7F2',
+    gap: 2,
+  },
+  compactBadgeValue: {
+    color: colors.primary,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  compactBadgeLabel: {
+    color: colors.muted,
+    fontSize: 12,
     fontWeight: '700',
   },
   catalogGrid: {
