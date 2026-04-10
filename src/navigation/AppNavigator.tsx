@@ -118,7 +118,7 @@ function WorkspaceScreen() {
     deleteOfferPromotion,
   } = useAppState();
 
-  const [adminTab, setAdminTab] = useState<'overview' | 'companies' | 'publishing' | 'bookings' | 'users'>('overview');
+  const [adminTab, setAdminTab] = useState<'overview' | 'companies' | 'publishing' | 'bookings' | 'settings'>('overview');
   const [companyTab, setCompanyTab] = useState<'overview' | 'catalog' | 'offers' | 'bookings' | 'loyalty'>('overview');
   const [customerTab, setCustomerTab] = useState<'home' | 'explore' | 'orders' | 'profile'>('home');
   const [customerDarkMode, setCustomerDarkMode] = useState(false);
@@ -415,28 +415,25 @@ function WorkspaceScreen() {
     { key: 'profile', label: 'Profile', icon: 'person-outline' },
   ];
 
-  const customerHeader =
-    customerTab === 'home'
-      ? {
-          title: 'Home services marketplace',
-          subtitle: 'Browse, compare, and book trusted services with a mobile-first customer shell.',
-        }
-      : customerTab === 'explore'
-        ? {
-            title: 'Explore live offers',
-            subtitle: 'Scan real products and services, then open the booking composer when you are ready.',
-          }
-        : customerTab === 'orders'
-          ? {
-              title: 'Orders and follow-up',
-              subtitle: 'Track bookings, status updates, and post-service ratings from one place.',
-            }
-          : {
-              title: authUser ? 'Account and preferences' : 'Sign in when needed',
-              subtitle: authUser
-                ? 'Manage your profile, addresses, payment defaults, and appearance settings.'
-                : 'Guests can browse freely and only authenticate when they want to place or track orders.',
-            };
+  const customerNotificationItems = useMemo(
+    () =>
+      authUser
+        ? customerBookings
+            .filter((booking) => booking.status !== 'pending')
+            .map((booking) => ({
+              id: booking.id,
+              title: `${booking.itemTitle} is ${readableBookingStatus(booking.status).toLowerCase()}`,
+              destination: 'orders' as const,
+            }))
+        : activeMarketplacePromotions.slice(0, 5).map((entry) => ({
+            id: entry.promotion.id,
+            title: `${entry.promotion.title} is live now`,
+            destination: 'explore' as const,
+          })),
+    [activeMarketplacePromotions, authUser, customerBookings],
+  );
+  const customerCartCount = authUser ? customerBookings.length : 0;
+  const customerNotificationCount = customerNotificationItems.length;
 
   const activeWorkspaceLabel =
     activeRole === 'admin'
@@ -673,6 +670,7 @@ function WorkspaceScreen() {
     try {
       if (authMode === 'signin') {
         await signInWithEmail(signInForm.email.trim(), signInForm.password);
+        setCustomerBanner(null);
       } else {
         await signUpWithEmail({
           fullName: signUpForm.fullName.trim(),
@@ -680,14 +678,40 @@ function WorkspaceScreen() {
           password: signUpForm.password,
           phone: signUpForm.phone.trim(),
         });
+        setCustomerBanner({
+          tone: 'success',
+          text: 'Account created. Enter the verification code that was sent to your email.',
+        });
       }
-      setCustomerBanner({
-        tone: 'success',
-        text: authMode === 'signin' ? 'Sign-in request submitted.' : 'Account created. Check your email for the verification code.',
-      });
     } catch (error) {
       setCustomerBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Authentication failed.' });
     }
+  }
+
+  async function handleSignOut() {
+    try {
+      await signOutCurrentUser();
+      setCustomerBanner({ tone: 'info', text: 'You have been signed out.' });
+      setAdminBanner(null);
+      setCompanyBanner(null);
+      setCustomerTab('home');
+    } catch (error) {
+      const text = error instanceof Error ? error.message : 'Unable to sign out.';
+      setCustomerBanner({ tone: 'error', text });
+      setAdminBanner({ tone: 'error', text });
+      setCompanyBanner({ tone: 'error', text });
+    }
+  }
+
+  function handleNotificationPress() {
+    if (!customerNotificationItems.length) {
+      setCustomerBanner({ tone: 'info', text: authUser ? 'No new notifications right now.' : 'Sign in to receive booking updates and personal notifications.' });
+      return;
+    }
+
+    const latest = customerNotificationItems[0];
+    setCustomerTab(latest.destination);
+    setCustomerBanner({ tone: 'info', text: latest.title });
   }
 
   async function handleConfirmCode() {
@@ -806,47 +830,35 @@ function WorkspaceScreen() {
     return (
       <SafeAreaView edges={['top', 'bottom']} style={[styles.safeArea, customerDarkMode && styles.customerShellSafeAreaDark]}>
         <View style={[styles.customerShell, customerDarkMode && styles.customerShellDark]}>
-          <LinearGradient colors={customerDarkMode ? ['#0F1A25', '#182736'] : ['#FFF3DE', '#F4E4C6']} style={[styles.customerHeaderCard, customerDarkMode && styles.customerHeaderCardDark]}>
-            <View style={styles.customerHeaderBar}>
-              <View style={styles.customerLogoWrap}>
-                <Image source={require('../../assets/icon.png')} style={styles.customerLogoImage} resizeMode="contain" />
-                <View style={styles.infoBodyGrow}>
-                  <Text style={[styles.customerHeaderBrand, customerDarkMode && styles.customerHeaderBrandDark]}>Jahzeen</Text>
-                  <Text style={[styles.customerHeaderMiniTitle, customerDarkMode && styles.customerTitleDark]}>{customerHeader.title}</Text>
-                </View>
-              </View>
+          <View style={styles.customerHeaderPlain}>
+            <Pressable onPress={() => setCustomerTab('home')}>
+              <Image source={require('../../assets/icon.png')} style={styles.customerLogoImage} resizeMode="contain" />
+            </Pressable>
 
-              <View style={styles.customerHeaderActions}>
-                <Pressable style={[styles.customerHeaderIconButton, customerDarkMode && styles.customerHeaderIconButtonDark]} onPress={() => setCustomerTab('profile')}>
-                  <Ionicons name="person-outline" size={20} color={customerDarkMode ? '#F5F7FA' : colors.text} />
-                </Pressable>
+            <View style={styles.customerHeaderActions}>
+              <Pressable style={[styles.customerHeaderIconButton, customerDarkMode && styles.customerHeaderIconButtonDark]} onPress={() => setCustomerTab('profile')}>
+                <Ionicons name="person-outline" size={20} color={customerDarkMode ? '#F5F7FA' : colors.text} />
+              </Pressable>
 
-                <Pressable style={[styles.customerHeaderIconButton, customerDarkMode && styles.customerHeaderIconButtonDark]} onPress={() => setCustomerTab('orders')}>
-                  <Ionicons name="cart-outline" size={20} color={customerDarkMode ? '#F5F7FA' : colors.text} />
-                  {customerBookings.length ? (
-                    <View style={styles.customerHeaderIconBadge}>
-                      <Text style={styles.customerHeaderIconBadgeText}>{Math.min(customerBookings.length, 9)}</Text>
-                    </View>
-                  ) : null}
-                </Pressable>
+              <Pressable style={[styles.customerHeaderIconButton, customerDarkMode && styles.customerHeaderIconButtonDark]} onPress={() => setCustomerTab(authUser ? 'orders' : 'profile')}>
+                <Ionicons name="cart-outline" size={20} color={customerDarkMode ? '#F5F7FA' : colors.text} />
+                {customerCartCount ? (
+                  <View style={styles.customerHeaderIconBadge}>
+                    <Text style={styles.customerHeaderIconBadgeText}>{Math.min(customerCartCount, 99)}</Text>
+                  </View>
+                ) : null}
+              </Pressable>
 
-                <Pressable style={[styles.customerHeaderIconButton, customerDarkMode && styles.customerHeaderIconButtonDark]} onPress={() => setCustomerBanner({ tone: 'info', text: authUser ? 'Notifications will appear here.' : 'Sign in to receive booking and offer notifications.' })}>
-                  <Ionicons name="notifications-outline" size={20} color={customerDarkMode ? '#F5F7FA' : colors.text} />
-                  {busy ? <View style={styles.customerHeaderStatusDot} /> : null}
-                </Pressable>
-              </View>
+              <Pressable style={[styles.customerHeaderIconButton, customerDarkMode && styles.customerHeaderIconButtonDark]} onPress={handleNotificationPress}>
+                <Ionicons name="notifications-outline" size={20} color={customerDarkMode ? '#F5F7FA' : colors.text} />
+                {customerNotificationCount ? (
+                  <View style={styles.customerHeaderIconBadge}>
+                    <Text style={styles.customerHeaderIconBadgeText}>{Math.min(customerNotificationCount, 99)}</Text>
+                  </View>
+                ) : null}
+              </Pressable>
             </View>
-
-            <View style={styles.customerHeaderMetaRow}>
-              <View style={[styles.customerHeaderSearchPill, customerDarkMode && styles.customerHeaderSearchPillDark]}>
-                <Ionicons name="location-outline" size={16} color={customerDarkMode ? '#C8D3DC' : colors.primary} />
-                <Text style={[styles.customerHeaderMetaText, customerDarkMode && styles.customerSubtitleDark]}>{authUser?.email ?? customerHeader.subtitle}</Text>
-              </View>
-              {busy ? <ActivityIndicator color={customerDarkMode ? '#F5F7FA' : colors.primary} /> : null}
-            </View>
-
-            {!!authMessage ? <Text style={[styles.customerHeaderMessage, customerDarkMode && styles.customerHeaderMessageDark]}>{authMessage}</Text> : null}
-          </LinearGradient>
+          </View>
 
           <ScrollView style={styles.customerScroll} contentContainerStyle={styles.customerScrollContent} showsVerticalScrollIndicator={false}>
             <CustomerWorkspace
@@ -893,6 +905,7 @@ function WorkspaceScreen() {
               needsConfirmation={needsConfirmation}
               onAuthAction={handleAuthAction}
               onConfirmCode={handleConfirmCode}
+              authBusy={busy}
               darkMode={customerDarkMode}
               onToggleDarkMode={() => setCustomerDarkMode((current) => !current)}
               profileForm={profileForm}
@@ -903,7 +916,7 @@ function WorkspaceScreen() {
               onAddressFormChange={setAddressForm}
               addressErrors={addressErrors}
               onSaveAddress={handleAddressSave}
-              onSignOut={signOutCurrentUser}
+              onSignOut={handleSignOut}
               banner={customerBanner}
             />
           </ScrollView>
@@ -933,7 +946,10 @@ function WorkspaceScreen() {
               <Text style={styles.brandName}>Jahzeen</Text>
               <Text style={styles.brandTagline}>Built for empty-start marketplaces that grow company by company.</Text>
             </View>
-            <RoleBadge role={activeRole} />
+            <View style={styles.workspaceUtilityRow}>
+              <RoleBadge role={activeRole} />
+              <SecondaryButton label={busy ? 'Signing out...' : 'Sign out'} onPress={handleSignOut} disabled={busy} />
+            </View>
           </View>
           <Text style={styles.heroTitle}>{activeWorkspaceLabel}</Text>
           <Text style={styles.heroBody}>
@@ -1020,8 +1036,8 @@ function WorkspaceScreen() {
 
 type AdminWorkspaceProps = {
   wide: boolean;
-  tab: 'overview' | 'companies' | 'publishing' | 'bookings' | 'users';
-  onTabChange: (tab: 'overview' | 'companies' | 'publishing' | 'bookings' | 'users') => void;
+  tab: 'overview' | 'companies' | 'publishing' | 'bookings' | 'settings';
+  onTabChange: (tab: 'overview' | 'companies' | 'publishing' | 'bookings' | 'settings') => void;
   metrics: Array<{ label: string; value: string }>;
   bookings: Booking[];
   catalogItems: CatalogItem[];
@@ -1102,10 +1118,10 @@ function AdminWorkspace({
           { key: 'companies', label: 'Companies' },
           { key: 'publishing', label: 'Publishing' },
           { key: 'bookings', label: 'Bookings' },
-          { key: 'users', label: 'Users' },
+          { key: 'settings', label: 'Settings' },
         ]}
         selectedKey={tab}
-        onChange={(value) => onTabChange(value as 'overview' | 'companies' | 'publishing' | 'bookings' | 'users')}
+        onChange={(value) => onTabChange(value as 'overview' | 'companies' | 'publishing' | 'bookings' | 'settings')}
       />
       {banner ? <StatusBanner tone={banner.tone} text={banner.text} /> : null}
 
@@ -1231,9 +1247,18 @@ function AdminWorkspace({
         </SectionCard>
       ) : null}
 
-      {tab === 'users' ? (
+      {tab === 'settings' ? (
         <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
           <View style={styles.columnPane}>
+            <SectionCard title="Invite company owner" subtitle="Admins can invite and manage partner access directly from settings.">
+              <View style={styles.rowGap}>
+                <FormField label="Company name" value={inviteForm.companyName} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, companyName: value }))} error={inviteErrors.companyName} />
+                <FormField label="Invite email" value={inviteForm.email} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, email: value }))} error={inviteErrors.email} />
+              </View>
+              <FormField label="Message" value={inviteForm.message} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, message: value }))} multiline />
+              <PrimaryButton label="Send invitation" onPress={onInvite} />
+            </SectionCard>
+
             <SectionCard title="Company user management" subtitle="Invite company owners, monitor pending activations, and manage every partner account from one admin page.">
               {companyUsers.length ? companyUsers.map((user) => <InfoRow key={user.id} title={user.fullName} subtitle={`${user.email}${user.companyName ? ` · ${user.companyName}` : ''}`} />) : <EmptyState title="No company users yet" body="Send a company invitation first, then accepted company accounts will appear here." />}
             </SectionCard>
@@ -1650,6 +1675,7 @@ type CustomerWorkspaceProps = {
   needsConfirmation: boolean;
   onAuthAction: () => void;
   onConfirmCode: () => void;
+  authBusy: boolean;
   darkMode: boolean;
   onToggleDarkMode: () => void;
   profileForm: UserProfile;
@@ -1694,6 +1720,7 @@ function CustomerWorkspace({
   needsConfirmation,
   onAuthAction,
   onConfirmCode,
+  authBusy,
   darkMode,
   onToggleDarkMode,
   profileForm,
@@ -1902,12 +1929,12 @@ function CustomerWorkspace({
                 <FormField label="Password" value={signUpForm.password} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, password: value }))} error={authErrors.password} secureTextEntry theme={customerTheme.inputTheme} />
               </>
             )}
-            <PrimaryButton label={authMode === 'signin' ? 'Sign in' : 'Create account'} onPress={onAuthAction} />
+            <PrimaryButton label={authMode === 'signin' ? 'Sign in' : 'Create account'} onPress={onAuthAction} loading={authBusy} disabled={authBusy} />
             {needsConfirmation ? (
               <View style={[styles.verificationCard, customerTheme.verificationCard]}>
                 <Text style={[styles.verificationTitle, customerTheme.title]}>Email verification required</Text>
                 <FormField label="Verification code" value={confirmCode} onChangeText={onConfirmCodeChange} error={authErrors.confirmCode} theme={customerTheme.inputTheme} />
-                <SecondaryButton label="Confirm email" onPress={onConfirmCode} />
+                <SecondaryButton label="Confirm email" onPress={onConfirmCode} loading={authBusy} disabled={authBusy} />
               </View>
             ) : null}
             </SectionCard>
@@ -1950,7 +1977,7 @@ function CustomerWorkspace({
                   <FormField label="Phone" value={addressForm.contactPhone} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, contactPhone: value }))} error={addressErrors.contactPhone} theme={customerTheme.inputTheme} />
                 </View>
                 <PrimaryButton label="Save address" onPress={onSaveAddress} />
-                <SecondaryButton label="Sign out" onPress={() => onSignOut()} />
+                <SecondaryButton label={authBusy ? 'Signing out...' : 'Sign out'} onPress={() => onSignOut()} loading={authBusy} disabled={authBusy} />
               </SectionCard>
             </View>
           </View>
@@ -2201,18 +2228,18 @@ function StatusBanner({ tone, text }: { tone: BannerTone; text: string }) {
   );
 }
 
-function PrimaryButton({ label, onPress }: { label: string; onPress: () => void }) {
+function PrimaryButton({ label, onPress, loading = false, disabled = false }: { label: string; onPress: () => void; loading?: boolean; disabled?: boolean }) {
   return (
-    <Pressable style={styles.primaryButton} onPress={onPress}>
-      <Text style={styles.primaryButtonText}>{label}</Text>
+    <Pressable style={[styles.primaryButton, (loading || disabled) && styles.buttonDisabled]} onPress={onPress} disabled={loading || disabled}>
+      {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>{label}</Text>}
     </Pressable>
   );
 }
 
-function SecondaryButton({ label, onPress }: { label: string; onPress: () => void }) {
+function SecondaryButton({ label, onPress, loading = false, disabled = false }: { label: string; onPress: () => void; loading?: boolean; disabled?: boolean }) {
   return (
-    <Pressable style={styles.secondaryButton} onPress={onPress}>
-      <Text style={styles.secondaryButtonText}>{label}</Text>
+    <Pressable style={[styles.secondaryButton, (loading || disabled) && styles.buttonDisabled]} onPress={onPress} disabled={loading || disabled}>
+      {loading ? <ActivityIndicator color={colors.primary} /> : <Text style={styles.secondaryButtonText}>{label}</Text>}
     </Pressable>
   );
 }
@@ -2420,6 +2447,15 @@ const styles = StyleSheet.create({
   },
   customerShellDark: {
     backgroundColor: '#0E151D',
+  },
+  customerHeaderPlain: {
+    marginHorizontal: 18,
+    marginTop: 12,
+    marginBottom: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
   },
   customerHeaderCard: {
     marginHorizontal: 18,
@@ -2689,6 +2725,11 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 12,
   },
+  workspaceUtilityRow: {
+    minWidth: 170,
+    alignItems: 'flex-end',
+    gap: 10,
+  },
   heroTextWrap: {
     flex: 1,
     gap: 4,
@@ -2851,6 +2892,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingVertical: 14,
     alignItems: 'center',
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
   primaryButtonText: {
     color: '#FFFFFF',

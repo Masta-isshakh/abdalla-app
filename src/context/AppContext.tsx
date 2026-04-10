@@ -422,7 +422,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setAuthGroups(nextGroups);
       setProfile((current: UserProfile) => ({ ...current, fullName: nextAuthUser.fullName || current.fullName, email: nextAuthUser.email || current.email }));
       await ensureUserRecord(nextAuthUser);
-      setAuthMessage('Signed in successfully.');
+      setAuthMessage('');
     } catch {
       setAuthUser(null);
       setAuthGroups([]);
@@ -483,11 +483,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setBusy(true);
     setAuthMessage('');
     try {
-      await signIn({ username: email.trim().toLowerCase(), password });
+      const normalizedEmail = email.trim().toLowerCase();
+      const response = await signIn({ username: normalizedEmail, password });
+      if (!response.isSignedIn) {
+        if (response.nextStep.signInStep === 'CONFIRM_SIGN_UP') {
+          setPendingEmail(normalizedEmail);
+          setNeedsConfirmation(true);
+          throw new Error('Confirm your email before signing in.');
+        }
+
+        throw new Error('Sign-in could not be completed. Please try again.');
+      }
+
       setNeedsConfirmation(false);
       await refreshAuthUser();
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : 'Unable to sign in.');
+      throw error;
     } finally {
       setBusy(false);
     }
@@ -511,6 +523,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setAuthMessage('Account created. Enter the email verification code.');
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : 'Unable to create account.');
+      throw error;
     } finally {
       setBusy(false);
     }
@@ -544,6 +557,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setAuthMessage('Email verified. You can sign in now.');
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : 'Unable to confirm your code.');
+      throw error;
     } finally {
       setBusy(false);
     }
@@ -551,13 +565,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   async function signOutCurrentUser() {
     setBusy(true);
+    setAuthMessage('');
     try {
       await signOut();
       setAuthUser(null);
       setAuthGroups([]);
-      setAuthMessage('Signed out.');
+      setPendingEmail('');
+      setNeedsConfirmation(false);
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : 'Unable to sign out.');
+      throw error;
     } finally {
       setBusy(false);
     }
