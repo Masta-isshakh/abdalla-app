@@ -1,11 +1,12 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import {
   ActivityIndicator,
   Image,
   Alert,
+  Animated,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -1602,11 +1603,24 @@ function CompanyWorkspace({
   onSaveLoyalty,
   currentProgram,
 }: CompanyWorkspaceProps) {
+  const [catalogFilter, setCatalogFilter] = useState<'all' | 'published' | 'draft'>('all');
   const unreadNotifications = notifications.filter((entry) => !entry.isRead);
   const pendingBookings = companyBookings.filter((entry) => entry.status === 'pending');
   const activePromotions = companyPromotions.filter((entry) => entry.isActive);
   const publishedItems = companyItems.filter((entry) => entry.isPublished).length;
+  const draftItems = companyItems.length - publishedItems;
   const currentAccent = currentCompany?.accentColor?.trim() || colors.primary;
+  const filteredCompanyItems = useMemo(() => {
+    if (catalogFilter === 'published') {
+      return companyItems.filter((entry) => entry.isPublished);
+    }
+
+    if (catalogFilter === 'draft') {
+      return companyItems.filter((entry) => !entry.isPublished);
+    }
+
+    return companyItems;
+  }, [catalogFilter, companyItems]);
 
   return (
     <>
@@ -1766,14 +1780,21 @@ function CompanyWorkspace({
 
           <View style={styles.columnPane}>
             <SectionCard title="Current catalog" subtitle="Only this company's items appear in this operational view.">
-              {companyItems.length ? companyItems.map((item) => (
+              <View style={styles.catalogFilterRow}>
+                <CatalogFilterChip label="All" count={companyItems.length} selected={catalogFilter === 'all'} onPress={() => setCatalogFilter('all')} />
+                <CatalogFilterChip label="Published" count={publishedItems} selected={catalogFilter === 'published'} onPress={() => setCatalogFilter('published')} />
+                <CatalogFilterChip label="Draft" count={draftItems} selected={catalogFilter === 'draft'} onPress={() => setCatalogFilter('draft')} />
+              </View>
+
+              {filteredCompanyItems.length ? filteredCompanyItems.map((item, index) => (
                 <CompanyCatalogCard
                   key={item.id}
                   item={item}
+                  index={index}
                   onAction={() => onSelectCatalogItem(item.id)}
                   onSecondaryAction={() => onDeleteCatalogItem(item.id)}
                 />
-              )) : <EmptyState title="No catalog items yet" body="The marketplace remains empty until this company publishes something here." />}
+              )) : <EmptyState title="No items in this filter" body={catalogFilter === 'draft' ? 'Every current listing is already published.' : catalogFilter === 'published' ? 'Publish a listing to make it visible here.' : 'The marketplace remains empty until this company publishes something here.'} />}
             </SectionCard>
           </View>
         </View>
@@ -2456,6 +2477,17 @@ function CompactBadge({ label, value }: { label: string; value: string }) {
   );
 }
 
+function CatalogFilterChip({ label, count, selected, onPress }: { label: string; count: number; selected: boolean; onPress: () => void }) {
+  return (
+    <Pressable style={[styles.catalogFilterChip, selected && styles.catalogFilterChipActive]} onPress={onPress}>
+      <Text style={[styles.catalogFilterChipText, selected && styles.catalogFilterChipTextActive]}>{label}</Text>
+      <View style={[styles.catalogFilterChipCount, selected && styles.catalogFilterChipCountActive]}>
+        <Text style={[styles.catalogFilterChipCountText, selected && styles.catalogFilterChipCountTextActive]}>{count}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
 function WorkspaceActionTile({ eyebrow, title, body, onPress }: { eyebrow: string; title: string; body: string; onPress: () => void }) {
   return (
     <Pressable style={styles.workspaceActionTile} onPress={onPress}>
@@ -2699,15 +2731,45 @@ function CatalogCard({ item, actionLabel, onAction, secondaryActionLabel, onSeco
   );
 }
 
-function CompanyCatalogCard({ item, onAction, onSecondaryAction }: { item: CatalogItem; onAction?: () => void; onSecondaryAction?: () => void }) {
+function CompanyCatalogCard({ item, index, onAction, onSecondaryAction }: { item: CatalogItem; index: number; onAction?: () => void; onSecondaryAction?: () => void }) {
   const stateLabel = item.isPublished ? 'Live in marketplace' : 'Draft in studio';
   const stateHint = item.isPublished
     ? 'Customers can discover and book this listing right now.'
     : 'Complete the details and publish when the listing is ready.';
   const gradientColors: [string, string, string] = item.isPublished ? ['#D9EEFF', '#EEF8FF', '#FFFFFF'] : ['#FFF0DD', '#FFF7ED', '#FFFFFF'];
+  const entrance = useRef(new Animated.Value(0)).current;
+  const monogram = (item.companyName || item.title || 'J').trim().charAt(0).toUpperCase();
+  const illustrationIcon = item.kind === 'service' ? 'sparkles-outline' : 'cube-outline';
+
+  useEffect(() => {
+    Animated.timing(entrance, {
+      toValue: 1,
+      duration: 420,
+      delay: index * 70,
+      useNativeDriver: true,
+    }).start();
+  }, [entrance, index]);
+
+  const animatedStyle = {
+    opacity: entrance,
+    transform: [
+      {
+        translateY: entrance.interpolate({
+          inputRange: [0, 1],
+          outputRange: [20, 0],
+        }),
+      },
+      {
+        scale: entrance.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.98, 1],
+        }),
+      },
+    ],
+  };
 
   return (
-    <View style={styles.companyCatalogCard}>
+    <Animated.View style={[styles.companyCatalogCard, animatedStyle]}>
       <Pressable style={({ pressed }) => [styles.companyCatalogCardPressable, pressed && styles.companyCatalogCardPressablePressed]} onPress={onAction} disabled={!onAction}>
         <LinearGradient colors={gradientColors} style={styles.companyCatalogCardVisual}>
           <View style={[styles.companyCatalogCardAura, item.isPublished ? styles.companyCatalogCardAuraPublished : styles.companyCatalogCardAuraDraft]} />
@@ -2718,6 +2780,20 @@ function CompanyCatalogCard({ item, onAction, onSecondaryAction }: { item: Catal
             </View>
             <View style={[styles.companyCatalogCardKindPill, item.kind === 'product' && styles.companyCatalogCardKindPillProduct]}>
               <Text style={styles.companyCatalogCardKindText}>{item.kind === 'service' ? 'Service' : 'Product'}</Text>
+            </View>
+          </View>
+          <View style={styles.companyCatalogVisualHero}>
+            <View style={[styles.companyCatalogIllustrationBadge, item.isPublished ? styles.companyCatalogIllustrationBadgePublished : styles.companyCatalogIllustrationBadgeDraft]}>
+              <Text style={styles.companyCatalogIllustrationBadgeText}>{monogram}</Text>
+            </View>
+            <View style={styles.companyCatalogIllustrationPanel}>
+              <View style={[styles.companyCatalogIllustrationOrb, item.isPublished ? styles.companyCatalogIllustrationOrbPublished : styles.companyCatalogIllustrationOrbDraft]}>
+                <Ionicons name={illustrationIcon as keyof typeof Ionicons.glyphMap} size={28} color={item.isPublished ? '#145DA0' : '#B56A17'} />
+              </View>
+              <View style={styles.companyCatalogIllustrationTextWrap}>
+                <Text style={styles.companyCatalogIllustrationTitle}>{item.companyName || 'Jahzeen partner'}</Text>
+                <Text style={styles.companyCatalogIllustrationSubtitle}>{item.imageHint || 'Branded catalog presentation'}</Text>
+              </View>
             </View>
           </View>
           <Text style={styles.companyCatalogCardCategory}>{item.category || 'Marketplace listing'}</Text>
@@ -2760,7 +2836,7 @@ function CompanyCatalogCard({ item, onAction, onSecondaryAction }: { item: Catal
         {onAction ? <SecondaryButton label="Edit item" tone="contrast" onPress={onAction} /> : null}
         {onSecondaryAction ? <SecondaryButton label="Delete" tone="danger" onPress={onSecondaryAction} /> : null}
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -3729,6 +3805,73 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
+  companyCatalogVisualHero: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 6,
+  },
+  companyCatalogIllustrationBadge: {
+    width: 58,
+    height: 58,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  companyCatalogIllustrationBadgePublished: {
+    backgroundColor: '#12385E',
+    borderColor: '#12385E',
+  },
+  companyCatalogIllustrationBadgeDraft: {
+    backgroundColor: '#B56A17',
+    borderColor: '#B56A17',
+  },
+  companyCatalogIllustrationBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: '900',
+  },
+  companyCatalogIllustrationPanel: {
+    flex: 1,
+    minHeight: 72,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFFBB',
+    borderWidth: 1,
+    borderColor: '#DCE8F3',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  companyCatalogIllustrationOrb: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  companyCatalogIllustrationOrbPublished: {
+    backgroundColor: '#DDEEFE',
+  },
+  companyCatalogIllustrationOrbDraft: {
+    backgroundColor: '#FEE8CC',
+  },
+  companyCatalogIllustrationTextWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  companyCatalogIllustrationTitle: {
+    color: colors.text,
+    fontWeight: '800',
+    fontSize: 14,
+  },
+  companyCatalogIllustrationSubtitle: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
   companyCatalogCardStatePill: {
     paddingHorizontal: 12,
     paddingVertical: 7,
@@ -3857,6 +4000,53 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontWeight: '800',
     lineHeight: 20,
+  },
+  catalogFilterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  catalogFilterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#F6F9FC',
+    borderWidth: 1,
+    borderColor: '#DAE7F2',
+  },
+  catalogFilterChipActive: {
+    backgroundColor: '#12385E',
+    borderColor: '#12385E',
+  },
+  catalogFilterChipText: {
+    color: colors.text,
+    fontWeight: '800',
+  },
+  catalogFilterChipTextActive: {
+    color: '#FFFFFF',
+  },
+  catalogFilterChipCount: {
+    minWidth: 24,
+    height: 24,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+    backgroundColor: '#E4EDF5',
+  },
+  catalogFilterChipCountActive: {
+    backgroundColor: '#FFFFFF22',
+  },
+  catalogFilterChipCountText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  catalogFilterChipCountTextActive: {
+    color: '#FFFFFF',
   },
   catalogGrid: {
     gap: 12,
