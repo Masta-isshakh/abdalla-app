@@ -8,6 +8,10 @@ import { authPostConfirmation } from './functions/auth-post-confirmation/resourc
 import { authPreSignUp } from './functions/auth-pre-sign-up/resource';
 import { sendCompanyInvitationEmail } from './functions/send-company-invitation-email/resource';
 
+const invitationAuthConfig = {
+  userPoolId: 'ap-south-1_xtxWgu65e',
+};
+
 /**
  * @see https://docs.amplify.aws/react/build-a-backend/ to add storage, functions, and more
  */
@@ -32,5 +36,5 @@ backend.sendCompanyInvitationEmail.resources.lambda.addToRolePolicy(
 
 (backend.sendCompanyInvitationEmail.resources.lambda as lambda.Function).addEnvironment(
   'USER_POOL_ID',
-  backend.auth.resources.userPool.userPoolId,
+  invitationAuthConfig.userPoolId,
 );
