@@ -411,10 +411,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           throw new Error(`Mutation \"${mutationName}\" is not available in the configured Amplify client.`);
         }
 
+        try {
+          await fetchAuthSession({ forceRefresh: true });
+        } catch {
+          // Continue with the best available session state.
+        }
+
         response = await dataClient.graphql({
           query,
           variables: argumentsInput,
-          authMode: mutationName === 'sendCompanyInvitationEmail' ? 'iam' : undefined,
+          authMode: mutationName === 'sendCompanyInvitationEmail' ? 'userPool' : undefined,
         });
       }
 
