@@ -207,7 +207,7 @@ function WorkspaceScreen() {
   const [selectedPromotionId, setSelectedPromotionId] = useState<string | null>(null);
   const [catalogSubmitting, setCatalogSubmitting] = useState(false);
   const [inviteSubmitting, setInviteSubmitting] = useState(false);
-  const [successPopupText, setSuccessPopupText] = useState<string | null>(null);
+  const [operationPopup, setOperationPopup] = useState<{ tone: BannerTone; text: string } | null>(null);
 
   const [companyFormErrors, setCompanyFormErrors] = useState<ValidationMap>({});
   const [inviteFormErrors, setInviteFormErrors] = useState<ValidationMap>({});
@@ -225,27 +225,27 @@ function WorkspaceScreen() {
   const [customerBanner, setCustomerBanner] = useState<BannerState>(null);
 
   useEffect(() => {
-    const nextSuccessMessage = customerBanner?.tone === 'success'
-      ? customerBanner.text
-      : companyBanner?.tone === 'success'
-        ? companyBanner.text
-        : adminBanner?.tone === 'success'
-          ? adminBanner.text
+    const nextPopup = customerBanner && (customerBanner.tone === 'success' || customerBanner.tone === 'error')
+      ? customerBanner
+      : companyBanner && (companyBanner.tone === 'success' || companyBanner.tone === 'error')
+        ? companyBanner
+        : adminBanner && (adminBanner.tone === 'success' || adminBanner.tone === 'error')
+          ? adminBanner
           : null;
 
-    if (nextSuccessMessage) {
-      setSuccessPopupText(nextSuccessMessage);
+    if (nextPopup) {
+      setOperationPopup({ tone: nextPopup.tone, text: nextPopup.text });
     }
   }, [adminBanner, companyBanner, customerBanner]);
 
   useEffect(() => {
-    if (!successPopupText) {
+    if (!operationPopup) {
       return undefined;
     }
 
-    const timeout = setTimeout(() => setSuccessPopupText(null), 2200);
+    const timeout = setTimeout(() => setOperationPopup(null), 2600);
     return () => clearTimeout(timeout);
-  }, [successPopupText]);
+  }, [operationPopup]);
 
   useEffect(() => {
     setProfileForm(profile);
@@ -1078,7 +1078,7 @@ function WorkspaceScreen() {
             />
           </View>
 
-          <SuccessPopup visible={!!successPopupText} text={successPopupText ?? ''} onClose={() => setSuccessPopupText(null)} />
+          <OperationPopup visible={!!operationPopup} tone={operationPopup?.tone ?? 'success'} text={operationPopup?.text ?? ''} onClose={() => setOperationPopup(null)} />
         </View>
       </SafeAreaView>
     );
@@ -1185,7 +1185,7 @@ function WorkspaceScreen() {
 
         {busy ? <ActivityIndicator color={colors.primary} style={styles.busyIndicator} /> : null}
       </ScrollView>
-      <SuccessPopup visible={!!successPopupText} text={successPopupText ?? ''} onClose={() => setSuccessPopupText(null)} />
+      <OperationPopup visible={!!operationPopup} tone={operationPopup?.tone ?? 'success'} text={operationPopup?.text ?? ''} onClose={() => setOperationPopup(null)} />
     </SafeAreaView>
   );
 }
@@ -2793,16 +2793,18 @@ function StatusBanner({ tone, text }: { tone: BannerTone; text: string }) {
   );
 }
 
-function SuccessPopup({ visible, text, onClose }: { visible: boolean; text: string; onClose: () => void }) {
+function OperationPopup({ visible, tone, text, onClose }: { visible: boolean; tone: BannerTone; text: string; onClose: () => void }) {
+  const isSuccess = tone === 'success';
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.successPopupBackdrop} onPress={onClose}>
-        <Pressable style={styles.successPopupCard} onPress={() => undefined}>
-          <View style={styles.successPopupIconWrap}>
-            <Ionicons name="checkmark" size={28} color="#FFFFFF" />
+      <Pressable style={styles.operationPopupBackdrop} onPress={onClose}>
+        <Pressable style={styles.operationPopupCard} onPress={() => undefined}>
+          <View style={[styles.operationPopupIconWrap, isSuccess ? styles.operationPopupIconSuccess : styles.operationPopupIconError]}>
+            <Ionicons name={isSuccess ? 'checkmark' : 'close'} size={28} color="#FFFFFF" />
           </View>
-          <Text style={styles.successPopupTitle}>Success</Text>
-          <Text style={styles.successPopupBody}>{text}</Text>
+          <Text style={styles.operationPopupTitle}>{isSuccess ? 'Success' : 'Action failed'}</Text>
+          <Text style={styles.operationPopupBody}>{text}</Text>
           <SecondaryButton label="Done" tone="contrast" onPress={onClose} />
         </Pressable>
       </Pressable>
@@ -4340,14 +4342,14 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     fontWeight: '600',
   },
-  successPopupBackdrop: {
+  operationPopupBackdrop: {
     flex: 1,
     backgroundColor: '#17252F66',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
   },
-  successPopupCard: {
+  operationPopupCard: {
     width: '100%',
     maxWidth: 360,
     borderRadius: 28,
@@ -4361,20 +4363,25 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 10 },
     elevation: 5,
   },
-  successPopupIconWrap: {
+  operationPopupIconWrap: {
     width: 64,
     height: 64,
     borderRadius: 999,
-    backgroundColor: colors.success,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  successPopupTitle: {
+  operationPopupIconSuccess: {
+    backgroundColor: colors.success,
+  },
+  operationPopupIconError: {
+    backgroundColor: '#D64545',
+  },
+  operationPopupTitle: {
     color: colors.text,
     fontSize: 24,
     fontWeight: '900',
   },
-  successPopupBody: {
+  operationPopupBody: {
     color: colors.muted,
     textAlign: 'center',
     lineHeight: 22,

@@ -13,12 +13,19 @@ function normalize(value: string) {
   return value.trim().toLowerCase();
 }
 
+function getUserPoolRegion(userPoolId: string) {
+  const [region] = userPoolId.split('_');
+  return region || 'ap-south-1';
+}
+
 function generateTemporaryPassword() {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*';
   return Array.from({ length: 14 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
 }
 
 async function provisionCompanyUser(userPoolId: string, email: string, temporaryPassword: string) {
+  const cognito = new CognitoIdentityProviderClient({ region: getUserPoolRegion(userPoolId) });
+
   try {
     await cognito.send(
       new AdminCreateUserCommand({
@@ -89,9 +96,10 @@ export const handler: Schema['sendCompanyInvitationEmail']['functionHandler'] = 
   try {
     await provisionCompanyUser(userPoolId, normalizedInviteeEmail, temporaryPassword);
   } catch (error) {
+    const reason = error instanceof Error ? error.message : 'Unable to provision the company account.';
     return {
       success: false,
-      message: error instanceof Error ? error.message : 'Unable to provision the company account.',
+      message: reason,
       sentAtLabel: '',
     };
   }
@@ -104,20 +112,11 @@ export const handler: Schema['sendCompanyInvitationEmail']['functionHandler'] = 
     timeStyle: 'short',
   });
 
-  try {
-    return {
-      success: true,
-      message: `Invitation email sent to ${normalizedInviteeEmail} through Cognito.` +
-        (safeMessage ? ` Message saved: ${safeMessage}` : '') +
-        ` Invited by ${safeInvitedByEmail} for ${safeCompanyName} on ${appName}.`,
-      sentAtLabel,
-    };
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : 'Unknown invitation delivery error';
-    return {
-      success: false,
-      message: reason,
-      sentAtLabel: '',
-    };
-  }
+  return {
+    success: true,
+    message: `Invitation email sent to ${normalizedInviteeEmail} through Cognito.` +
+      (safeMessage ? ` Message saved: ${safeMessage}` : '') +
+      ` Invited by ${safeInvitedByEmail} for ${safeCompanyName} on ${appName}.`,
+    sentAtLabel,
+  };
 };
