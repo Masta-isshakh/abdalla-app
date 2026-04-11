@@ -80,7 +80,10 @@ const schema = a.schema({
       message: a.string(),
     })
     .returns(a.ref('InvitationEmailResult'))
-    .authorization((allow) => [allow.authenticated()])
+    .authorization((allow) => [
+      allow.authenticated(),
+      allow.authenticated('identityPool'),
+    ])
     .handler(a.handler.function(sendCompanyInvitationEmail)),
 
   CatalogItem: a

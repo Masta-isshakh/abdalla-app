@@ -38,6 +38,77 @@ import {
 
 const STORAGE_KEY = 'jahzeen-platform-state-v4';
 const MANUAL_ADMIN_EMAILS = ['owner@jahzeen.app', 'admin@jahzeen.app'];
+const CUSTOM_MUTATION_DOCUMENTS: Record<string, string> = {
+  sendCompanyInvitationEmail: `
+    mutation SendCompanyInvitationEmail(
+      $companyName: String!
+      $inviteeEmail: String!
+      $invitedByEmail: String!
+      $message: String
+    ) {
+      sendCompanyInvitationEmail(
+        companyName: $companyName
+        inviteeEmail: $inviteeEmail
+        invitedByEmail: $invitedByEmail
+        message: $message
+      ) {
+        success
+        message
+        sentAtLabel
+      }
+    }
+  `,
+};
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (!error || typeof error !== 'object') {
+    return 'Mutation failed.';
+  }
+
+  const candidate = error as {
+    message?: unknown;
+    errors?: Array<{ message?: unknown }>;
+    cause?: unknown;
+    originalError?: unknown;
+    recoverySuggestion?: unknown;
+  };
+
+  const graphQlMessages = Array.isArray(candidate.errors)
+    ? candidate.errors
+        .map((entry) => (typeof entry?.message === 'string' ? entry.message : ''))
+        .filter(Boolean)
+    : [];
+
+  if (graphQlMessages.length) {
+    return graphQlMessages.join(' | ');
+  }
+
+  if (typeof candidate.message === 'string' && candidate.message.trim()) {
+    return candidate.message;
+  }
+
+  const nestedMessage = [candidate.cause, candidate.originalError]
+    .map((entry) => toErrorMessage(entry))
+    .find((entry) => entry && entry !== 'Mutation failed.');
+
+  if (nestedMessage) {
+    return nestedMessage;
+  }
+
+  if (typeof candidate.recoverySuggestion === 'string' && candidate.recoverySuggestion.trim()) {
+    return candidate.recoverySuggestion;
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return 'Mutation failed.';
+  }
+}
 
 const starterProfile: UserProfile = {
   fullName: 'Guest Customer',
@@ -329,14 +400,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   async function safeMutation(mutationName: string, argumentsInput: object) {
     try {
-      const response = await (dataClient.mutations as any)?.[mutationName]?.(argumentsInput);
+      const mutation = (dataClient.mutations as Record<string, ((input: object) => Promise<any>) | undefined> | undefined)?.[mutationName];
+      let response: any;
+
+      if (mutation) {
+        response = await mutation(argumentsInput);
+      } else {
+        const query = CUSTOM_MUTATION_DOCUMENTS[mutationName];
+        if (!query || typeof dataClient.graphql !== 'function') {
+          throw new Error(`Mutation \"${mutationName}\" is not available in the configured Amplify client.`);
+        }
+
+        response = await dataClient.graphql({
+          query,
+          variables: argumentsInput,
+          authMode: mutationName === 'sendCompanyInvitationEmail' ? 'iam' : undefined,
+        });
+      }
+
       const errors = response?.errors as Array<{ message?: string }> | undefined;
       if (errors?.length) {
         throw new Error(errors.map((entry) => entry.message).filter(Boolean).join(' | ') || 'Mutation failed.');
       }
-      return response?.data ?? null;
+
+      const payload = response?.data;
+      if (payload && typeof payload === 'object' && mutationName in payload) {
+        return (payload as Record<string, unknown>)[mutationName] ?? null;
+      }
+
+      return payload ?? null;
     } catch (error) {
-      throw error instanceof Error ? error : new Error('Mutation failed.');
+      throw new Error(toErrorMessage(error));
     }
   }
 
