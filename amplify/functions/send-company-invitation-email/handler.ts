@@ -7,8 +7,6 @@ import {
 import { env } from '$amplify/env/send-company-invitation-email';
 import type { Schema } from '../../data/resource';
 
-const cognito = new CognitoIdentityProviderClient({});
-
 function normalize(value: string) {
   return value.trim().toLowerCase();
 }
@@ -21,6 +19,14 @@ function getUserPoolRegion(userPoolId: string) {
 function generateTemporaryPassword() {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*';
   return Array.from({ length: 14 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+}
+
+function formatErrorReason(error: unknown) {
+  if (!(error instanceof Error)) {
+    return 'Unable to complete the Cognito invitation flow.';
+  }
+
+  return error.name && error.message ? `${error.name}: ${error.message}` : error.message || 'Unable to complete the Cognito invitation flow.';
 }
 
 async function provisionCompanyUser(userPoolId: string, email: string, temporaryPassword: string) {
@@ -58,13 +64,26 @@ async function provisionCompanyUser(userPoolId: string, email: string, temporary
     );
   }
 
-  await cognito.send(
-    new AdminAddUserToGroupCommand({
-      GroupName: 'company',
-      UserPoolId: userPoolId,
-      Username: email,
-    }),
-  );
+  return cognito;
+}
+
+async function addUserToCompanyGroup(
+  cognito: CognitoIdentityProviderClient,
+  userPoolId: string,
+  email: string,
+) {
+  try {
+    await cognito.send(
+      new AdminAddUserToGroupCommand({
+        GroupName: 'company',
+        UserPoolId: userPoolId,
+        Username: email,
+      }),
+    );
+    return undefined;
+  } catch (error) {
+    return formatErrorReason(error);
+  }
 }
 
 function escapeHtml(value: string) {
@@ -92,14 +111,15 @@ export const handler: Schema['sendCompanyInvitationEmail']['functionHandler'] = 
   }
 
   const temporaryPassword = generateTemporaryPassword();
+  let groupAssignmentWarning: string | undefined;
 
   try {
-    await provisionCompanyUser(userPoolId, normalizedInviteeEmail, temporaryPassword);
+    const cognitoClient = await provisionCompanyUser(userPoolId, normalizedInviteeEmail, temporaryPassword);
+    groupAssignmentWarning = await addUserToCompanyGroup(cognitoClient, userPoolId, normalizedInviteeEmail);
   } catch (error) {
-    const reason = error instanceof Error ? error.message : 'Unable to provision the company account.';
     return {
       success: false,
-      message: reason,
+      message: formatErrorReason(error),
       sentAtLabel: '',
     };
   }
@@ -116,6 +136,7 @@ export const handler: Schema['sendCompanyInvitationEmail']['functionHandler'] = 
     success: true,
     message: `Invitation email sent to ${normalizedInviteeEmail} through Cognito.` +
       (safeMessage ? ` Message saved: ${safeMessage}` : '') +
+      (groupAssignmentWarning ? ` Group assignment warning: ${groupAssignmentWarning}.` : '') +
       ` Invited by ${safeInvitedByEmail} for ${safeCompanyName} on ${appName}.`,
     sentAtLabel,
   };
