@@ -17,6 +17,8 @@ import {
   AppNotification,
   AppRole,
   AppUserRecord,
+  AuditEvent,
+  AuditEventDraft,
   AuthUser,
   Booking,
   BookingDraft,
@@ -140,6 +142,7 @@ type PersistedState = {
   catalogItems: CatalogItem[];
   offerPromotions: OfferPromotion[];
   notifications: AppNotification[];
+  auditEvents: AuditEvent[];
   bookings: Booking[];
   ratings: Array<{ id: string; bookingId: string; companyId: string; itemId: string; customerEmail: string; score: number; review: string; createdAtLabel: string }>;
   loyaltyPrograms: LoyaltyProgram[];
@@ -161,6 +164,7 @@ interface AppContextValue {
   catalogItems: CatalogItem[];
   offerPromotions: OfferPromotion[];
   notifications: AppNotification[];
+  auditEvents: AuditEvent[];
   bookings: Booking[];
   ratings: PersistedState['ratings'];
   loyaltyPrograms: LoyaltyProgram[];
@@ -257,6 +261,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [offerPromotions, setOfferPromotions] = useState<OfferPromotion[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [ratings, setRatings] = useState<PersistedState['ratings']>([]);
   const [loyaltyPrograms, setLoyaltyPrograms] = useState<LoyaltyProgram[]>([]);
@@ -277,6 +282,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setCatalogItems(parsed.catalogItems ?? []);
           setOfferPromotions(parsed.offerPromotions ?? []);
           setNotifications(parsed.notifications ?? []);
+          setAuditEvents(parsed.auditEvents ?? []);
           setBookings(parsed.bookings ?? []);
           setRatings(parsed.ratings ?? []);
           setLoyaltyPrograms(parsed.loyaltyPrograms ?? []);
@@ -314,6 +320,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         catalogItems,
         offerPromotions,
         notifications,
+        auditEvents,
         bookings,
         ratings,
         loyaltyPrograms,
@@ -321,7 +328,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ).catch(() => {
       // Ignore persistence errors.
     });
-  }, [initialized, profile, addresses, users, companies, invitations, catalogItems, offerPromotions, notifications, bookings, ratings, loyaltyPrograms]);
+  }, [initialized, profile, addresses, users, companies, invitations, catalogItems, offerPromotions, notifications, auditEvents, bookings, ratings, loyaltyPrograms]);
 
   const currentUserRecord = useMemo(() => {
     if (!authUser) {
@@ -500,6 +507,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await safeCreate('AppNotification', { ...notification });
   }
 
+  async function createAuditEvent(draft: AuditEventDraft) {
+    const actorRole = draft.actorRole ?? (authUser ? (activeRole === 'guest' ? 'system' : activeRole) : 'system');
+    const actorEmail = draft.actorEmail ?? authUser?.email ?? 'system@jahzeen.app';
+    const event: AuditEvent = {
+      id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      actorRole,
+      actorEmail,
+      entityType: draft.entityType,
+      entityId: draft.entityId,
+      companyId: draft.companyId,
+      action: draft.action,
+      status: draft.status,
+      summary: draft.summary,
+      metadata: draft.metadata ?? [],
+      createdAtLabel: nowLabel(),
+    };
+
+    setAuditEvents((current) => [event, ...current].slice(0, 200));
+    await safeCreate('AuditEvent', { ...event, metadata: JSON.stringify(event.metadata) });
+  }
+
   async function ensureUserRecord(nextAuthUser: AuthUser) {
     const email = nextAuthUser.email.trim().toLowerCase();
     const existingUser = users.find((entry) => entry.email.toLowerCase() === email);
@@ -609,13 +637,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   async function syncCloudRecords() {
     try {
-      const [remoteUsers, remoteCompanies, remoteInvitations, remoteItems, remotePromotions, remoteNotifications, remoteBookings, remoteRatings, remotePrograms, remoteAddresses, remoteProfiles] = await Promise.all([
+      const [remoteUsers, remoteCompanies, remoteInvitations, remoteItems, remotePromotions, remoteNotifications, remoteAuditEvents, remoteBookings, remoteRatings, remotePrograms, remoteAddresses, remoteProfiles] = await Promise.all([
         safeList('AppUser'),
         safeList('Company'),
         safeList('CompanyInvitation'),
         safeList('CatalogItem'),
         safeList('OfferPromotion'),
         safeList('AppNotification'),
+        safeList('AuditEvent'),
         safeList('Booking'),
         safeList('Rating'),
         safeList('LoyaltyProgram'),
@@ -640,6 +669,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       if (remoteNotifications.length) {
         setNotifications(remoteNotifications.map((entry: any) => ({ id: entry.id, recipientRole: entry.recipientRole, recipientEmail: entry.recipientEmail ?? undefined, companyId: entry.companyId ?? undefined, title: entry.title, body: entry.body ?? '', kind: entry.kind, destinationTab: entry.destinationTab ?? 'overview', isRead: !!entry.isRead, createdAtLabel: entry.createdAtLabel ?? nowLabel() })));
+      }
+      if (remoteAuditEvents.length) {
+        setAuditEvents(remoteAuditEvents.map((entry: any) => ({ id: entry.id, actorRole: entry.actorRole, actorEmail: entry.actorEmail, entityType: entry.entityType, entityId: entry.entityId, companyId: entry.companyId ?? undefined, action: entry.action, status: entry.status, summary: entry.summary, metadata: parseList(entry.metadata), createdAtLabel: entry.createdAtLabel ?? nowLabel() })));
       }
       if (remoteBookings.length) {
         setBookings(remoteBookings.map((entry: any) => ({ id: entry.id, bookingNumber: entry.bookingNumber, customerEmail: entry.customerEmail, customerName: entry.customerName, companyId: entry.companyId, companyName: entry.companyName, itemId: entry.itemId, itemTitle: entry.itemTitle, kind: entry.kind, scheduleDate: entry.scheduleDate, scheduleTime: entry.scheduleTime, addressLabel: entry.addressLabel, addressLine: entry.addressLine, paymentMethod: entry.paymentMethod, notes: entry.notes ?? '', status: entry.status, subtotal: Number(entry.subtotal ?? 0), serviceFee: Number(entry.serviceFee ?? 0), discount: Number(entry.discount ?? 0), total: Number(entry.total ?? 0), loyaltyPointsEarned: Number(entry.loyaltyPointsEarned ?? 0), ratingSubmitted: !!entry.ratingSubmitted, timeline: parseTimeline(entry.timeline) })));
@@ -781,12 +813,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setBusy(true);
     setAuthMessage('');
     try {
+      const signedOutEmail = authUser?.email ?? '';
       await signOut();
       setAuthUser(null);
       setAuthGroups([]);
       setPendingEmail('');
       setNeedsConfirmation(false);
       setSignInChallenge('none');
+      if (signedOutEmail) {
+        await createAuditEvent({ actorEmail: signedOutEmail, actorRole: activeRole === 'guest' ? 'system' : activeRole, entityType: 'auth', entityId: signedOutEmail, action: 'signOut', status: 'info', summary: 'User signed out of the workspace.' });
+      }
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : 'Unable to sign out.');
       throw error;
@@ -804,6 +840,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } else {
       await safeCreate('UserProfile', { ...nextProfile });
     }
+    await createAuditEvent({ entityType: 'profile', entityId: nextProfile.email || authUser?.email || 'profile', action: 'saveProfile', status: 'success', summary: 'Customer profile preferences were updated.', metadata: [nextProfile.defaultPaymentMethod, nextProfile.preferredLanguage] });
   }
 
   async function saveAddress(address: Omit<Address, 'id'> & { id?: string }) {
@@ -814,23 +851,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } else {
       await safeCreate('Address', { ...nextAddress });
     }
+    await createAuditEvent({ entityType: 'address', entityId: nextAddress.id, action: address.id ? 'updateAddress' : 'createAddress', status: 'success', summary: `Saved default address ${nextAddress.label}.`, metadata: [nextAddress.area, nextAddress.street].filter(Boolean) });
   }
 
   async function createCompany(draft: CompanyDraft) {
     const company: Company = { id: `company-${Date.now()}`, name: draft.name, slug: slugify(draft.name), description: draft.description, supportEmail: draft.supportEmail, supportPhone: draft.supportPhone, accentColor: draft.accentColor, logoText: draft.logoText, ownerEmail: '', isActive: true, createdAtLabel: nowLabel() };
     setCompanies((current) => [company, ...current]);
     await safeCreate('Company', { ...company });
+    await createAuditEvent({ entityType: 'company', entityId: company.id, companyId: company.id, action: 'createCompany', status: 'success', summary: `Created company workspace for ${company.name}.`, metadata: [company.supportEmail, company.accentColor] });
     return company;
   }
 
   async function updateCompany(companyId: string, draft: CompanyDraft) {
     setCompanies((current) => current.map((entry) => (entry.id === companyId ? { ...entry, name: draft.name, slug: slugify(draft.name), description: draft.description, supportEmail: draft.supportEmail, supportPhone: draft.supportPhone, accentColor: draft.accentColor, logoText: draft.logoText } : entry)));
     await safeUpdate('Company', { id: companyId, ...draft, slug: slugify(draft.name) });
+    await createAuditEvent({ entityType: 'company', entityId: companyId, companyId, action: 'updateCompany', status: 'success', summary: `Updated company workspace details for ${draft.name}.`, metadata: [draft.supportEmail, draft.accentColor] });
   }
 
   async function setCompanyActive(companyId: string, isActive: boolean) {
     setCompanies((current) => current.map((entry) => (entry.id === companyId ? { ...entry, isActive } : entry)));
     await safeUpdate('Company', { id: companyId, isActive });
+    await createAuditEvent({ entityType: 'company', entityId: companyId, companyId, action: 'setCompanyActive', status: isActive ? 'success' : 'warning', summary: `Company workspace was ${isActive ? 'reactivated' : 'paused'}.`, metadata: [isActive ? 'active' : 'paused'] });
   }
 
   async function deleteCompany(companyId: string) {
@@ -843,6 +884,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setInvitations((current) => current.filter((entry) => entry.companyId !== companyId));
     setLoyaltyPrograms((current) => current.filter((entry) => entry.companyId !== companyId));
     await safeDelete('Company', companyId);
+    await createAuditEvent({ entityType: 'company', entityId: companyId, companyId, action: 'deleteCompany', status: 'warning', summary: 'Company workspace and linked operational records were removed.' });
   }
 
   async function inviteCompany(draft: InvitationDraft) {
@@ -869,7 +911,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       await safeCreate('AppUser', { ...invitedUser });
     }
 
-    await dispatchInvitationEmail(invitation);
+    try {
+      await dispatchInvitationEmail(invitation);
+      await createAuditEvent({ entityType: 'invitation', entityId: invitation.id, companyId: invitation.companyId, action: 'sendInvitation', status: 'success', summary: `Invitation sent to ${invitation.email}.`, metadata: [invitation.companyName, 'delivery:sent'] });
+    } catch (error) {
+      await createAuditEvent({ entityType: 'invitation', entityId: invitation.id, companyId: invitation.companyId, action: 'sendInvitation', status: 'warning', summary: `Invitation saved for ${invitation.email}, but delivery needs attention.`, metadata: [error instanceof Error ? error.message : 'delivery failed'] });
+      throw error;
+    }
+
     await Promise.all([
       createNotification({ recipientRole: 'admin', title: `Invitation sent to ${invitation.email}`, body: `${invitation.companyName} is waiting for company owner activation.`, kind: 'invitation', destinationTab: 'settings' }),
       createNotification({ recipientRole: 'company', recipientEmail: invitation.email, companyId: invitation.companyId, title: `You were invited to ${invitation.companyName}`, body: 'Use the email invitation from Cognito to sign in with your temporary password and create a new one.', kind: 'invitation', destinationTab: 'overview' }),
@@ -896,6 +945,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
     await dispatchInvitationEmail({ ...invitation, emailDeliveryStatus: 'pending', emailDeliveryError: undefined });
     await createNotification({ recipientRole: 'admin', title: `Invitation resent to ${invitation.email}`, body: `${invitation.companyName} invitation delivery was retried.`, kind: 'invitation', destinationTab: 'settings' });
+    await createAuditEvent({ entityType: 'invitation', entityId: invitationId, companyId: invitation.companyId, action: 'resendInvitation', status: 'success', summary: `Invitation delivery retried for ${invitation.email}.`, metadata: [invitation.companyName] });
   }
 
   async function revokeInvitation(invitationId: string) {
@@ -904,6 +954,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await safeUpdate('CompanyInvitation', { id: invitationId, status: 'revoked' });
     if (invitation) {
       await createNotification({ recipientRole: 'admin', title: `Invitation revoked for ${invitation.email}`, body: `${invitation.companyName} invitation has been revoked.`, kind: 'invitation', destinationTab: 'settings' });
+      await createAuditEvent({ entityType: 'invitation', entityId: invitationId, companyId: invitation.companyId, action: 'revokeInvitation', status: 'warning', summary: `Invitation revoked for ${invitation.email}.`, metadata: [invitation.companyName] });
     }
   }
 
@@ -919,6 +970,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } else {
       await safeCreate('CatalogItem', { ...item, tags: JSON.stringify(item.tags) });
     }
+    await createAuditEvent({ entityType: 'catalogItem', entityId: item.id, companyId, action: draft.id ? 'updateCatalogItem' : 'createCatalogItem', status: item.isPublished ? 'success' : 'info', summary: `${item.title} was ${draft.id ? 'updated' : 'saved'}${item.isPublished ? ' and published' : ' as a draft'}.`, metadata: [item.kind, item.category, `${item.price}`] });
   }
 
   async function deleteCatalogItem(itemId: string) {
@@ -927,6 +979,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setOfferPromotions((current) => current.filter((entry) => entry.catalogItemId !== itemId));
     await safeDelete('CatalogItem', itemId);
     await Promise.all(linkedPromotions.map((entry) => safeDelete('OfferPromotion', entry.id)));
+    await createAuditEvent({ entityType: 'catalogItem', entityId: itemId, action: 'deleteCatalogItem', status: 'warning', summary: 'Catalog item and linked promotions were removed.' });
   }
 
   async function saveOfferPromotion(companyId: string, draft: OfferPromotionDraft) {
@@ -966,11 +1019,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ? [createNotification({ recipientRole: 'customer', title: `${nextPromotion.title} is now live`, body: nextPromotion.headline, kind: 'promotion', destinationTab: 'explore' })]
         : []),
     ]);
+    await createAuditEvent({ entityType: 'promotion', entityId: nextPromotion.id, companyId, action: draft.id ? 'updatePromotion' : 'createPromotion', status: nextPromotion.isActive ? 'success' : 'info', summary: `${nextPromotion.title} promotion ${nextPromotion.isActive ? 'went live' : 'was saved as paused'}.`, metadata: [nextPromotion.catalogItemTitle, nextPromotion.discountLabel].filter(Boolean) });
   }
 
   async function deleteOfferPromotion(promotionId: string) {
     setOfferPromotions((current) => current.filter((entry) => entry.id !== promotionId));
     await safeDelete('OfferPromotion', promotionId);
+    await createAuditEvent({ entityType: 'promotion', entityId: promotionId, action: 'deletePromotion', status: 'warning', summary: 'Promotion was removed from the marketplace plan.' });
   }
 
   async function markNotificationRead(notificationId: string) {
@@ -987,6 +1042,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } else {
       await safeCreate('LoyaltyProgram', { ...nextProgram, tierRules: JSON.stringify(nextProgram.tierRules) });
     }
+    await createAuditEvent({ entityType: 'loyaltyProgram', entityId: nextProgram.id, companyId, action: existing ? 'updateLoyaltyProgram' : 'createLoyaltyProgram', status: nextProgram.isActive ? 'success' : 'info', summary: `${nextProgram.title} loyalty program ${nextProgram.isActive ? 'is active' : 'was paused'}.`, metadata: [scope, `${nextProgram.pointsPerBooking} pts`] });
   }
 
   async function placeBooking(draft: BookingDraft) {
@@ -1007,6 +1063,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       createNotification({ recipientRole: 'company', companyId: booking.companyId, title: `New booking for ${booking.itemTitle}`, body: `${booking.customerName} placed ${booking.bookingNumber}.`, kind: 'booking', destinationTab: 'bookings' }),
       createNotification({ recipientRole: 'admin', title: `New marketplace booking ${booking.bookingNumber}`, body: `${booking.companyName} received a new booking.`, kind: 'booking', destinationTab: 'bookings' }),
     ]);
+    await createAuditEvent({ entityType: 'booking', entityId: booking.id, companyId: booking.companyId, action: 'placeBooking', status: 'success', summary: `Booking ${booking.bookingNumber} was placed for ${booking.itemTitle}.`, metadata: [booking.companyName, `${booking.total}`] });
     return booking;
   }
 
@@ -1020,6 +1077,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         createNotification({ recipientRole: 'customer', recipientEmail: booking.customerEmail, title: `${booking.itemTitle} is ${readableBookingStatus(status).toLowerCase()}`, body: `Booking ${booking.bookingNumber} moved to ${readableBookingStatus(status)}.`, kind: 'booking', destinationTab: 'orders' }),
         createNotification({ recipientRole: 'admin', title: `${booking.bookingNumber} moved to ${readableBookingStatus(status)}`, body: `${booking.companyName} updated ${booking.itemTitle}.`, kind: 'booking', destinationTab: 'bookings' }),
       ]);
+      await createAuditEvent({ entityType: 'booking', entityId: bookingId, companyId: booking.companyId, action: 'changeBookingStatus', status: status === 'completed' ? 'success' : 'info', summary: `Booking ${booking.bookingNumber} moved to ${readableBookingStatus(status)}.`, metadata: [booking.itemTitle, booking.companyName] });
     }
   }
 
@@ -1037,10 +1095,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       createNotification({ recipientRole: 'company', companyId: booking.companyId, title: `New rating for ${booking.itemTitle}`, body: `${authUser.fullName} left a ${score}/5 review.`, kind: 'system', destinationTab: 'overview' }),
       createNotification({ recipientRole: 'admin', title: `Customer review submitted`, body: `${booking.companyName} received a ${score}/5 rating for ${booking.itemTitle}.`, kind: 'system', destinationTab: 'overview' }),
     ]);
+    await createAuditEvent({ entityType: 'rating', entityId: rating.id, companyId: booking.companyId, action: 'submitRating', status: 'success', summary: `${booking.itemTitle} received a ${score}/5 rating.`, metadata: [booking.companyName, authUser.email] });
   }
 
   return (
-    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, signInChallenge, activeRole, profile, addresses, users, companies, invitations, catalogItems, offerPromotions, notifications, bookings, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, signInWithEmail, completeNewPassword, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, deleteCatalogItem, saveOfferPromotion, deleteOfferPromotion, markNotificationRead, saveLoyaltyProgram, placeBooking, changeBookingStatus, submitRating }}>
+    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, signInChallenge, activeRole, profile, addresses, users, companies, invitations, catalogItems, offerPromotions, notifications, auditEvents, bookings, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, signInWithEmail, completeNewPassword, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, deleteCatalogItem, saveOfferPromotion, deleteOfferPromotion, markNotificationRead, saveLoyaltyProgram, placeBooking, changeBookingStatus, submitRating }}>
       {children}
     </AppContext.Provider>
   );

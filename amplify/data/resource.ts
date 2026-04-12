@@ -149,6 +149,25 @@ const schema = a.schema({
       allow.group('customer'),
     ]),
 
+  AuditEvent: a
+    .model({
+      actorRole: a.string().required(),
+      actorEmail: a.string().required(),
+      entityType: a.string().required(),
+      entityId: a.string().required(),
+      companyId: a.id(),
+      action: a.string().required(),
+      status: a.string().required(),
+      summary: a.string().required(),
+      metadata: a.string(),
+      createdAtLabel: a.string().required(),
+    })
+    .authorization((allow) => [
+      allow.group('admin'),
+      allow.group('company'),
+      allow.group('customer'),
+    ]),
+
   LoyaltyProgram: a
     .model({
       scope: a.string().required(),

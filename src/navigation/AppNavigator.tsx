@@ -1,5 +1,6 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -25,6 +26,7 @@ import {
   Address,
   AppNotification,
   AppRole,
+  AuditEvent,
   Booking,
   BookingStatus,
   CatalogItem,
@@ -47,6 +49,7 @@ type BannerState = {
 } | null;
 
 type ValidationMap = Record<string, string>;
+type CustomerSortMode = 'popular' | 'newest' | 'priceLow' | 'priceHigh';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -66,6 +69,75 @@ const colors = {
   infoSurface: '#EEF5FB',
 };
 
+const tableToneFilterMemory: Record<string, 'all' | 'error' | 'warning' | 'success'> = {};
+const TABLE_TONE_FILTER_STORAGE_PREFIX = 'jahzeen-table-tone-filter:';
+const CUSTOMER_FILTER_STORAGE_PREFIX = 'jahzeen-customer-filters:';
+const APP_CATEGORY_OPTIONS = [
+  'Commercial Properties for Sale',
+  'Commercial Properties for Rent',
+  'Residential Properties for Rent',
+  'Lands',
+  'Residential Properties for Sale',
+  'Furniture',
+  'Cars',
+  'Motorcycles',
+  'Car Rentals',
+  'Offshore Tools',
+  'Spare Parts',
+  'Heavy Equipment',
+  'Pest Control',
+  'Home Cleaning',
+  'Maintenance',
+  'Beauty Services',
+  'Appliances',
+  'Electronics',
+];
+const CATEGORY_GROUPS: Array<{ key: string; title: string; icon: keyof typeof Ionicons.glyphMap; categories: string[] }> = [
+  {
+    key: 'real-estate',
+    title: 'Real Estate',
+    icon: 'business-outline',
+    categories: [
+      'Residential Properties for Sale',
+      'Residential Properties for Rent',
+      'Commercial Properties for Sale',
+      'Commercial Properties for Rent',
+      'Lands',
+    ],
+  },
+  {
+    key: 'vehicles',
+    title: 'Vehicles',
+    icon: 'car-sport-outline',
+    categories: ['Cars', 'Motorcycles', 'Car Rentals', 'Spare Parts', 'Heavy Equipment', 'Offshore Tools'],
+  },
+  {
+    key: 'services',
+    title: 'Services',
+    icon: 'construct-outline',
+    categories: ['Pest Control', 'Home Cleaning', 'Maintenance', 'Beauty Services'],
+  },
+  {
+    key: 'electronics',
+    title: 'Electronics',
+    icon: 'hardware-chip-outline',
+    categories: ['Electronics', 'Appliances'],
+  },
+  {
+    key: 'home-living',
+    title: 'Home & Living',
+    icon: 'bed-outline',
+    categories: ['Furniture'],
+  },
+];
+const HOME_CAROUSEL_IMAGES = [
+  'https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=1400&q=80',
+  'https://images.unsplash.com/photo-1484154218962-a197022b5858?auto=format&fit=crop&w=1400&q=80',
+  'https://images.unsplash.com/photo-1494526585095-c41746248156?auto=format&fit=crop&w=1400&q=80',
+  'https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=1400&q=80',
+  'https://images.unsplash.com/photo-1449844908441-8829872d2607?auto=format&fit=crop&w=1400&q=80',
+];
+
 export function AppNavigator() {
   return (
     <NavigationContainer>
@@ -79,6 +151,10 @@ export function AppNavigator() {
 function WorkspaceScreen() {
   const width = useWindowDimensions().width;
   const wide = width >= 980;
+  const [customerCategoryMenuOpen, setCustomerCategoryMenuOpen] = useState(false);
+  const [customerCategoryQuery, setCustomerCategoryQuery] = useState('');
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  const [selectedCustomerCategory, setSelectedCustomerCategory] = useState<string | null>(null);
   const {
     activeRole,
     addresses,
@@ -102,6 +178,7 @@ function WorkspaceScreen() {
     loyaltyPrograms,
     marketplaceItems,
     notifications,
+    auditEvents,
     needsConfirmation,
     signInChallenge,
     offerPromotions,
@@ -128,8 +205,9 @@ function WorkspaceScreen() {
 
   const [adminTab, setAdminTab] = useState<'overview' | 'companies' | 'publishing' | 'bookings' | 'settings'>('overview');
   const [companyTab, setCompanyTab] = useState<'overview' | 'catalog' | 'offers' | 'bookings' | 'loyalty'>('overview');
-  const [customerTab, setCustomerTab] = useState<'home' | 'explore' | 'orders' | 'profile' | 'notifications'>('home');
+  const [customerTab, setCustomerTab] = useState<'home' | 'browse' | 'explore' | 'orders' | 'profile' | 'notifications'>('home');
   const [customerDarkMode, setCustomerDarkMode] = useState(false);
+  const [customerSortMode, setCustomerSortMode] = useState<CustomerSortMode>('popular');
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
 
   const [signInForm, setSignInForm] = useState({ email: '', password: '' });
@@ -223,6 +301,9 @@ function WorkspaceScreen() {
   const [adminBanner, setAdminBanner] = useState<BannerState>(null);
   const [companyBanner, setCompanyBanner] = useState<BannerState>(null);
   const [customerBanner, setCustomerBanner] = useState<BannerState>(null);
+  const customerFiltersHydratedRef = useRef(false);
+
+  const customerFilterStorageKey = `${CUSTOMER_FILTER_STORAGE_PREFIX}${authUser?.email?.toLowerCase() ?? 'guest'}`;
 
   useEffect(() => {
     const nextPopup = customerBanner && (customerBanner.tone === 'success' || customerBanner.tone === 'error')
@@ -250,6 +331,53 @@ function WorkspaceScreen() {
   useEffect(() => {
     setProfileForm(profile);
   }, [profile]);
+
+  useEffect(() => {
+    customerFiltersHydratedRef.current = false;
+
+    AsyncStorage.getItem(customerFilterStorageKey)
+      .then((rawValue) => {
+        if (!rawValue) {
+          setCustomerSearchQuery('');
+          setSelectedCustomerCategory(null);
+          setCustomerSortMode('popular');
+          return;
+        }
+
+        const parsed = JSON.parse(rawValue) as {
+          searchQuery?: string;
+          selectedCategory?: string | null;
+          sortMode?: CustomerSortMode;
+        };
+
+        setCustomerSearchQuery(parsed.searchQuery ?? '');
+        setSelectedCustomerCategory(parsed.selectedCategory ?? null);
+        setCustomerSortMode(parsed.sortMode ?? 'popular');
+      })
+      .catch(() => {
+        setCustomerSearchQuery('');
+        setSelectedCustomerCategory(null);
+        setCustomerSortMode('popular');
+      })
+      .finally(() => {
+        customerFiltersHydratedRef.current = true;
+      });
+  }, [customerFilterStorageKey]);
+
+  useEffect(() => {
+    if (!customerFiltersHydratedRef.current) {
+      return;
+    }
+
+    AsyncStorage.setItem(
+      customerFilterStorageKey,
+      JSON.stringify({
+        searchQuery: customerSearchQuery,
+        selectedCategory: selectedCustomerCategory,
+        sortMode: customerSortMode,
+      }),
+    ).catch(() => undefined);
+  }, [customerFilterStorageKey, customerSearchQuery, selectedCustomerCategory, customerSortMode]);
 
   useEffect(() => {
     setAddressForm(addresses[0] ?? emptyAddress());
@@ -448,6 +576,7 @@ function WorkspaceScreen() {
 
   const customerTabs = [
     { key: 'home', label: 'Home', icon: 'home-outline' },
+    { key: 'browse', label: 'Browse', icon: 'grid-outline' },
     { key: 'explore', label: 'Explore', icon: 'search-outline' },
     { key: 'orders', label: 'Orders', icon: 'receipt-outline' },
     { key: 'profile', label: 'Profile', icon: 'person-outline' },
@@ -471,8 +600,8 @@ function WorkspaceScreen() {
         : [],
     [authUser, notifications],
   );
-  const customerCartCount = authUser ? customerBookings.length : 0;
   const customerNotificationCount = customerNotifications.filter((entry) => !entry.isRead).length;
+  const visibleCustomerCategories = APP_CATEGORY_OPTIONS.filter((category) => category.toLowerCase().includes(customerCategoryQuery.trim().toLowerCase()));
 
   const activeWorkspaceLabel =
     activeRole === 'admin'
@@ -839,8 +968,8 @@ function WorkspaceScreen() {
       return;
     }
 
-    setCustomerTab((['home', 'explore', 'orders', 'profile', 'notifications'] as const).includes(notification.destinationTab as any)
-      ? (notification.destinationTab as 'home' | 'explore' | 'orders' | 'profile' | 'notifications')
+    setCustomerTab((['home', 'browse', 'explore', 'orders', 'profile', 'notifications'] as const).includes(notification.destinationTab as any)
+      ? (notification.destinationTab as 'home' | 'browse' | 'explore' | 'orders' | 'profile' | 'notifications')
       : 'notifications');
   }
 
@@ -969,23 +1098,18 @@ function WorkspaceScreen() {
     return (
       <SafeAreaView edges={['top', 'bottom']} style={[styles.safeArea, customerDarkMode && styles.customerShellSafeAreaDark]}>
         <View style={[styles.customerShell, customerDarkMode && styles.customerShellDark]}>
-          <View style={styles.customerHeaderPlain}>
-            <Pressable onPress={() => setCustomerTab('home')}>
-              <Image source={require('../../assets/icon.png')} style={styles.customerLogoImage} resizeMode="contain" />
+          <View style={[styles.customerHeaderPlain, customerTab === 'home' && styles.customerHeaderPlainHome]}>
+            <Pressable style={[styles.customerHeaderIconButton, customerDarkMode && styles.customerHeaderIconButtonDark]} onPress={() => setCustomerCategoryMenuOpen(true)}>
+              <Ionicons name="menu-outline" size={22} color={customerDarkMode ? '#F5F7FA' : colors.text} />
+            </Pressable>
+
+            <Pressable style={styles.customerHeaderCenteredBrand} onPress={() => setCustomerTab('home')}>
+              <Text style={[styles.customerHeaderCenteredTitle, customerDarkMode && styles.customerHeaderCenteredTitleDark]}>Jahzeen</Text>
             </Pressable>
 
             <View style={styles.customerHeaderActions}>
-              <Pressable style={[styles.customerHeaderIconButton, customerDarkMode && styles.customerHeaderIconButtonDark]} onPress={() => setCustomerTab('profile')}>
-                <Ionicons name="person-outline" size={20} color={customerDarkMode ? '#F5F7FA' : colors.text} />
-              </Pressable>
-
-              <Pressable style={[styles.customerHeaderIconButton, customerDarkMode && styles.customerHeaderIconButtonDark]} onPress={() => setCustomerTab(authUser ? 'orders' : 'profile')}>
-                <Ionicons name="cart-outline" size={20} color={customerDarkMode ? '#F5F7FA' : colors.text} />
-                {customerCartCount ? (
-                  <View style={styles.customerHeaderIconBadge}>
-                    <Text style={styles.customerHeaderIconBadgeText}>{Math.min(customerCartCount, 99)}</Text>
-                  </View>
-                ) : null}
+              <Pressable style={[styles.customerHeaderIconButton, customerDarkMode && styles.customerHeaderIconButtonDark]} onPress={() => setCustomerTab('explore')}>
+                <Ionicons name="search-outline" size={20} color={customerDarkMode ? '#F5F7FA' : colors.text} />
               </Pressable>
 
               <Pressable style={[styles.customerHeaderIconButton, customerDarkMode && styles.customerHeaderIconButtonDark]} onPress={handleNotificationPress}>
@@ -999,7 +1123,7 @@ function WorkspaceScreen() {
             </View>
           </View>
 
-          <ScrollView style={styles.customerScroll} contentContainerStyle={styles.customerScrollContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.customerWorkspaceHost}>
             <CustomerWorkspace
               wide={wide}
               tab={customerTab}
@@ -1008,6 +1132,7 @@ function WorkspaceScreen() {
               currentUserRole={currentUserRecord?.role ?? 'customer'}
               marketplaceItems={marketplaceItems}
               featuredOffers={activeMarketplacePromotions}
+              ratings={ratings}
               notifications={customerNotifications}
               bookingComposer={bookingComposer}
               onBookingComposerChange={setBookingComposer}
@@ -1053,6 +1178,12 @@ function WorkspaceScreen() {
               authBusy={busy}
               darkMode={customerDarkMode}
               onToggleDarkMode={() => setCustomerDarkMode((current) => !current)}
+              customerSearchQuery={customerSearchQuery}
+              onCustomerSearchQueryChange={setCustomerSearchQuery}
+              customerSortMode={customerSortMode}
+              onCustomerSortModeChange={setCustomerSortMode}
+              selectedCustomerCategory={selectedCustomerCategory}
+              onSelectCustomerCategory={setSelectedCustomerCategory}
               profileForm={profileForm}
               onProfileFormChange={setProfileForm}
               profileErrors={profileErrors}
@@ -1064,13 +1195,13 @@ function WorkspaceScreen() {
               onSignOut={handleSignOut}
               banner={customerBanner}
             />
-          </ScrollView>
+          </View>
 
           <View style={[styles.customerBottomDock, customerDarkMode && styles.customerBottomDockDark]}>
             <BottomNavBar
               items={customerTabs}
               selectedKey={customerTab}
-              onChange={(value) => setCustomerTab(value as 'home' | 'explore' | 'orders' | 'profile')}
+              onChange={(value) => setCustomerTab(value as 'home' | 'browse' | 'explore' | 'orders' | 'profile')}
               containerStyle={customerDarkMode ? styles.bottomNavDark : undefined}
               itemStyle={customerDarkMode ? styles.bottomNavItemDark : undefined}
               textStyle={customerDarkMode ? styles.bottomNavTextDark : undefined}
@@ -1079,6 +1210,42 @@ function WorkspaceScreen() {
           </View>
 
           <OperationPopup visible={!!operationPopup} tone={operationPopup?.tone ?? 'success'} text={operationPopup?.text ?? ''} onClose={() => setOperationPopup(null)} />
+
+          <Modal visible={customerCategoryMenuOpen} transparent animationType="slide" onRequestClose={() => setCustomerCategoryMenuOpen(false)}>
+            <View style={styles.customerCategoryDrawerOverlay}>
+              <Pressable style={styles.customerCategoryDrawerBackdrop} onPress={() => setCustomerCategoryMenuOpen(false)} />
+              <View style={styles.customerCategoryDrawer}>
+                <Text style={styles.customerCategoryDrawerTitle}>Categories</Text>
+                <View style={styles.customerCategorySearchWrap}>
+                  <TextInput
+                    value={customerCategoryQuery}
+                    onChangeText={setCustomerCategoryQuery}
+                    placeholder="Search categories"
+                    placeholderTextColor="#8A8F98"
+                    style={styles.customerCategorySearchInput}
+                  />
+                  <Ionicons name="search-outline" size={22} color="#D5D8DE" />
+                </View>
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.customerCategoryDrawerList}>
+                  {visibleCustomerCategories.map((category) => (
+                    <Pressable
+                      key={category}
+                      style={styles.customerCategoryDrawerRow}
+                      onPress={() => {
+                        setSelectedCustomerCategory(category);
+                        setCustomerSearchQuery('');
+                        setCustomerCategoryMenuOpen(false);
+                        setCustomerTab('explore');
+                      }}
+                    >
+                      <Text style={styles.customerCategoryDrawerRowText}>{category}</Text>
+                      <Ionicons name="chevron-forward-outline" size={20} color="#D7DADF" />
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+          </Modal>
         </View>
       </SafeAreaView>
     );
@@ -1115,6 +1282,8 @@ function WorkspaceScreen() {
             catalogItems={catalogItems}
             offerPromotions={offerPromotions}
             notifications={adminNotifications}
+            auditEvents={auditEvents}
+            ratings={ratings}
             users={users}
             companies={companies}
             invitations={invitations}
@@ -1153,6 +1322,7 @@ function WorkspaceScreen() {
             companyItems={companyItems}
             companyPromotions={companyPromotions}
             notifications={companyNotifications}
+            auditEvents={auditEvents}
             companyBookings={companyBookings}
             ratings={ratings}
             selectedCatalogItem={selectedCatalogItem}
@@ -1199,6 +1369,8 @@ type AdminWorkspaceProps = {
   catalogItems: CatalogItem[];
   offerPromotions: OfferPromotion[];
   notifications: AppNotification[];
+  auditEvents: AuditEvent[];
+  ratings: Array<{ id: string; companyId: string; score: number }>;
   users: Array<{ id: string; fullName: string; role: string; email: string; companyName?: string }>;
   companies: Company[];
   invitations: CompanyInvitation[];
@@ -1245,6 +1417,8 @@ function AdminWorkspace({
   catalogItems,
   offerPromotions,
   notifications,
+  auditEvents,
+  ratings,
   users,
   companies,
   invitations,
@@ -1267,6 +1441,16 @@ function AdminWorkspace({
   onOpenNotification,
   banner,
 }: AdminWorkspaceProps) {
+  const ultraWide = useWindowDimensions().width >= 1360;
+  const [adminTrendWindow, setAdminTrendWindow] = useState<7 | 30 | 90>(30);
+  const [adminTrendFocus, setAdminTrendFocus] = useState<'activity' | 'bookings' | 'revenue'>('activity');
+  const [companyStatusFilter, setCompanyStatusFilter] = useState<'all' | 'active' | 'paused' | 'attention'>('all');
+  const [publishingFilter, setPublishingFilter] = useState<'all' | 'service' | 'product' | 'attention'>('all');
+  const [bookingFilter, setBookingFilter] = useState<'all' | 'pending' | 'active' | 'completed' | 'attention'>('all');
+  const [companySort, setCompanySort] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'risk', direction: 'desc' });
+  const [invitationSort, setInvitationSort] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'delivery', direction: 'desc' });
+  const [bookingSort, setBookingSort] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'risk', direction: 'desc' });
+  const [promotionSort, setPromotionSort] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'countdown', direction: 'asc' });
   const adminUsers = users.filter((user) => user.role === 'admin');
   const companyUsers = users.filter((user) => user.role === 'company');
   const pendingInvitations = invitations.filter((invitation) => invitation.status === 'pending');
@@ -1275,6 +1459,76 @@ function AdminWorkspace({
   const recentBookings = bookings.slice(0, 4);
   const livePromotions = offerPromotions.filter((promotion) => promotion.isActive).length;
   const publishedCatalogCount = catalogItems.filter((item) => item.isPublished).length;
+  const grossMerchandiseValue = bookings.reduce((total, booking) => total + booking.total, 0);
+  const completedBookings = bookings.filter((booking) => booking.status === 'completed').length;
+  const averageAdminRating = averageScore(ratings);
+  const invitationDeliveryRate = invitations.length
+    ? (invitations.filter((invitation) => invitation.emailDeliveryStatus === 'sent').length / invitations.length) * 100
+    : 100;
+  const recentAdminEvents = getRecentAuditEvents(auditEvents, adminTrendWindow);
+  const partnerSnapshots = companies
+    .map((company) => buildCompanyOperationalSnapshot(company, bookings, catalogItems, offerPromotions, notifications, invitations, ratings, auditEvents))
+    .sort((left, right) => severityWeight(right.tone) - severityWeight(left.tone));
+  const recentAuditEvents = auditEvents.slice(0, 6);
+  const adminActivityTrend = buildTrendSeries(recentAdminEvents, (event) => (event.status === 'error' ? 0 : 1));
+  const adminBookingTrend = buildTrendSeries(
+    recentAdminEvents.filter((event) => event.entityType === 'booking' && event.action === 'placeBooking'),
+    () => 1,
+  );
+  const adminRevenueTrend = buildTrendSeries(
+    recentAdminEvents.filter((event) => event.entityType === 'booking' && event.action === 'placeBooking'),
+    (event) => toNumericMetric(event.metadata.find((entry) => /^\d/.test(entry)) ?? '0'),
+  );
+  const riskCompanies = partnerSnapshots.filter((snapshot) => snapshot.tone === 'warning' || snapshot.tone === 'error');
+  const filteredCompanies = partnerSnapshots.filter((snapshot) => {
+    if (companyStatusFilter === 'active') return snapshot.tone !== 'error' && snapshot.detail.startsWith('Active');
+    if (companyStatusFilter === 'paused') return snapshot.detail.startsWith('Paused');
+    if (companyStatusFilter === 'attention') return snapshot.tone === 'warning' || snapshot.tone === 'error';
+    return true;
+  });
+  const filteredPublishingItems = catalogItems.filter((item) => {
+    const company = companies.find((entry) => entry.id === item.companyId);
+    const catalogRisk = getCatalogRisk(item, company?.isActive ?? true);
+    if (publishingFilter === 'service') return item.kind === 'service';
+    if (publishingFilter === 'product') return item.kind === 'product';
+    if (publishingFilter === 'attention') return catalogRisk.tone === 'warning' || catalogRisk.tone === 'error';
+    return true;
+  });
+  const filteredBookings = bookings.filter((booking) => {
+    const bookingRisk = getBookingRisk(booking);
+    if (bookingFilter === 'pending') return booking.status === 'pending';
+    if (bookingFilter === 'active') return ['approved', 'scheduled', 'enRoute', 'inProgress'].includes(booking.status);
+    if (bookingFilter === 'completed') return booking.status === 'completed';
+    if (bookingFilter === 'attention') return bookingRisk.tone === 'warning' || bookingRisk.tone === 'error';
+    return true;
+  });
+  const sortedCompanySnapshots = sortRows(filteredCompanies, companySort, {
+    name: (snapshot) => snapshot.title,
+    risk: (snapshot) => severityWeight(snapshot.tone),
+    status: (snapshot) => snapshot.statusLabel,
+  });
+  const sortedInvitations = sortRows(pendingInvitations, invitationSort, {
+    company: (invitation) => invitation.companyName,
+    email: (invitation) => invitation.email,
+    delivery: (invitation) => invitation.emailDeliveryStatus,
+    status: (invitation) => invitation.status,
+  });
+  const sortedBookings = sortRows(filteredBookings, bookingSort, {
+    booking: (booking) => booking.bookingNumber,
+    company: (booking) => booking.companyName,
+    aging: (booking) => getBookingAgingInfo(booking).sortValue,
+    total: (booking) => booking.total,
+    status: (booking) => booking.status,
+    risk: (booking) => severityWeight(getBookingRisk(booking).tone),
+  });
+  const sortedPromotions = sortRows(offerPromotions, promotionSort, {
+    promotion: (promotion) => promotion.title,
+    company: (promotion) => promotion.companyName,
+    discount: (promotion) => promotion.discountLabel || '',
+    countdown: (promotion) => getCountdownInfo(promotion.endsAtLabel).sortValue,
+    status: (promotion) => (promotion.isActive ? 1 : 0),
+  });
+  const adminTrendDetails = getTrendInsight(adminTrendFocus, adminActivityTrend, adminBookingTrend, adminRevenueTrend, adminTrendWindow);
 
   return (
     <>
@@ -1340,15 +1594,18 @@ function AdminWorkspace({
             ))}
             <MetricCard label="Catalog live" value={String(publishedCatalogCount)} />
             <MetricCard label="Action needed" value={String(pendingInvitations.length + pausedCompanies.length)} />
+            <MetricCard label="GMV" value={formatMetricValue(grossMerchandiseValue)} />
+            <MetricCard label="Completion" value={formatPercentValue(completedBookings, bookings.length)} />
+            <MetricCard label="Avg rating" value={averageAdminRating ? averageAdminRating.toFixed(1) : '0.0'} />
+            <MetricCard label="Invite delivery" value={formatPercent(invitationDeliveryRate)} />
           </View>
           <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
             <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
-              <SectionCard title="Operations pulse" subtitle="Use the dashboard to spot onboarding blockers, marketplace issues, and unread updates before you dive into forms.">
-                <View style={[styles.metricGrid, wide && styles.metricGridWide]}>
-                  <MetricCard label="Pending invites" value={String(pendingInvitations.length)} />
-                  <MetricCard label="Paused companies" value={String(pausedCompanies.length)} />
-                  <MetricCard label="Unread alerts" value={String(unreadNotifications.length)} />
-                  <MetricCard label="Live promotions" value={String(livePromotions)} />
+              <SectionCard title="Executive scoreboard" subtitle="A premium admin dashboard should expose demand, fulfilment, trust, and onboarding health without making you inspect raw lists first.">
+                <View style={styles.statusRail}>
+                  <OperationalStatusRow title="GMV" detail={`${formatMetricValue(grossMerchandiseValue)} across ${bookings.length} marketplace bookings`} statusLabel={completedBookings ? `${completedBookings} completed` : 'No completions yet'} tone="success" />
+                  <OperationalStatusRow title="Delivery health" detail={`${pendingInvitations.length} pending invites, ${pausedCompanies.length} paused workspaces, ${unreadNotifications.length} unread alerts`} statusLabel={`${formatPercent(invitationDeliveryRate)} deliverability`} tone={pendingInvitations.length || pausedCompanies.length ? 'warning' : 'success'} />
+                  <OperationalStatusRow title="Trust score" detail={`${publishedCatalogCount} live listings, ${livePromotions} active promotions, ${ratings.length} customer reviews`} statusLabel={averageAdminRating ? `${averageAdminRating.toFixed(1)} / 5` : 'Awaiting reviews'} tone={averageAdminRating >= 4 ? 'success' : averageAdminRating >= 3 ? 'info' : 'warning'} />
                 </View>
                 <View style={styles.rowGap}>
                   <SecondaryButton label="Review settings" onPress={() => onTabChange('settings')} />
@@ -1357,23 +1614,31 @@ function AdminWorkspace({
               </SectionCard>
 
               <SectionCard title="Partner health" subtitle="A quick view of partner readiness, publishing volume, and support posture.">
-                {companies.length ? companies.slice(0, 4).map((company) => {
-                  const companyCatalogCount = catalogItems.filter((item) => item.companyId === company.id && item.isPublished).length;
-                  const companyPromotionCount = offerPromotions.filter((promotion) => promotion.companyId === company.id && promotion.isActive).length;
-                  return (
-                    <InfoRow
-                      key={company.id}
-                      title={company.name}
-                      subtitle={`${company.isActive ? 'Active' : 'Paused'} · ${companyCatalogCount} published items · ${companyPromotionCount} live promotions`}
-                              actionLabel="Manage"
-                              onAction={() => onTabChange('companies')}
-                    />
-                  );
-                }) : <EmptyState title="No companies yet" body="Create the first partner workspace to start marketplace operations." />}
+                {partnerSnapshots.length ? partnerSnapshots.slice(0, 5).map((snapshot) => (
+                  <OperationalStatusRow key={snapshot.id} title={snapshot.title} detail={snapshot.detail} statusLabel={snapshot.statusLabel} tone={snapshot.tone} actionLabel="Manage" onPress={() => onTabChange('companies')} />
+                )) : <EmptyState title="No companies yet" body="Create the first partner workspace to start marketplace operations." />}
               </SectionCard>
             </View>
 
             <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
+              <SectionCard title="Audit history" subtitle="Every core operational change is captured so admins can review what changed, who triggered it, and which workspace needs attention.">
+                {recentAuditEvents.length ? recentAuditEvents.map((event) => (
+                  <AuditEventRow key={event.id} event={event} />
+                )) : <EmptyState title="No audit history yet" body="Operational history starts building as soon as admins, companies, and customers take action." />}
+              </SectionCard>
+
+              <SectionCard title="Trend monitor" subtitle="Short-horizon trend bars help you spot whether marketplace demand and operator activity are rising or flattening.">
+                <View style={styles.filterChipRow}>
+                  <ChoiceChip label="7D" selected={adminTrendWindow === 7} onPress={() => setAdminTrendWindow(7)} />
+                  <ChoiceChip label="30D" selected={adminTrendWindow === 30} onPress={() => setAdminTrendWindow(30)} />
+                  <ChoiceChip label="90D" selected={adminTrendWindow === 90} onPress={() => setAdminTrendWindow(90)} />
+                </View>
+                <MiniTrendCard title="Operational activity" subtitle="Successful admin, company, and customer actions over recent days." points={adminActivityTrend} tone="info" selected={adminTrendFocus === 'activity'} onPress={() => setAdminTrendFocus('activity')} />
+                <MiniTrendCard title="Bookings created" subtitle="Recent booking intake trend from the audit stream." points={adminBookingTrend} tone="success" selected={adminTrendFocus === 'bookings'} onPress={() => setAdminTrendFocus('bookings')} />
+                <MiniTrendCard title="Revenue trend" subtitle="Booking value trend from recent booking activity." points={adminRevenueTrend} tone="warning" format="currency" selected={adminTrendFocus === 'revenue'} onPress={() => setAdminTrendFocus('revenue')} />
+                <TrendDrilldownCard title={adminTrendDetails.title} description={adminTrendDetails.description} highlight={adminTrendDetails.highlight} footer={adminTrendDetails.footer} points={adminTrendFocus === 'activity' ? adminActivityTrend : adminTrendFocus === 'bookings' ? adminBookingTrend : adminRevenueTrend} format={adminTrendFocus === 'revenue' ? 'currency' : 'number'} />
+              </SectionCard>
+
               <SectionCard title="Notification center" subtitle="Unread and recent updates from invitations, bookings, reviews, and publishing appear here.">
                 {notifications.length ? notifications.slice(0, 6).map((notification) => (
                   <NotificationRow key={notification.id} notification={notification} onOpen={() => onOpenNotification(notification)} />
@@ -1399,6 +1664,12 @@ function AdminWorkspace({
                 <CompactBadge label="Paused" value={String(pausedCompanies.length)} />
                 <CompactBadge label="Invites" value={String(invitations.length)} />
               </View>
+              <View style={styles.filterChipRow}>
+                <ChoiceChip label="All" selected={companyStatusFilter === 'all'} onPress={() => setCompanyStatusFilter('all')} />
+                <ChoiceChip label="Active" selected={companyStatusFilter === 'active'} onPress={() => setCompanyStatusFilter('active')} />
+                <ChoiceChip label="Paused" selected={companyStatusFilter === 'paused'} onPress={() => setCompanyStatusFilter('paused')} />
+                <ChoiceChip label="Attention" selected={companyStatusFilter === 'attention'} onPress={() => setCompanyStatusFilter('attention')} />
+              </View>
             </SectionCard>
 
             <SectionCard title="Management rules" subtitle="Company creation now happens through invitations in Settings. This page is dedicated to operational management only.">
@@ -1412,20 +1683,80 @@ function AdminWorkspace({
 
           <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
             <SectionCard title="Partner companies" subtitle="Admins can inspect every company and switch each workspace active or inactive without entering an edit form.">
-              {companies.length ? companies.map((company) => (
-                <CompanyCard
-                  key={company.id}
-                  company={company}
-                  actionLabel={company.isActive ? 'Set inactive' : 'Set active'}
-                  onAction={() => onToggleCompany(company.id, !company.isActive)}
-                  secondaryActionLabel="Delete"
-                  onSecondaryAction={() => onDeleteCompany(company.id)}
+              {riskCompanies.length ? (
+                <View style={styles.statusRail}>
+                  {riskCompanies.slice(0, 3).map((snapshot) => (
+                    <OperationalStatusRow key={snapshot.id} title={snapshot.title} detail={snapshot.detail} statusLabel={snapshot.statusLabel} tone={snapshot.tone} />
+                  ))}
+                </View>
+              ) : null}
+              {wide ? (
+                <SortableDataTable
+                  columns={[
+                    { key: 'name', label: 'Company', sortable: true, render: (snapshot) => snapshot.title },
+                    { key: 'bookingsTrend', label: 'Bookings trend', render: (snapshot) => <MiniSparkline values={buildCompanyBookingSparkline(bookings, snapshot.id)} tone={snapshot.tone === 'error' ? 'error' : snapshot.tone === 'warning' ? 'warning' : 'info'} /> },
+                    { key: 'risk', label: 'Risk', sortable: true, render: (snapshot) => <TableStatusPill label={toneLabel(snapshot.tone)} tone={snapshot.tone} /> },
+                    { key: 'status', label: 'Status', sortable: true, render: (snapshot) => snapshot.statusLabel },
+                    { key: 'detail', label: 'Ops detail', render: (snapshot) => snapshot.detail },
+                  ]}
+                  rows={sortedCompanySnapshots}
+                  sortState={companySort}
+                  onSortChange={setCompanySort}
+                  keyExtractor={(snapshot) => snapshot.id}
+                  getRowTone={(snapshot) => snapshot.tone}
+                  stickyLeadColumns={ultraWide}
+                  stickyLeadingColumnCount={1}
+                  filterStorageKey="admin-companies"
+                  renderActions={(snapshot) => {
+                    const company = companies.find((entry) => entry.id === snapshot.id);
+                    return company ? (
+                      <View style={styles.tableActionWrap}>
+                        <InlineActionButton label={company.isActive ? 'Pause' : 'Activate'} onPress={() => onToggleCompany(company.id, !company.isActive)} tone="neutral" />
+                        <InlineActionButton label="Delete" onPress={() => onDeleteCompany(company.id)} tone="danger" />
+                      </View>
+                    ) : null;
+                  }}
                 />
-              )) : <EmptyState title="No companies yet" body="Invite a company owner from Settings to create and populate the marketplace." />}
+              ) : filteredCompanies.length ? filteredCompanies.map((snapshot) => {
+                const company = companies.find((entry) => entry.id === snapshot.id);
+                return company ? (
+                  <View key={company.id} style={styles.stackTight}>
+                    <OperationalStatusRow title={snapshot.title} detail={snapshot.detail} statusLabel={snapshot.statusLabel} tone={snapshot.tone} />
+                    <CompanyCard
+                      company={company}
+                      actionLabel={company.isActive ? 'Set inactive' : 'Set active'}
+                      onAction={() => onToggleCompany(company.id, !company.isActive)}
+                      secondaryActionLabel="Delete"
+                      onSecondaryAction={() => onDeleteCompany(company.id)}
+                    />
+                  </View>
+                ) : null;
+              }) : <EmptyState title="No companies match this filter" body="Try another state filter to review partner workspaces." />}
             </SectionCard>
 
             <SectionCard title="Invitation delivery" subtitle="Track invite acceptance and whether delivery succeeded or failed.">
-              {invitations.length ? invitations.map((invitation) => (
+              {wide ? (
+                <SortableDataTable
+                  columns={[
+                    { key: 'company', label: 'Company', sortable: true, render: (invitation) => invitation.companyName },
+                    { key: 'email', label: 'Email', sortable: true, render: (invitation) => invitation.email },
+                    { key: 'delivery', label: 'Delivery', sortable: true, render: (invitation) => <TableStatusPill label={invitation.emailDeliveryStatus} tone={getInvitationDeliveryTone(invitation.emailDeliveryStatus)} /> },
+                    { key: 'status', label: 'State', sortable: true, render: (invitation) => <TableStatusPill label={invitation.status} tone={invitation.status === 'revoked' ? 'error' : invitation.status === 'accepted' ? 'success' : 'warning'} /> },
+                  ]}
+                  rows={sortedInvitations}
+                  sortState={invitationSort}
+                  onSortChange={setInvitationSort}
+                  keyExtractor={(invitation) => invitation.id}
+                  getRowTone={(invitation) => invitation.emailDeliveryStatus === 'failed' ? 'error' : invitation.status === 'pending' ? 'warning' : 'success'}
+                  filterStorageKey="admin-invitations"
+                  renderActions={(invitation) => invitation.status === 'pending' ? (
+                    <View style={styles.tableActionWrap}>
+                      <InlineActionButton label="Resend" onPress={() => onResendInvitation(invitation)} />
+                      <InlineActionButton label="Revoke" onPress={() => onRevokeInvitation(invitation)} tone="danger" />
+                    </View>
+                  ) : null}
+                />
+              ) : invitations.length ? invitations.map((invitation) => (
                 <InfoRow
                   key={invitation.id}
                   title={`${invitation.companyName} · ${invitation.email}`}
@@ -1445,20 +1776,54 @@ function AdminWorkspace({
         <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
           <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
             <SectionCard title="Published by companies" subtitle="Admins can inspect all products and services companies have pushed live to customers.">
-              {catalogItems.length ? catalogItems.map((item) => (
-                <CatalogCard
-                  key={item.id}
-                  item={item}
-                  actionLabel="Open company"
-                  onAction={() => onSelectCompany(item.companyId)}
-                />
-              )) : <EmptyState title="No published items yet" body="Company products and services will appear here as soon as a partner publishes them." />}
+              <View style={styles.filterChipRow}>
+                <ChoiceChip label="All" selected={publishingFilter === 'all'} onPress={() => setPublishingFilter('all')} />
+                <ChoiceChip label="Service" selected={publishingFilter === 'service'} onPress={() => setPublishingFilter('service')} />
+                <ChoiceChip label="Product" selected={publishingFilter === 'product'} onPress={() => setPublishingFilter('product')} />
+                <ChoiceChip label="Attention" selected={publishingFilter === 'attention'} onPress={() => setPublishingFilter('attention')} />
+              </View>
+              {filteredPublishingItems.length ? filteredPublishingItems.map((item) => {
+                const company = companies.find((entry) => entry.id === item.companyId);
+                const risk = getCatalogRisk(item, company?.isActive ?? true);
+                return (
+                  <View key={item.id} style={styles.stackTight}>
+                    <OperationalStatusRow title={`${item.title} risk`} detail={risk.detail} statusLabel={risk.label} tone={risk.tone} />
+                    <CatalogCard
+                      item={item}
+                      actionLabel="Open company"
+                      onAction={() => onSelectCompany(item.companyId)}
+                    />
+                  </View>
+                );
+              }) : <EmptyState title="No catalog items match this filter" body="Try another publishing filter to inspect storefront quality." />}
             </SectionCard>
           </View>
 
           <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
             <SectionCard title="Live promotions" subtitle="Promotions are now their own backend records, separate from the base product and service catalog.">
-              {offerPromotions.length ? offerPromotions.map((promotion) => (
+              {wide ? (
+                <SortableDataTable
+                  columns={[
+                    { key: 'promotion', label: 'Promotion', sortable: true, render: (promotion) => promotion.title },
+                    { key: 'company', label: 'Company', sortable: true, render: (promotion) => promotion.companyName },
+                    { key: 'velocity', label: 'Velocity', render: (promotion) => <MiniSparkline values={buildPromotionVelocitySparkline(auditEvents, promotion)} tone={getPromotionRisk(promotion).tone} /> },
+                    { key: 'discount', label: 'Discount', sortable: true, render: (promotion) => promotion.discountLabel || 'None set' },
+                    { key: 'countdown', label: 'Countdown', sortable: true, render: (promotion) => {
+                      const countdown = getCountdownInfo(promotion.endsAtLabel);
+                      return <TableStatusPill label={countdown.label} tone={countdown.tone} />;
+                    } },
+                    { key: 'status', label: 'State', sortable: true, render: (promotion) => <TableStatusPill label={promotion.isActive ? 'Active' : 'Paused'} tone={getPromotionStateTone(promotion.isActive)} /> },
+                  ]}
+                  rows={sortedPromotions}
+                  sortState={promotionSort}
+                  onSortChange={setPromotionSort}
+                  keyExtractor={(promotion) => promotion.id}
+                  getRowTone={(promotion) => getPromotionRisk(promotion).tone}
+                  stickyLeadColumns={ultraWide}
+                  stickyLeadingColumnCount={2}
+                  filterStorageKey="admin-promotions"
+                />
+              ) : offerPromotions.length ? offerPromotions.map((promotion) => (
                 <InfoRow
                   key={promotion.id}
                   title={`${promotion.title} · ${promotion.catalogItemTitle}`}
@@ -1472,7 +1837,47 @@ function AdminWorkspace({
 
       {tab === 'bookings' ? (
         <SectionCard title="All company bookings" subtitle="Admins can track the full marketplace booking flow across every partner company.">
-          {bookings.length ? bookings.map((booking) => <BookingCard key={booking.id} booking={booking} />) : <EmptyState title="No bookings yet" body="Bookings will appear here once customers order published items." />}
+          <View style={styles.filterChipRow}>
+            <ChoiceChip label="All" selected={bookingFilter === 'all'} onPress={() => setBookingFilter('all')} />
+            <ChoiceChip label="Pending" selected={bookingFilter === 'pending'} onPress={() => setBookingFilter('pending')} />
+            <ChoiceChip label="Active" selected={bookingFilter === 'active'} onPress={() => setBookingFilter('active')} />
+            <ChoiceChip label="Completed" selected={bookingFilter === 'completed'} onPress={() => setBookingFilter('completed')} />
+            <ChoiceChip label="Attention" selected={bookingFilter === 'attention'} onPress={() => setBookingFilter('attention')} />
+          </View>
+          {wide ? (
+            <SortableDataTable
+              columns={[
+                { key: 'booking', label: 'Booking', sortable: true, render: (booking) => booking.bookingNumber },
+                { key: 'company', label: 'Company', sortable: true, render: (booking) => booking.companyName },
+                { key: 'aging', label: 'Aging', sortable: true, render: (booking) => {
+                  const aging = getBookingAgingInfo(booking);
+                  return <TableStatusPill label={aging.label} tone={aging.tone} />;
+                } },
+                { key: 'total', label: 'Total', sortable: true, render: (booking) => `QAR ${booking.total.toFixed(0)}` },
+                { key: 'status', label: 'Status', sortable: true, render: (booking) => <TableStatusPill label={readableBookingStatus(booking.status)} tone={getBookingStatusTone(booking.status)} /> },
+                { key: 'risk', label: 'Risk', sortable: true, render: (booking) => {
+                  const risk = getBookingRisk(booking);
+                  return <TableStatusPill label={risk.label} tone={risk.tone} />;
+                } },
+              ]}
+              rows={sortedBookings}
+              sortState={bookingSort}
+              onSortChange={setBookingSort}
+              keyExtractor={(booking) => booking.id}
+              getRowTone={(booking) => getBookingRisk(booking).tone}
+              stickyLeadColumns={ultraWide}
+              stickyLeadingColumnCount={2}
+              filterStorageKey="admin-bookings"
+            />
+          ) : filteredBookings.length ? filteredBookings.map((booking) => {
+            const risk = getBookingRisk(booking);
+            return (
+              <View key={booking.id} style={styles.stackTight}>
+                <OperationalStatusRow title={`${booking.bookingNumber} risk`} detail={risk.detail} statusLabel={risk.label} tone={risk.tone} />
+                <BookingCard booking={booking} />
+              </View>
+            );
+          }) : <EmptyState title="No bookings match this filter" body="Adjust the booking filter to review another operational slice." />}
         </SectionCard>
       ) : null}
 
@@ -1554,8 +1959,9 @@ type CompanyWorkspaceProps = {
   companyItems: CatalogItem[];
   companyPromotions: OfferPromotion[];
   notifications: AppNotification[];
+  auditEvents: AuditEvent[];
   companyBookings: Booking[];
-  ratings: Array<{ id: string; companyId: string }>;
+  ratings: Array<{ id: string; companyId: string; score: number }>;
   selectedCatalogItem: CatalogItem | null;
   catalogForm: {
     title: string;
@@ -1658,6 +2064,7 @@ function CompanyWorkspace({
   companyItems,
   companyPromotions,
   notifications,
+  auditEvents,
   companyBookings,
   ratings,
   selectedCatalogItem,
@@ -1686,13 +2093,59 @@ function CompanyWorkspace({
   onSaveLoyalty,
   currentProgram,
 }: CompanyWorkspaceProps) {
-  const [catalogFilter, setCatalogFilter] = useState<'all' | 'published' | 'draft'>('all');
+  const ultraWide = useWindowDimensions().width >= 1360;
+  const [companyTrendWindow, setCompanyTrendWindow] = useState<7 | 30 | 90>(30);
+  const [companyTrendFocus, setCompanyTrendFocus] = useState<'activity' | 'bookings' | 'publishing'>('activity');
+  const [catalogFilter, setCatalogFilter] = useState<'all' | 'published' | 'draft' | 'attention'>('all');
+  const [offerFilter, setOfferFilter] = useState<'all' | 'active' | 'paused' | 'attention'>('all');
+  const [companyBookingFilter, setCompanyBookingFilter] = useState<'all' | 'pending' | 'active' | 'completed' | 'attention'>('all');
+  const [companyCatalogSort, setCompanyCatalogSort] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'risk', direction: 'desc' });
+  const [companyOfferSort, setCompanyOfferSort] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'risk', direction: 'desc' });
+  const [companyBookingSort, setCompanyBookingSort] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'risk', direction: 'desc' });
   const unreadNotifications = notifications.filter((entry) => !entry.isRead);
   const pendingBookings = companyBookings.filter((entry) => entry.status === 'pending');
   const activePromotions = companyPromotions.filter((entry) => entry.isActive);
   const publishedItems = companyItems.filter((entry) => entry.isPublished).length;
   const draftItems = companyItems.length - publishedItems;
   const currentAccent = currentCompany?.accentColor?.trim() || colors.primary;
+  const companyRevenue = companyBookings.reduce((total, booking) => total + booking.total, 0);
+  const completedBookings = companyBookings.filter((booking) => booking.status === 'completed').length;
+  const companyRatings = ratings.filter((entry) => entry.companyId === currentCompany?.id);
+  const averageCompanyRating = averageScore(companyRatings);
+  const companyAuditEvents = auditEvents.filter((event) => event.companyId === currentCompany?.id).slice(0, 6);
+  const companyAllAuditEvents = getRecentAuditEvents(auditEvents.filter((event) => event.companyId === currentCompany?.id), companyTrendWindow);
+  const companyActivityTrend = buildTrendSeries(companyAllAuditEvents, (event) => (event.status === 'error' ? 0 : 1));
+  const companyBookingTrend = buildTrendSeries(
+    companyAllAuditEvents.filter((event) => event.entityType === 'booking' && event.action === 'placeBooking'),
+    () => 1,
+  );
+  const companyPublishingTrend = buildTrendSeries(
+    companyAllAuditEvents.filter((event) => event.entityType === 'catalogItem' || event.entityType === 'promotion'),
+    () => 1,
+  );
+  const companyRisks = [
+    {
+      id: 'booking-risk',
+      title: 'Bookings waiting',
+      detail: `${pendingBookings.length} bookings still need first action from the company team.`,
+      statusLabel: pendingBookings.length ? 'Needs operational follow-up' : 'Backlog is clear',
+      tone: pendingBookings.length > 2 ? 'warning' as const : 'success' as const,
+    },
+    {
+      id: 'catalog-risk',
+      title: 'Catalog gaps',
+      detail: `${companyItems.filter((item) => !item.imageUrl).length} listings have no image and ${draftItems} remain in draft.`,
+      statusLabel: companyItems.length ? `${formatPercentValue(publishedItems, companyItems.length)} live` : 'No listings yet',
+      tone: companyItems.filter((item) => !item.imageUrl).length || draftItems > publishedItems ? 'warning' as const : 'info' as const,
+    },
+    {
+      id: 'offer-risk',
+      title: 'Offer hygiene',
+      detail: `${companyPromotions.filter((promotion) => !promotion.discountLabel || !promotion.endsAtLabel).length} promotions are missing discount or end-date detail.`,
+      statusLabel: `${activePromotions.length} active offers`,
+      tone: companyPromotions.filter((promotion) => !promotion.discountLabel || !promotion.endsAtLabel).length ? 'warning' as const : 'success' as const,
+    },
+  ];
   const filteredCompanyItems = useMemo(() => {
     if (catalogFilter === 'published') {
       return companyItems.filter((entry) => entry.isPublished);
@@ -1702,8 +2155,54 @@ function CompanyWorkspace({
       return companyItems.filter((entry) => !entry.isPublished);
     }
 
+    if (catalogFilter === 'attention') {
+      return companyItems.filter((entry) => {
+        const risk = getCatalogRisk(entry, true);
+        return risk.tone === 'warning' || risk.tone === 'error';
+      });
+    }
+
     return companyItems;
   }, [catalogFilter, companyItems]);
+  const filteredPromotions = companyPromotions.filter((promotion) => {
+    const risk = getPromotionRisk(promotion);
+    if (offerFilter === 'active') return promotion.isActive;
+    if (offerFilter === 'paused') return !promotion.isActive;
+    if (offerFilter === 'attention') return risk.tone === 'warning' || risk.tone === 'error';
+    return true;
+  });
+  const filteredCompanyBookings = companyBookings.filter((booking) => {
+    const risk = getBookingRisk(booking);
+    if (companyBookingFilter === 'pending') return booking.status === 'pending';
+    if (companyBookingFilter === 'active') return ['approved', 'scheduled', 'enRoute', 'inProgress'].includes(booking.status);
+    if (companyBookingFilter === 'completed') return booking.status === 'completed';
+    if (companyBookingFilter === 'attention') return risk.tone === 'warning' || risk.tone === 'error';
+    return true;
+  });
+  const sortedCompanyItems = sortRows(filteredCompanyItems, companyCatalogSort, {
+    title: (item) => item.title,
+    kind: (item) => item.kind,
+    price: (item) => item.price,
+    status: (item) => (item.isPublished ? 1 : 0),
+    risk: (item) => severityWeight(getCatalogRisk(item, true).tone),
+  });
+  const sortedCompanyPromotions = sortRows(filteredPromotions, companyOfferSort, {
+    title: (promotion) => promotion.title,
+    item: (promotion) => promotion.catalogItemTitle,
+    status: (promotion) => (promotion.isActive ? 1 : 0),
+    ending: (promotion) => parseFlexibleDate(promotion.endsAtLabel)?.getTime() ?? Number.MAX_SAFE_INTEGER,
+    risk: (promotion) => severityWeight(getPromotionRisk(promotion).tone),
+  });
+  const sortedCompanyBookings = sortRows(filteredCompanyBookings, companyBookingSort, {
+    booking: (booking) => booking.bookingNumber,
+    customer: (booking) => booking.customerName,
+    schedule: (booking) => parseFlexibleDate(booking.scheduleDate)?.getTime() ?? Number.MAX_SAFE_INTEGER,
+    aging: (booking) => getBookingAgingInfo(booking).sortValue,
+    total: (booking) => booking.total,
+    status: (booking) => booking.status,
+    risk: (booking) => severityWeight(getBookingRisk(booking).tone),
+  });
+  const companyTrendDetails = getTrendInsight(companyTrendFocus, companyActivityTrend, companyBookingTrend, companyPublishingTrend, companyTrendWindow);
 
   return (
     <>
@@ -1769,22 +2268,43 @@ function CompanyWorkspace({
             <MetricCard label="Bookings" value={String(companyBookings.length)} />
             <MetricCard label="Ratings" value={String(ratings.filter((entry) => entry.companyId === currentCompany?.id).length)} />
             <MetricCard label="Live offers" value={String(activePromotions.length)} />
+            <MetricCard label="GMV" value={formatMetricValue(companyRevenue)} />
+            <MetricCard label="Fulfilment" value={formatPercentValue(completedBookings, companyBookings.length)} />
+            <MetricCard label="Avg rating" value={averageCompanyRating ? averageCompanyRating.toFixed(1) : '0.0'} />
+            <MetricCard label="Draft share" value={formatPercentValue(draftItems, companyItems.length)} />
           </View>
 
           <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
             <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
-              <SectionCard title={currentCompany?.name ?? 'Company workspace'} subtitle="A polished operations view should surface bookings, promotions, and unread activity before editing settings.">
-                <View style={[styles.metricGrid, wide && styles.metricGridWide]}>
-                  <MetricCard label="Pending bookings" value={String(pendingBookings.length)} />
-                  <MetricCard label="Active offers" value={String(activePromotions.length)} />
-                  <MetricCard label="Unread alerts" value={String(unreadNotifications.length)} />
-                  <MetricCard label="Loyalty" value={currentProgram?.isActive ? 'Live' : 'Paused'} />
+              <SectionCard title={currentCompany?.name ?? 'Company workspace'} subtitle="A SaaS-grade company dashboard should highlight revenue, fulfilment pressure, and listing quality before anyone touches the forms.">
+                <View style={styles.statusRail}>
+                  <OperationalStatusRow title="Revenue lane" detail={`${formatMetricValue(companyRevenue)} from ${companyBookings.length} bookings`} statusLabel={companyBookings.length ? `${Math.round(companyRevenue / companyBookings.length)} avg order` : 'No orders yet'} tone={companyRevenue > 0 ? 'success' : 'info'} />
+                  <OperationalStatusRow title="Fulfilment lane" detail={`${pendingBookings.length} pending bookings, ${completedBookings} completed, ${unreadNotifications.length} unread alerts`} statusLabel={`${formatPercentValue(completedBookings, companyBookings.length)} delivered`} tone={pendingBookings.length > 2 ? 'warning' : 'success'} />
+                  <OperationalStatusRow title="Publishing lane" detail={`${publishedItems} published items, ${draftItems} drafts, ${activePromotions.length} live offers`} statusLabel={currentProgram?.isActive ? 'Loyalty live' : 'Loyalty paused'} tone={draftItems > publishedItems && companyItems.length > 0 ? 'warning' : 'info'} />
                 </View>
                 <View style={styles.rowGap}>
                   <SecondaryButton label="Catalog" onPress={() => onTabChange('catalog')} />
                   <SecondaryButton label="Offers" onPress={() => onTabChange('offers')} />
                   <SecondaryButton label="Bookings" onPress={() => onTabChange('bookings')} />
                 </View>
+              </SectionCard>
+
+              <SectionCard title="Audit trail" subtitle="Publishing, booking, and loyalty changes are logged so the company team can review operational history in one place.">
+                {companyAuditEvents.length ? companyAuditEvents.map((event) => (
+                  <AuditEventRow key={event.id} event={event} />
+                )) : <EmptyState title="No audit history yet" body="Audit activity will appear here after the first catalog, offer, booking, or loyalty action." />}
+              </SectionCard>
+
+              <SectionCard title="Trend monitor" subtitle="These compact trend bars show whether bookings and publishing actions are accelerating or stalling.">
+                <View style={styles.filterChipRow}>
+                  <ChoiceChip label="7D" selected={companyTrendWindow === 7} onPress={() => setCompanyTrendWindow(7)} />
+                  <ChoiceChip label="30D" selected={companyTrendWindow === 30} onPress={() => setCompanyTrendWindow(30)} />
+                  <ChoiceChip label="90D" selected={companyTrendWindow === 90} onPress={() => setCompanyTrendWindow(90)} />
+                </View>
+                <MiniTrendCard title="Workspace activity" subtitle="All tracked company actions across recent days." points={companyActivityTrend} tone="info" selected={companyTrendFocus === 'activity'} onPress={() => setCompanyTrendFocus('activity')} />
+                <MiniTrendCard title="Booking intake" subtitle="Recent booking creation trend for this company." points={companyBookingTrend} tone="success" selected={companyTrendFocus === 'bookings'} onPress={() => setCompanyTrendFocus('bookings')} />
+                <MiniTrendCard title="Publishing activity" subtitle="Catalog and offer updates across recent days." points={companyPublishingTrend} tone="warning" selected={companyTrendFocus === 'publishing'} onPress={() => setCompanyTrendFocus('publishing')} />
+                <TrendDrilldownCard title={companyTrendDetails.title} description={companyTrendDetails.description} highlight={companyTrendDetails.highlight} footer={companyTrendDetails.footer} points={companyTrendFocus === 'activity' ? companyActivityTrend : companyTrendFocus === 'bookings' ? companyBookingTrend : companyPublishingTrend} />
               </SectionCard>
 
               <SectionCard title="Recent workspace activity" subtitle="Use recent activity to respond faster to bookings, publishing changes, and reviews.">
@@ -1795,6 +2315,16 @@ function CompanyWorkspace({
             </View>
 
             <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
+              <SectionCard title="Operational standards" subtitle="These status checks make the workspace feel closer to a production SaaS console than a simple CRUD screen.">
+                <OperationalStatusRow title="Response queue" detail={`${pendingBookings.length} bookings are still waiting for first action from the company team.`} statusLabel={pendingBookings.length ? 'Needs attention' : 'Under control'} tone={pendingBookings.length > 2 ? 'warning' : 'success'} />
+                <OperationalStatusRow title="Catalog readiness" detail={`${publishedItems} items are live and ${draftItems} remain in draft.`} statusLabel={companyItems.length ? formatPercentValue(publishedItems, companyItems.length) : '0% live'} tone={publishedItems === 0 && companyItems.length > 0 ? 'warning' : 'info'} />
+                <OperationalStatusRow title="Customer trust" detail={`${companyRatings.length} reviews collected and ${activePromotions.length} active offers supporting acquisition.`} statusLabel={averageCompanyRating ? `${averageCompanyRating.toFixed(1)} / 5 rating` : 'No ratings yet'} tone={averageCompanyRating >= 4 ? 'success' : averageCompanyRating >= 3 ? 'info' : 'warning'} />
+                <OperationalStatusRow title="Loyalty readiness" detail={currentProgram ? `${currentProgram.title} rewards customers with ${currentProgram.rewardText || 'configured benefits'}.` : 'No loyalty program is configured for this company yet.'} statusLabel={currentProgram?.isActive ? 'Program active' : 'Program paused'} tone={currentProgram?.isActive ? 'success' : 'warning'} />
+                {companyRisks.map((risk) => (
+                  <OperationalStatusRow key={risk.id} title={risk.title} detail={risk.detail} statusLabel={risk.statusLabel} tone={risk.tone} />
+                ))}
+              </SectionCard>
+
               <SectionCard title="Workspace profile" subtitle="Support, branding, and contact settings still live here, but they no longer crowd the top of the dashboard.">
                 {currentCompany ? (
                   <>
@@ -1834,7 +2364,7 @@ function CompanyWorkspace({
               <SectionCard title={selectedCatalogItem ? 'Edit catalog item' : 'Publish catalog item'} subtitle="Validation now blocks incomplete listings before they reach the marketplace.">
                 <View style={styles.rowGap}>
                   <FormField label="Title" value={catalogForm.title} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, title: value }))} error={catalogErrors.title} />
-                  <FormField label="Category" value={catalogForm.category} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, category: value }))} error={catalogErrors.category} />
+                  <SelectField label="Category" value={catalogForm.category} options={APP_CATEGORY_OPTIONS} placeholder="Choose a category" error={catalogErrors.category} onSelect={(value) => onCatalogFormChange((current) => ({ ...current, category: value }))} />
                 </View>
                 <FormField label="Summary" value={catalogForm.summary} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, summary: value }))} error={catalogErrors.summary} />
                 <FormField label="Description" value={catalogForm.description} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, description: value }))} error={catalogErrors.description} multiline />
@@ -1884,17 +2414,51 @@ function CompanyWorkspace({
                   <CatalogFilterChip label="All" count={companyItems.length} selected={catalogFilter === 'all'} onPress={() => setCatalogFilter('all')} />
                   <CatalogFilterChip label="Published" count={publishedItems} selected={catalogFilter === 'published'} onPress={() => setCatalogFilter('published')} />
                   <CatalogFilterChip label="Draft" count={draftItems} selected={catalogFilter === 'draft'} onPress={() => setCatalogFilter('draft')} />
+                  <CatalogFilterChip label="Attention" count={companyItems.filter((item) => {
+                    const risk = getCatalogRisk(item, true);
+                    return risk.tone === 'warning' || risk.tone === 'error';
+                  }).length} selected={catalogFilter === 'attention'} onPress={() => setCatalogFilter('attention')} />
                 </View>
 
-                {filteredCompanyItems.length ? filteredCompanyItems.map((item, index) => (
-                  <CompanyCatalogCard
-                    key={item.id}
-                    item={item}
-                    index={index}
-                    onAction={() => onSelectCatalogItem(item.id)}
-                    onSecondaryAction={() => onDeleteCatalogItem(item.id)}
+                {wide ? (
+                  <SortableDataTable
+                    columns={[
+                      { key: 'title', label: 'Listing', sortable: true, render: (item) => item.title },
+                      { key: 'kind', label: 'Kind', sortable: true, render: (item) => item.kind === 'service' ? 'Service' : 'Product' },
+                      { key: 'price', label: 'Price', sortable: true, render: (item) => `QAR ${item.price.toFixed(0)}` },
+                      { key: 'status', label: 'State', sortable: true, render: (item) => <TableStatusPill label={item.isPublished ? 'Published' : 'Draft'} tone={item.isPublished ? 'success' : 'info'} /> },
+                      { key: 'risk', label: 'Risk', sortable: true, render: (item) => {
+                        const risk = getCatalogRisk(item, true);
+                        return <TableStatusPill label={risk.label} tone={risk.tone} />;
+                      } },
+                    ]}
+                    rows={sortedCompanyItems}
+                    sortState={companyCatalogSort}
+                    onSortChange={setCompanyCatalogSort}
+                    keyExtractor={(item) => item.id}
+                    getRowTone={(item) => getCatalogRisk(item, true).tone}
+                    filterStorageKey="company-catalog"
+                    renderActions={(item) => (
+                      <View style={styles.tableActionWrap}>
+                        <InlineActionButton label="Edit" onPress={() => onSelectCatalogItem(item.id)} />
+                        <InlineActionButton label="Delete" onPress={() => onDeleteCatalogItem(item.id)} tone="danger" />
+                      </View>
+                    )}
                   />
-                )) : <EmptyState title="No items in this filter" body={catalogFilter === 'draft' ? 'Every current listing is already published.' : catalogFilter === 'published' ? 'Publish a listing to make it visible here.' : 'The marketplace remains empty until this company publishes something here.'} />}
+                ) : filteredCompanyItems.length ? filteredCompanyItems.map((item, index) => {
+                  const risk = getCatalogRisk(item, true);
+                  return (
+                    <View key={item.id} style={styles.stackTight}>
+                      <OperationalStatusRow title={`${item.title} risk`} detail={risk.detail} statusLabel={risk.label} tone={risk.tone} />
+                      <CompanyCatalogCard
+                        item={item}
+                        index={index}
+                        onAction={() => onSelectCatalogItem(item.id)}
+                        onSecondaryAction={() => onDeleteCatalogItem(item.id)}
+                      />
+                    </View>
+                  );
+                }) : <EmptyState title="No items in this filter" body={catalogFilter === 'draft' ? 'Every current listing is already published.' : catalogFilter === 'published' ? 'Publish a listing to make it visible here.' : catalogFilter === 'attention' ? 'No catalog risks are currently flagged.' : 'The marketplace remains empty until this company publishes something here.'} />}
               </SectionCard>
             </View>
           </View>
@@ -1911,7 +2475,7 @@ function CompanyWorkspace({
             <SectionCard title={selectedCatalogItem ? 'Edit catalog item' : 'Publish catalog item'} subtitle="Validation now blocks incomplete listings before they reach the marketplace.">
               <View style={styles.rowGap}>
                 <FormField label="Title" value={catalogForm.title} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, title: value }))} error={catalogErrors.title} />
-                <FormField label="Category" value={catalogForm.category} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, category: value }))} error={catalogErrors.category} />
+                <SelectField label="Category" value={catalogForm.category} options={APP_CATEGORY_OPTIONS} placeholder="Choose a category" error={catalogErrors.category} onSelect={(value) => onCatalogFormChange((current) => ({ ...current, category: value }))} />
               </View>
               <FormField label="Summary" value={catalogForm.summary} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, summary: value }))} error={catalogErrors.summary} />
               <FormField label="Description" value={catalogForm.description} onChangeText={(value) => onCatalogFormChange((current) => ({ ...current, description: value }))} error={catalogErrors.description} multiline />
@@ -1959,17 +2523,26 @@ function CompanyWorkspace({
                 <CatalogFilterChip label="All" count={companyItems.length} selected={catalogFilter === 'all'} onPress={() => setCatalogFilter('all')} />
                 <CatalogFilterChip label="Published" count={publishedItems} selected={catalogFilter === 'published'} onPress={() => setCatalogFilter('published')} />
                 <CatalogFilterChip label="Draft" count={draftItems} selected={catalogFilter === 'draft'} onPress={() => setCatalogFilter('draft')} />
+                <CatalogFilterChip label="Attention" count={companyItems.filter((item) => {
+                  const risk = getCatalogRisk(item, true);
+                  return risk.tone === 'warning' || risk.tone === 'error';
+                }).length} selected={catalogFilter === 'attention'} onPress={() => setCatalogFilter('attention')} />
               </View>
 
-              {filteredCompanyItems.length ? filteredCompanyItems.map((item, index) => (
-                <CompanyCatalogCard
-                  key={item.id}
-                  item={item}
-                  index={index}
-                  onAction={() => onSelectCatalogItem(item.id)}
-                  onSecondaryAction={() => onDeleteCatalogItem(item.id)}
-                />
-              )) : <EmptyState title="No items in this filter" body={catalogFilter === 'draft' ? 'Every current listing is already published.' : catalogFilter === 'published' ? 'Publish a listing to make it visible here.' : 'The marketplace remains empty until this company publishes something here.'} />}
+              {filteredCompanyItems.length ? filteredCompanyItems.map((item, index) => {
+                const risk = getCatalogRisk(item, true);
+                return (
+                  <View key={item.id} style={styles.stackTight}>
+                    <OperationalStatusRow title={`${item.title} risk`} detail={risk.detail} statusLabel={risk.label} tone={risk.tone} />
+                    <CompanyCatalogCard
+                      item={item}
+                      index={index}
+                      onAction={() => onSelectCatalogItem(item.id)}
+                      onSecondaryAction={() => onDeleteCatalogItem(item.id)}
+                    />
+                  </View>
+                );
+              }) : <EmptyState title="No items in this filter" body={catalogFilter === 'draft' ? 'Every current listing is already published.' : catalogFilter === 'published' ? 'Publish a listing to make it visible here.' : catalogFilter === 'attention' ? 'No catalog risks are currently flagged.' : 'The marketplace remains empty until this company publishes something here.'} />}
             </SectionCard>
           </View>
         )
@@ -2016,17 +2589,59 @@ function CompanyWorkspace({
 
             <View style={[styles.columnPane, styles.columnPaneWide]}>
               <SectionCard title="Current promotions" subtitle="These are the offers customers will see highlighted on the marketplace home screen.">
-                {companyPromotions.length ? companyPromotions.map((promotion) => (
-                  <InfoRow
-                    key={promotion.id}
-                    title={`${promotion.title} · ${promotion.catalogItemTitle}`}
-                    subtitle={`${promotion.isActive ? 'Active' : 'Paused'}${promotion.discountLabel ? ` · ${promotion.discountLabel}` : ''}${promotion.badgeText ? ` · ${promotion.badgeText}` : ''}`}
-                    actionLabel="Edit"
-                    onAction={() => onSelectPromotion(promotion.id)}
-                    secondaryActionLabel="Delete"
-                    onSecondaryAction={() => onDeleteOffer(promotion.id)}
+                <View style={styles.filterChipRow}>
+                  <ChoiceChip label="All" selected={offerFilter === 'all'} onPress={() => setOfferFilter('all')} />
+                  <ChoiceChip label="Active" selected={offerFilter === 'active'} onPress={() => setOfferFilter('active')} />
+                  <ChoiceChip label="Paused" selected={offerFilter === 'paused'} onPress={() => setOfferFilter('paused')} />
+                  <ChoiceChip label="Attention" selected={offerFilter === 'attention'} onPress={() => setOfferFilter('attention')} />
+                </View>
+                {wide ? (
+                  <SortableDataTable
+                    columns={[
+                      { key: 'title', label: 'Promotion', sortable: true, render: (promotion) => promotion.title },
+                      { key: 'item', label: 'Linked item', sortable: true, render: (promotion) => promotion.catalogItemTitle },
+                      { key: 'velocity', label: 'Velocity', render: (promotion) => <MiniSparkline values={buildPromotionVelocitySparkline(auditEvents, promotion)} tone={getPromotionRisk(promotion).tone} /> },
+                      { key: 'status', label: 'State', sortable: true, render: (promotion) => <TableStatusPill label={promotion.isActive ? 'Active' : 'Paused'} tone={getPromotionStateTone(promotion.isActive)} /> },
+                      { key: 'ending', label: 'Countdown', sortable: true, render: (promotion) => {
+                        const countdown = getCountdownInfo(promotion.endsAtLabel);
+                        return <TableStatusPill label={countdown.label} tone={countdown.tone} />;
+                      } },
+                      { key: 'risk', label: 'Risk', sortable: true, render: (promotion) => {
+                        const risk = getPromotionRisk(promotion);
+                        return <TableStatusPill label={risk.label} tone={risk.tone} />;
+                      } },
+                    ]}
+                    rows={sortedCompanyPromotions}
+                    sortState={companyOfferSort}
+                    onSortChange={setCompanyOfferSort}
+                    keyExtractor={(promotion) => promotion.id}
+                    getRowTone={(promotion) => getPromotionRisk(promotion).tone}
+                    stickyLeadColumns={ultraWide}
+                    stickyLeadingColumnCount={2}
+                    filterStorageKey="company-promotions"
+                    renderActions={(promotion) => (
+                      <View style={styles.tableActionWrap}>
+                        <InlineActionButton label="Edit" onPress={() => onSelectPromotion(promotion.id)} />
+                        <InlineActionButton label="Delete" onPress={() => onDeleteOffer(promotion.id)} tone="danger" />
+                      </View>
+                    )}
                   />
-                )) : <EmptyState title="No promotions yet" body="Create a promotion here after publishing a product or service in Catalog." />}
+                ) : filteredPromotions.length ? filteredPromotions.map((promotion) => {
+                  const risk = getPromotionRisk(promotion);
+                  return (
+                    <View key={promotion.id} style={styles.stackTight}>
+                      <OperationalStatusRow title={`${promotion.title} risk`} detail={risk.detail} statusLabel={risk.label} tone={risk.tone} />
+                      <InfoRow
+                        title={`${promotion.title} · ${promotion.catalogItemTitle}`}
+                        subtitle={`${promotion.isActive ? 'Active' : 'Paused'}${promotion.discountLabel ? ` · ${promotion.discountLabel}` : ''}${promotion.badgeText ? ` · ${promotion.badgeText}` : ''}`}
+                        actionLabel="Edit"
+                        onAction={() => onSelectPromotion(promotion.id)}
+                        secondaryActionLabel="Delete"
+                        onSecondaryAction={() => onDeleteOffer(promotion.id)}
+                      />
+                    </View>
+                  );
+                }) : <EmptyState title="No promotions match this filter" body="Adjust the offer filter to review another promotion segment." />}
               </SectionCard>
             </View>
           </View>
@@ -2067,17 +2682,28 @@ function CompanyWorkspace({
             </SectionCard>
 
             <SectionCard title="Current promotions" subtitle="These are the offers customers will see highlighted on the marketplace home screen.">
-              {companyPromotions.length ? companyPromotions.map((promotion) => (
-                <InfoRow
-                  key={promotion.id}
-                  title={`${promotion.title} · ${promotion.catalogItemTitle}`}
-                  subtitle={`${promotion.isActive ? 'Active' : 'Paused'}${promotion.discountLabel ? ` · ${promotion.discountLabel}` : ''}${promotion.badgeText ? ` · ${promotion.badgeText}` : ''}`}
-                  actionLabel="Edit"
-                  onAction={() => onSelectPromotion(promotion.id)}
-                  secondaryActionLabel="Delete"
-                  onSecondaryAction={() => onDeleteOffer(promotion.id)}
-                />
-              )) : <EmptyState title="No promotions yet" body="Create a promotion here after publishing a product or service in Catalog." />}
+              <View style={styles.filterChipRow}>
+                <ChoiceChip label="All" selected={offerFilter === 'all'} onPress={() => setOfferFilter('all')} />
+                <ChoiceChip label="Active" selected={offerFilter === 'active'} onPress={() => setOfferFilter('active')} />
+                <ChoiceChip label="Paused" selected={offerFilter === 'paused'} onPress={() => setOfferFilter('paused')} />
+                <ChoiceChip label="Attention" selected={offerFilter === 'attention'} onPress={() => setOfferFilter('attention')} />
+              </View>
+              {filteredPromotions.length ? filteredPromotions.map((promotion) => {
+                const risk = getPromotionRisk(promotion);
+                return (
+                  <View key={promotion.id} style={styles.stackTight}>
+                    <OperationalStatusRow title={`${promotion.title} risk`} detail={risk.detail} statusLabel={risk.label} tone={risk.tone} />
+                    <InfoRow
+                      title={`${promotion.title} · ${promotion.catalogItemTitle}`}
+                      subtitle={`${promotion.isActive ? 'Active' : 'Paused'}${promotion.discountLabel ? ` · ${promotion.discountLabel}` : ''}${promotion.badgeText ? ` · ${promotion.badgeText}` : ''}`}
+                      actionLabel="Edit"
+                      onAction={() => onSelectPromotion(promotion.id)}
+                      secondaryActionLabel="Delete"
+                      onSecondaryAction={() => onDeleteOffer(promotion.id)}
+                    />
+                  </View>
+                );
+              }) : <EmptyState title="No promotions match this filter" body="Adjust the offer filter to review another promotion segment." />}
             </SectionCard>
           </View>
         )
@@ -2085,16 +2711,61 @@ function CompanyWorkspace({
 
       {tab === 'bookings' ? (
         <SectionCard title="Company bookings" subtitle="Status controls are kept inside the company workspace so admins do not need to manage fulfilment.">
-          {companyBookings.length ? companyBookings.map((booking) => (
-            <View key={booking.id} style={styles.bookingWrap}>
-              <BookingCard booking={booking} />
-              <View style={styles.statusActions}>
-                {(['approved', 'scheduled', 'enRoute', 'inProgress', 'completed'] as BookingStatus[]).map((status) => (
-                  <ChoiceChip key={status} label={readableBookingStatus(status)} selected={booking.status === status} onPress={() => onChangeBookingStatus(booking.id, status)} />
-                ))}
+          <View style={styles.filterChipRow}>
+            <ChoiceChip label="All" selected={companyBookingFilter === 'all'} onPress={() => setCompanyBookingFilter('all')} />
+            <ChoiceChip label="Pending" selected={companyBookingFilter === 'pending'} onPress={() => setCompanyBookingFilter('pending')} />
+            <ChoiceChip label="Active" selected={companyBookingFilter === 'active'} onPress={() => setCompanyBookingFilter('active')} />
+            <ChoiceChip label="Completed" selected={companyBookingFilter === 'completed'} onPress={() => setCompanyBookingFilter('completed')} />
+            <ChoiceChip label="Attention" selected={companyBookingFilter === 'attention'} onPress={() => setCompanyBookingFilter('attention')} />
+          </View>
+          {wide ? (
+            <SortableDataTable
+              columns={[
+                { key: 'booking', label: 'Booking', sortable: true, render: (booking) => booking.bookingNumber },
+                { key: 'customer', label: 'Customer', sortable: true, render: (booking) => booking.customerName },
+                { key: 'velocity', label: 'Velocity', render: (booking) => <MiniSparkline values={buildBookingStatusVelocitySparkline(auditEvents, booking.id)} tone={getBookingRisk(booking).tone} /> },
+                { key: 'schedule', label: 'Schedule', sortable: true, render: (booking) => `${booking.scheduleDate} · ${booking.scheduleTime}` },
+                { key: 'aging', label: 'Aging', sortable: true, render: (booking) => {
+                  const aging = getBookingAgingInfo(booking);
+                  return <TableStatusPill label={aging.label} tone={aging.tone} />;
+                } },
+                { key: 'total', label: 'Total', sortable: true, render: (booking) => `QAR ${booking.total.toFixed(0)}` },
+                { key: 'status', label: 'Status', sortable: true, render: (booking) => <TableStatusPill label={readableBookingStatus(booking.status)} tone={getBookingStatusTone(booking.status)} /> },
+                { key: 'risk', label: 'Risk', sortable: true, render: (booking) => {
+                  const risk = getBookingRisk(booking);
+                  return <TableStatusPill label={risk.label} tone={risk.tone} />;
+                } },
+              ]}
+              rows={sortedCompanyBookings}
+              sortState={companyBookingSort}
+              onSortChange={setCompanyBookingSort}
+              keyExtractor={(booking) => booking.id}
+              getRowTone={(booking) => getBookingRisk(booking).tone}
+              stickyLeadColumns={ultraWide}
+              stickyLeadingColumnCount={1}
+              filterStorageKey="company-bookings"
+              renderActions={(booking) => (
+                <View style={styles.tableStatusActionWrap}>
+                  {(['approved', 'scheduled', 'enRoute', 'inProgress', 'completed'] as BookingStatus[]).map((status) => (
+                    <InlineActionButton key={status} label={readableBookingStatus(status)} onPress={() => onChangeBookingStatus(booking.id, status)} tone={booking.status === status ? 'neutral' : 'default'} />
+                  ))}
+                </View>
+              )}
+            />
+          ) : filteredCompanyBookings.length ? filteredCompanyBookings.map((booking) => {
+            const risk = getBookingRisk(booking);
+            return (
+              <View key={booking.id} style={styles.bookingWrap}>
+                <OperationalStatusRow title={`${booking.bookingNumber} risk`} detail={risk.detail} statusLabel={risk.label} tone={risk.tone} />
+                <BookingCard booking={booking} />
+                <View style={styles.statusActions}>
+                  {(['approved', 'scheduled', 'enRoute', 'inProgress', 'completed'] as BookingStatus[]).map((status) => (
+                    <ChoiceChip key={status} label={readableBookingStatus(status)} selected={booking.status === status} onPress={() => onChangeBookingStatus(booking.id, status)} />
+                  ))}
+                </View>
               </View>
-            </View>
-          )) : <EmptyState title="No bookings yet" body="Bookings will appear when customers place orders with your published listings." />}
+            );
+          }) : <EmptyState title="No bookings match this filter" body="Adjust the booking filter to review a different fulfilment slice." />}
         </SectionCard>
       ) : null}
 
@@ -2121,12 +2792,13 @@ function CompanyWorkspace({
 
 type CustomerWorkspaceProps = {
   wide: boolean;
-  tab: 'home' | 'explore' | 'orders' | 'profile' | 'notifications';
-  onTabChange: (tab: 'home' | 'explore' | 'orders' | 'profile' | 'notifications') => void;
+  tab: 'home' | 'browse' | 'explore' | 'orders' | 'profile' | 'notifications';
+  onTabChange: (tab: 'home' | 'browse' | 'explore' | 'orders' | 'profile' | 'notifications') => void;
   authUser: { email: string } | null;
   currentUserRole: string;
   marketplaceItems: CatalogItem[];
   featuredOffers: Array<{ promotion: OfferPromotion; item: CatalogItem }>;
+  ratings: Array<{ id: string; bookingId: string; companyId: string; itemId: string; customerEmail: string; score: number; review: string; createdAtLabel: string }>;
   notifications: AppNotification[];
   bookingComposer: {
     itemId: string;
@@ -2174,6 +2846,12 @@ type CustomerWorkspaceProps = {
   authBusy: boolean;
   darkMode: boolean;
   onToggleDarkMode: () => void;
+  customerSearchQuery: string;
+  onCustomerSearchQueryChange: (value: string) => void;
+  customerSortMode: CustomerSortMode;
+  onCustomerSortModeChange: (value: CustomerSortMode) => void;
+  selectedCustomerCategory: string | null;
+  onSelectCustomerCategory: (value: string | null) => void;
   profileForm: UserProfile;
   onProfileFormChange: React.Dispatch<React.SetStateAction<UserProfile>>;
   profileErrors: ValidationMap;
@@ -2194,6 +2872,7 @@ function CustomerWorkspace({
   currentUserRole,
   marketplaceItems,
   featuredOffers,
+  ratings,
   notifications,
   bookingComposer,
   onBookingComposerChange,
@@ -2225,6 +2904,12 @@ function CustomerWorkspace({
   authBusy,
   darkMode,
   onToggleDarkMode,
+  customerSearchQuery,
+  onCustomerSearchQueryChange,
+  customerSortMode,
+  onCustomerSortModeChange,
+  selectedCustomerCategory,
+  onSelectCustomerCategory,
   profileForm,
   onProfileFormChange,
   profileErrors,
@@ -2236,10 +2921,127 @@ function CustomerWorkspace({
   onSignOut,
   banner,
 }: CustomerWorkspaceProps) {
-  const customerItems = marketplaceItems.slice(0, 6);
+  const customerWidth = useWindowDimensions().width;
+  const [activeBrowseGroupKey, setActiveBrowseGroupKey] = useState<string>(CATEGORY_GROUPS[0]?.key ?? 'real-estate');
+  const normalizedCustomerSearch = customerSearchQuery.trim().toLowerCase();
+  const normalizedSelectedCategory = selectedCustomerCategory?.trim() || null;
+  const allCategories = useMemo(
+    () => Array.from(new Set([...APP_CATEGORY_OPTIONS, ...marketplaceItems.map((item) => item.category).filter(Boolean)])).sort((a, b) => a.localeCompare(b)),
+    [marketplaceItems],
+  );
+  const itemRatingMeta = useMemo(() => {
+    const next: Record<string, { count: number; average: number }> = {};
+
+    ratings.forEach((rating) => {
+      const current = next[rating.itemId] ?? { count: 0, average: 0 };
+      const nextCount = current.count + 1;
+      next[rating.itemId] = {
+        count: nextCount,
+        average: ((current.average * current.count) + rating.score) / nextCount,
+      };
+    });
+
+    return next;
+  }, [ratings]);
+  const promotedItemIds = useMemo(() => new Set(featuredOffers.map((entry) => entry.item.id)), [featuredOffers]);
+  const groupedCategoryCards = useMemo(
+    () =>
+      CATEGORY_GROUPS.map((group) => {
+        const categories = group.categories.filter((category) => allCategories.includes(category));
+        const listingsCount = marketplaceItems.filter((item) => categories.includes(item.category)).length;
+        return {
+          ...group,
+          categories,
+          listingsCount,
+        };
+      }).filter((group) => group.categories.length),
+    [allCategories, marketplaceItems],
+  );
+  const newestRank = (item: CatalogItem, index: number) => {
+    const match = item.id.match(/(\d{10,})$/);
+    return match ? Number(match[1]) : marketplaceItems.length - index;
+  };
+  const popularityScore = (item: CatalogItem) => {
+    const rating = itemRatingMeta[item.id] ?? { count: 0, average: 0 };
+    return (promotedItemIds.has(item.id) ? 16 : 0) + (item.featured ? 10 : 0) + (rating.average * 3) + (rating.count * 2);
+  };
+  const sortItems = (left: { item: CatalogItem; index: number }, right: { item: CatalogItem; index: number }) => {
+    if (customerSortMode === 'priceLow') {
+      return left.item.price - right.item.price || newestRank(right.item, right.index) - newestRank(left.item, left.index);
+    }
+
+    if (customerSortMode === 'priceHigh') {
+      return right.item.price - left.item.price || newestRank(right.item, right.index) - newestRank(left.item, left.index);
+    }
+
+    if (customerSortMode === 'newest') {
+      return newestRank(right.item, right.index) - newestRank(left.item, left.index);
+    }
+
+    return popularityScore(right.item) - popularityScore(left.item) || newestRank(right.item, right.index) - newestRank(left.item, left.index);
+  };
+  const filteredMarketplaceItems = marketplaceItems
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => {
+      const matchesCategory = !normalizedSelectedCategory || item.category === normalizedSelectedCategory;
+      const matchesSearch = !normalizedCustomerSearch || [item.title, item.summary, item.companyName, item.category]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(normalizedCustomerSearch));
+      return matchesCategory && matchesSearch;
+    })
+    .sort(sortItems)
+    .map(({ item }) => item);
+  const customerItems = filteredMarketplaceItems.slice(0, 6);
   const featuredItems = featuredOffers.slice(0, 3);
-  const displayItems = (featuredItems.length ? featuredItems.map((entry) => entry.item) : customerItems).slice(0, 3);
-  const categories = Array.from(new Set(marketplaceItems.map((item) => item.category).filter(Boolean))).slice(0, 6);
+  const categories = allCategories.slice(0, 10);
+  const searchPreviewItems = filteredMarketplaceItems.slice(0, 6);
+  const carouselEntries = HOME_CAROUSEL_IMAGES.map((imageUrl, index) => ({
+    imageUrl,
+    title: allCategories[index] ?? APP_CATEGORY_OPTIONS[index] ?? 'Featured category',
+    subtitle: index % 2 === 0 ? 'Discover standout listings across the marketplace.' : 'Preview premium inventory and services before you search deeper.',
+  }));
+  const liveEntries = (featuredOffers.length ? featuredOffers : marketplaceItems.slice(0, 8).map((item) => ({ item, promotion: undefined }))).slice(0, 8);
+  const liveCompanyCount = new Set(marketplaceItems.map((item) => item.companyId)).size;
+  const marketplaceCounts = {
+    listings: marketplaceItems.length,
+    services: marketplaceItems.filter((item) => item.kind === 'service').length,
+    products: marketplaceItems.filter((item) => item.kind === 'product').length,
+  };
+  const activeBrowseGroup = groupedCategoryCards.find((group) => (normalizedSelectedCategory ? group.categories.includes(normalizedSelectedCategory) : group.key === activeBrowseGroupKey)) ?? groupedCategoryCards[0] ?? null;
+  const activeLandingItems = activeBrowseGroup
+    ? marketplaceItems
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => activeBrowseGroup.categories.includes(item.category))
+      .sort(sortItems)
+      .map(({ item }) => item)
+      .slice(0, 6)
+    : [];
+  const activeLandingBannerImage = activeBrowseGroup
+    ? HOME_CAROUSEL_IMAGES[Math.max(groupedCategoryCards.findIndex((group) => group.key === activeBrowseGroup.key), 0) % HOME_CAROUSEL_IMAGES.length]
+    : HOME_CAROUSEL_IMAGES[0];
+  const activeFilterSummary = [
+    normalizedSelectedCategory,
+    normalizedCustomerSearch ? `"${customerSearchQuery.trim()}"` : null,
+    customerSortMode === 'popular'
+      ? 'Popular'
+      : customerSortMode === 'newest'
+        ? 'Newest'
+        : customerSortMode === 'priceLow'
+          ? 'Price: Low to High'
+          : 'Price: High to Low',
+  ].filter(Boolean).join(' · ');
+  const carouselCardWidth = Math.max(Math.min(customerWidth - 74, wide ? 620 : 540), 270);
+
+  useEffect(() => {
+    if (!normalizedSelectedCategory) {
+      return;
+    }
+
+    const group = groupedCategoryCards.find((entry) => entry.categories.includes(normalizedSelectedCategory));
+    if (group) {
+      setActiveBrowseGroupKey(group.key);
+    }
+  }, [groupedCategoryCards, normalizedSelectedCategory]);
   const customerTheme = {
     canvas: darkMode ? styles.customerCanvasDark : undefined,
     card: darkMode ? styles.customerSectionDark : undefined,
@@ -2261,80 +3063,435 @@ function CustomerWorkspace({
       {banner ? <StatusBanner tone={banner.tone} text={banner.text} /> : null}
 
       {tab === 'home' ? (
-        <>
-          <SectionCard
-            title="Professional home services, ready when you are"
-            subtitle="Browse trusted companies, compare offers, and book only when you are ready. Guests can explore the full customer experience before signing in."
-            cardStyle={customerTheme.card}
-            titleStyle={customerTheme.title}
-            subtitleStyle={customerTheme.subtitle}
-          >
-            <View style={[styles.homeHeroPanel, customerTheme.metaCard]}>
-              <View style={styles.infoBodyGrow}>
-                <Text style={styles.customerHeroEyebrow}>Curated for fast booking</Text>
-                <Text style={[styles.homeHeroTitle, customerTheme.title]}>Home cleaning, maintenance, beauty, repairs, and more.</Text>
-                <Text style={[styles.homeHeroBody, customerTheme.subtitle]}>Jahzeen keeps the storefront open to guests and keeps fulfilment inside dedicated admin and company groups.</Text>
-              </View>
-              <View style={styles.customerHeroActionRow}>
-                <PrimaryButton label="Explore services" onPress={() => onTabChange('explore')} />
-              </View>
-            </View>
-            <View style={[styles.metricGrid, wide && styles.metricGridWide]}>
-              <CustomerMetricCard label="Live companies" value={String(new Set(marketplaceItems.map((item) => item.companyId)).size)} darkMode={darkMode} />
-              <CustomerMetricCard label="Visible offers" value={String(marketplaceItems.length)} darkMode={darkMode} />
-              <CustomerMetricCard label="Featured picks" value={String(featuredItems.length || Math.min(3, marketplaceItems.length))} darkMode={darkMode} />
-            </View>
-          </SectionCard>
+        <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.customerHomeScreen}>
+          <View style={styles.customerHomeCarouselHeader}>
+            <Text style={styles.customerHomeCarouselEyebrow}>Discover the marketplace</Text>
+          </View>
+          {carouselEntries.length ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} pagingEnabled snapToInterval={carouselCardWidth + 14} decelerationRate="fast" contentContainerStyle={styles.customerHomeCarouselRow}>
+              {carouselEntries.map((entry, index) => (
+                <CustomerHomeBannerCard
+                  key={`${entry.title}-${index}`}
+                  imageUrl={entry.imageUrl}
+                  title={entry.title}
+                  subtitle={entry.subtitle}
+                  width={carouselCardWidth}
+                  onPress={() => {
+                    onTabChange('explore');
+                  }}
+                />
+              ))}
+            </ScrollView>
+          ) : (
+            <EmptyState title="Marketplace is empty" body="Once companies publish live listings, the home carousel will lead customers into the storefront." cardStyle={styles.customerHomeEmptyCard} titleStyle={styles.customerHomeSectionTitle} bodyStyle={styles.customerHomeSectionSubtitle} />
+          )}
 
-          <SectionCard
-            title="Popular categories"
-            subtitle="A professional landing page should help customers scan categories before they commit to an order."
-            cardStyle={customerTheme.card}
-            titleStyle={customerTheme.title}
-            subtitleStyle={customerTheme.subtitle}
-          >
+          <View style={styles.customerHomeSearchSection}>
+            <View style={styles.customerHomeSearchBar}>
+              <Ionicons name="search-outline" size={20} color={colors.primary} />
+              <TextInput
+                value={customerSearchQuery}
+                onChangeText={onCustomerSearchQueryChange}
+                onSubmitEditing={() => onTabChange('explore')}
+                autoCorrect={false}
+                autoCapitalize="none"
+                returnKeyType="search"
+                placeholder="Search products and services"
+                placeholderTextColor="#8A8F98"
+                style={styles.customerHomeSearchInput}
+              />
+              {customerSearchQuery ? (
+                <Pressable style={styles.customerHomeSearchClearButton} onPress={() => onCustomerSearchQueryChange('')}>
+                  <Ionicons name="close-outline" size={16} color={colors.muted} />
+                </Pressable>
+              ) : null}
+            </View>
+            <View style={styles.customerHomeSearchMetaRow}>
+              <Text style={styles.customerHomeSearchMetaText}>
+                {normalizedCustomerSearch
+                  ? `${filteredMarketplaceItems.length} matching products and services`
+                  : 'Search products and services across the marketplace'}
+              </Text>
+              {normalizedCustomerSearch ? (
+                <Pressable onPress={() => onTabChange('explore')}>
+                  <Text style={styles.customerHomeSearchLink}>View all</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
+
+          {normalizedCustomerSearch ? (
+            <View style={styles.customerHomeSectionBlock}>
+              <View style={styles.customerHomeSectionHeaderCompact}>
+                <Text style={styles.customerHomeSectionTitle}>Search results</Text>
+                <Text style={styles.customerHomeSectionMeta}>{filteredMarketplaceItems.length} found</Text>
+              </View>
+              {searchPreviewItems.length ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.customerHomeLotRow}>
+                  {searchPreviewItems.map((item) => (
+                    <CustomerHomeLotCard
+                      key={`search-${item.id}`}
+                      item={item}
+                      onPress={() => {
+                        onSelectItem(item);
+                        onTabChange('explore');
+                      }}
+                    />
+                  ))}
+                </ScrollView>
+              ) : (
+                <EmptyState title="No products or services found" body="Try a different keyword or clear the selected category to widen the search." cardStyle={styles.customerHomeEmptyCard} titleStyle={styles.customerHomeSectionTitle} bodyStyle={styles.customerHomeSectionSubtitle} />
+              )}
+            </View>
+          ) : null}
+
+          <View style={styles.customerHomeSectionBlock}>
+            <View style={styles.customerHomeSectionHeaderCompact}>
+              <Text style={styles.customerHomeSectionTitle}>Category hubs</Text>
+              <Text style={styles.customerHomeSectionMeta}>{allCategories.length} categories</Text>
+            </View>
+            {groupedCategoryCards.length ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.customerCategoryHubRow}>
+                {groupedCategoryCards.map((group) => (
+                  <Pressable
+                    key={group.key}
+                    style={styles.customerCategoryHubCard}
+                    onPress={() => {
+                      setActiveBrowseGroupKey(group.key);
+                      onSelectCustomerCategory(group.categories[0] ?? null);
+                      onTabChange('browse');
+                    }}
+                  >
+                    <View style={styles.customerCategoryHubTopRow}>
+                      <View style={styles.customerCategoryHubIconWrap}>
+                        <Ionicons name={group.icon} size={18} color={colors.primary} />
+                      </View>
+                      <Text style={styles.customerCategoryHubCount}>{group.listingsCount} ads</Text>
+                    </View>
+                    <Text style={styles.customerCategoryHubTitle}>{group.title}</Text>
+                    <Text style={styles.customerCategoryHubMeta}>{group.categories.slice(0, 2).join(' · ')}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            ) : null}
+          </View>
+
+          <View style={styles.customerHomeSectionHeader}>
+            <View style={styles.infoBodyGrow}>
+              <Text style={styles.customerHomeSectionTitle}>Jahzeen Live Picks</Text>
+              <Text style={styles.customerHomeSectionSubtitle}>Browse now and discover standout listings from trusted companies.</Text>
+            </View>
+          </View>
+
+          {liveEntries.length ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.customerHomeLotRow}>
+              {liveEntries.map((entry) => (
+                <CustomerHomeLotCard
+                  key={entry.item.id}
+                  item={entry.item}
+                  promotion={entry.promotion}
+                  onPress={() => {
+                    onSelectItem(entry.item);
+                    onTabChange('explore');
+                  }}
+                />
+              ))}
+            </ScrollView>
+          ) : null}
+
+          <Pressable style={styles.customerHomePrimaryCta} onPress={() => onTabChange('explore')}>
+            <Text style={styles.customerHomePrimaryCtaText}>see more lots</Text>
+          </Pressable>
+
+          <View style={styles.customerHomeSectionBlock}>
+            <View style={styles.customerHomeSectionHeaderCompact}>
+              <Text style={styles.customerHomeSectionTitle}>Browse by category</Text>
+              <Text style={styles.customerHomeSectionMeta}>{liveCompanyCount} companies live</Text>
+            </View>
             {categories.length ? (
-              <View style={styles.toggleRow}>
+              <View style={styles.customerHomeCategoryRow}>
                 {categories.map((category) => (
-                  <ChoiceChip key={category} label={category} selected={false} onPress={() => onTabChange('explore')} />
+                  <Pressable key={category} style={styles.customerHomeCategoryChip} onPress={() => {
+                    onSelectCustomerCategory(category);
+                    onCustomerSearchQueryChange('');
+                    onTabChange('explore');
+                  }}>
+                    <Text style={styles.customerHomeCategoryChipText}>{category}</Text>
+                  </Pressable>
                 ))}
               </View>
-            ) : (
-              <EmptyState title="No categories yet" body="Once companies publish offers, customers will see categories and featured services here." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
-            )}
-          </SectionCard>
+            ) : null}
+          </View>
 
+          {selectedCustomerCategory ? (
+            <Pressable style={styles.customerHomeActiveFilterChip} onPress={() => onSelectCustomerCategory(null)}>
+              <Text style={styles.customerHomeActiveFilterChipText}>{selectedCustomerCategory} · Clear</Text>
+            </Pressable>
+          ) : null}
+
+          <View style={styles.customerHomeStatsPanel}>
+            <View style={styles.customerHomeStatCard}>
+              <Text style={styles.customerHomeStatValue}>{liveCompanyCount}</Text>
+              <Text style={styles.customerHomeStatLabel}>Live companies</Text>
+            </View>
+            <View style={styles.customerHomeStatCard}>
+              <Text style={styles.customerHomeStatValue}>{marketplaceItems.length}</Text>
+              <Text style={styles.customerHomeStatLabel}>Visible listings</Text>
+            </View>
+            <View style={styles.customerHomeStatCard}>
+              <Text style={styles.customerHomeStatValue}>{featuredItems.length || Math.min(3, marketplaceItems.length)}</Text>
+              <Text style={styles.customerHomeStatLabel}>Featured now</Text>
+            </View>
+          </View>
+        </View>
+        </ScrollView>
+      ) : null}
+
+      {tab === 'browse' ? (
+        <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false}>
           <SectionCard
-            title="Featured offers"
-            subtitle="Guests can preview real services and products directly from the home page."
+            title="Browse categories"
+            subtitle="Structured marketplace categories inspired by auction apps, refined for Jahzeen."
             cardStyle={customerTheme.card}
             titleStyle={customerTheme.title}
             subtitleStyle={customerTheme.subtitle}
           >
-            {displayItems.length ? (
-              <View style={[styles.catalogGrid, wide && styles.catalogGridWide]}>
-                {displayItems.map((item) => (
-                  <CustomerOfferCard key={item.id} item={item} darkMode={darkMode} ctaLabel="View offer" onPress={() => { onSelectItem(item); onTabChange('explore'); }} />
+            <View style={styles.customerBrowseStatsRow}>
+              <View style={styles.customerBrowseStatCard}>
+                <Text style={styles.customerBrowseStatValue}>{marketplaceCounts.listings}</Text>
+                <Text style={styles.customerBrowseStatLabel}>Total listings</Text>
+              </View>
+              <View style={styles.customerBrowseStatCard}>
+                <Text style={styles.customerBrowseStatValue}>{marketplaceCounts.services}</Text>
+                <Text style={styles.customerBrowseStatLabel}>Services</Text>
+              </View>
+              <View style={styles.customerBrowseStatCard}>
+                <Text style={styles.customerBrowseStatValue}>{marketplaceCounts.products}</Text>
+                <Text style={styles.customerBrowseStatLabel}>Products</Text>
+              </View>
+            </View>
+
+            {activeBrowseGroup ? (
+              <Pressable style={styles.customerLandingHero} onPress={() => onTabChange('explore')}>
+                <Image source={{ uri: activeLandingBannerImage }} style={styles.customerLandingHeroImage} resizeMode="cover" />
+                <LinearGradient colors={['rgba(17,24,33,0.08)', 'rgba(17,24,33,0.72)']} style={styles.customerLandingHeroOverlay}>
+                  <View style={styles.customerLandingHeroTopRow}>
+                    <View style={styles.customerLandingHeroIconWrap}>
+                      <Ionicons name={activeBrowseGroup.icon} size={18} color="#FFFFFF" />
+                    </View>
+                    <Text style={styles.customerLandingHeroBadge}>{activeBrowseGroup.listingsCount} live ads</Text>
+                  </View>
+                  <View style={styles.customerLandingHeroBody}>
+                    <Text style={styles.customerLandingHeroTitle}>{activeBrowseGroup.title}</Text>
+                    <Text style={styles.customerLandingHeroSubtitle}>
+                      Discover premium {activeBrowseGroup.title.toLowerCase()} listings with faster navigation, cleaner categories, and smarter filters.
+                    </Text>
+                  </View>
+                </LinearGradient>
+              </Pressable>
+            ) : null}
+
+            {activeBrowseGroup ? (
+              <View style={styles.customerBrowseSectionBlock}>
+                <View style={styles.customerHomeSectionHeaderCompact}>
+                  <Text style={styles.customerHomeSectionTitle}>Subcategories</Text>
+                  <Text style={styles.customerHomeSectionMeta}>{activeBrowseGroup.categories.length} options</Text>
+                </View>
+                <View style={styles.customerBrowseChipRow}>
+                  {activeBrowseGroup.categories.map((category) => (
+                    <Pressable
+                      key={`landing-${category}`}
+                      style={[
+                        styles.customerBrowseChip,
+                        normalizedSelectedCategory === category && styles.customerBrowseChipActive,
+                      ]}
+                      onPress={() => {
+                        onSelectCustomerCategory(category);
+                        onTabChange('explore');
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.customerBrowseChipText,
+                          normalizedSelectedCategory === category && styles.customerBrowseChipTextActive,
+                        ]}
+                      >
+                        {category}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+
+            {activeLandingItems.length ? (
+              <View style={styles.customerBrowseSectionBlock}>
+                <View style={styles.customerHomeSectionHeaderCompact}>
+                  <Text style={styles.customerHomeSectionTitle}>Featured in this category</Text>
+                  <Pressable onPress={() => onTabChange('explore')}>
+                    <Text style={styles.customerHomeSearchLink}>Open listing feed</Text>
+                  </Pressable>
+                </View>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.customerHomeLotRow}>
+                  {activeLandingItems.map((item) => (
+                    <CustomerHomeLotCard
+                      key={`landing-item-${item.id}`}
+                      item={item}
+                      onPress={() => {
+                        onSelectItem(item);
+                        onTabChange('explore');
+                      }}
+                    />
+                  ))}
+                </ScrollView>
+              </View>
+            ) : null}
+
+            <View style={styles.customerBrowseSectionBlock}>
+              <View style={styles.customerHomeSectionHeaderCompact}>
+                <Text style={styles.customerHomeSectionTitle}>All marketplace groups</Text>
+                <Text style={styles.customerHomeSectionMeta}>{groupedCategoryCards.length} hubs</Text>
+              </View>
+              <View style={styles.customerBrowseGroupStack}>
+                {groupedCategoryCards.map((group) => (
+                  <Pressable key={group.key} style={styles.customerBrowseGroupCard} onPress={() => setActiveBrowseGroupKey(group.key)}>
+                    <View style={styles.customerBrowseGroupHeader}>
+                      <View style={styles.customerBrowseGroupTitleWrap}>
+                        <View style={styles.customerBrowseGroupIcon}>
+                          <Ionicons name={group.icon} size={18} color={colors.primary} />
+                        </View>
+                        <Text style={styles.customerBrowseGroupTitle}>{group.title}</Text>
+                      </View>
+                      <Text style={styles.customerBrowseGroupCount}>{group.listingsCount} ads</Text>
+                    </View>
+                    <View style={styles.customerBrowseChipRow}>
+                      {group.categories.map((category) => (
+                        <Pressable
+                          key={`${group.key}-${category}`}
+                          style={[
+                            styles.customerBrowseChip,
+                            normalizedSelectedCategory === category && styles.customerBrowseChipActive,
+                          ]}
+                          onPress={() => {
+                            onSelectCustomerCategory(category);
+                            setActiveBrowseGroupKey(group.key);
+                            onTabChange('explore');
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.customerBrowseChipText,
+                              normalizedSelectedCategory === category && styles.customerBrowseChipTextActive,
+                            ]}
+                          >
+                            {category}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </Pressable>
                 ))}
               </View>
-            ) : (
-              <EmptyState title="Marketplace is empty" body="No company has published items yet. Admins can create partner workspaces and companies can publish from their dashboard." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
-            )}
+            </View>
           </SectionCard>
-        </>
+        </ScrollView>
       ) : null}
 
       {tab === 'explore' ? (
-        <>
-          <SectionCard title="Explore offers" subtitle="Browse live products and services without authentication." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
-            {marketplaceItems.length ? (
+        <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false} stickyHeaderIndices={[0]}>
+          <View style={styles.customerExploreStickyHeader}>
+            <View style={styles.customerExploreStickySearchBar}>
+              <Ionicons name="search-outline" size={18} color={colors.primary} />
+              <TextInput
+                value={customerSearchQuery}
+                onChangeText={onCustomerSearchQueryChange}
+                autoCorrect={false}
+                autoCapitalize="none"
+                returnKeyType="search"
+                placeholder="Search products and services"
+                placeholderTextColor="#8A8F98"
+                style={styles.customerExploreStickySearchInput}
+              />
+              {customerSearchQuery ? (
+                <Pressable style={styles.customerExploreSearchClearButton} onPress={() => onCustomerSearchQueryChange('')}>
+                  <Ionicons name="close-outline" size={16} color={colors.muted} />
+                </Pressable>
+              ) : null}
+            </View>
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.customerExploreSortRow}>
+              {([
+                { key: 'popular', label: 'Popular' },
+                { key: 'newest', label: 'Newest' },
+                { key: 'priceLow', label: 'Price ↑' },
+                { key: 'priceHigh', label: 'Price ↓' },
+              ] as Array<{ key: CustomerSortMode; label: string }>).map((option) => (
+                <Pressable
+                  key={option.key}
+                  style={[
+                    styles.customerExploreSortChip,
+                    customerSortMode === option.key && styles.customerExploreSortChipActive,
+                  ]}
+                  onPress={() => onCustomerSortModeChange(option.key)}
+                >
+                  <Text
+                    style={[
+                      styles.customerExploreSortChipText,
+                      customerSortMode === option.key && styles.customerExploreSortChipTextActive,
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+
+            <View style={styles.customerExploreFilterBar}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.customerExploreFilterRow}>
+                {allCategories.map((category) => (
+                  <Pressable
+                    key={`explore-${category}`}
+                    style={[
+                      styles.customerExploreFilterChip,
+                      normalizedSelectedCategory === category && styles.customerExploreFilterChipActive,
+                    ]}
+                    onPress={() => onSelectCustomerCategory(normalizedSelectedCategory === category ? null : category)}
+                  >
+                    <Text
+                      style={[
+                        styles.customerExploreFilterChipText,
+                        normalizedSelectedCategory === category && styles.customerExploreFilterChipTextActive,
+                      ]}
+                    >
+                      {category}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              {(normalizedSelectedCategory || normalizedCustomerSearch) ? (
+                <Pressable
+                  style={styles.customerExploreResetButton}
+                  onPress={() => {
+                    onSelectCustomerCategory(null);
+                    onCustomerSearchQueryChange('');
+                  }}
+                >
+                  <Text style={styles.customerExploreResetButtonText}>Clear filters</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
+
+          <SectionCard title="Explore offers" subtitle={activeFilterSummary || 'Browse live products and services without authentication.'} cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+            {filteredMarketplaceItems.length ? (
               <View style={[styles.catalogGrid, wide && styles.catalogGridWide]}>
-                {marketplaceItems.map((item) => (
+                {filteredMarketplaceItems.map((item) => (
                   <CustomerOfferCard key={item.id} item={item} darkMode={darkMode} ctaLabel="Book now" onPress={() => onSelectItem(item)} />
                 ))}
               </View>
             ) : (
-              <EmptyState title="Marketplace is empty" body="No company has published items yet. Admins can create partner workspaces and companies can publish from their dashboard." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
+              <EmptyState title="No results match" body="Try another search or clear the selected category to see more listings." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
             )}
           </SectionCard>
 
@@ -2354,10 +3511,11 @@ function CustomerWorkspace({
               <PrimaryButton label={authUser ? 'Place booking' : 'Open profile to login'} onPress={authUser ? onPlaceBooking : () => onTabChange('profile')} />
             </SectionCard>
           ) : null}
-        </>
+        </ScrollView>
       ) : null}
 
       {tab === 'orders' ? (
+        <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false}>
         <SectionCard title="My orders" subtitle="Signed-in customers can track bookings and submit ratings after completion." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
           {authUser ? (
             customerBookings.length ? customerBookings.map((booking) => (
@@ -2399,9 +3557,11 @@ function CustomerWorkspace({
             <EmptyState title="Sign in required" body="Open the Profile tab to sign in, then your orders and ratings will appear here." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
           )}
         </SectionCard>
+        </ScrollView>
       ) : null}
 
       {tab === 'notifications' ? (
+        <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false}>
         <SectionCard title="Notification center" subtitle="Unread and read updates from bookings, offers, and account activity live here." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
           {authUser ? (
             notifications.length ? notifications.map((notification) => (
@@ -2411,11 +3571,12 @@ function CustomerWorkspace({
             <EmptyState title="Sign in required" body="Notifications are available after you sign in to your customer account." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
           )}
         </SectionCard>
+        </ScrollView>
       ) : null}
 
       {tab === 'profile' ? (
         !authUser ? (
-          <>
+          <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false}>
             <SectionCard title="Profile" subtitle="Sign in only when you need to order, track bookings, or save your preferences." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
               <View style={[styles.darkModeCard, customerTheme.metaCard]}>
                 <View style={styles.infoBodyGrow}>
@@ -2460,8 +3621,9 @@ function CustomerWorkspace({
               </View>
             ) : null}
             </SectionCard>
-          </>
+          </ScrollView>
         ) : (
+          <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false}>
           <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
             <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
               <SectionCard title="Profile" subtitle={`Signed in as ${currentUserRole}`} cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
@@ -2503,8 +3665,838 @@ function CustomerWorkspace({
               </SectionCard>
             </View>
           </View>
+          </ScrollView>
         )
       ) : null}
+    </View>
+  );
+}
+
+type OperationalTone = 'success' | 'info' | 'warning' | 'error';
+
+function formatMetricValue(value: number) {
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value);
+}
+
+function formatPercent(value: number) {
+  return `${Math.round(value)}%`;
+}
+
+function formatPercentValue(value: number, total: number) {
+  if (!total) {
+    return '0%';
+  }
+
+  return formatPercent((value / total) * 100);
+}
+
+function averageScore(entries: Array<{ score: number }>) {
+  if (!entries.length) {
+    return 0;
+  }
+
+  const total = entries.reduce((sum, entry) => sum + entry.score, 0);
+  return total / entries.length;
+}
+
+function severityWeight(tone: OperationalTone) {
+  if (tone === 'error') return 4;
+  if (tone === 'warning') return 3;
+  if (tone === 'info') return 2;
+  return 1;
+}
+
+function toNumericMetric(value: string) {
+  const parsed = Number(value.replace(/[^\d.-]/g, ''));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseDayLabel(label: string) {
+  const parsed = Date.parse(label);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function parseFlexibleDate(label: string) {
+  const trimmed = label.trim();
+  const now = new Date();
+  if (!trimmed) {
+    return null;
+  }
+  if (/^today$/i.test(trimmed)) {
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  }
+  if (/^tomorrow$/i.test(trimmed)) {
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  }
+  if (/^yesterday$/i.test(trimmed)) {
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  }
+
+  const parsed = Date.parse(trimmed);
+  if (!Number.isNaN(parsed)) {
+    return new Date(parsed);
+  }
+
+  return null;
+}
+
+function daysBetween(target: Date, base = new Date()) {
+  const normalizedTarget = new Date(target.getFullYear(), target.getMonth(), target.getDate()).getTime();
+  const normalizedBase = new Date(base.getFullYear(), base.getMonth(), base.getDate()).getTime();
+  return Math.round((normalizedTarget - normalizedBase) / 86400000);
+}
+
+function getRecentAuditEvents(events: AuditEvent[], days: number) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days + 1);
+  return events.filter((event) => {
+    const parsed = parseFlexibleDate(event.createdAtLabel);
+    return parsed ? parsed >= cutoff : true;
+  });
+}
+
+function buildTrendSeries(events: AuditEvent[], resolveValue: (event: AuditEvent) => number, maxPoints = 6) {
+  const grouped = new Map<string, number>();
+  [...events]
+    .sort((left, right) => parseDayLabel(left.createdAtLabel) - parseDayLabel(right.createdAtLabel))
+    .forEach((event) => {
+      const current = grouped.get(event.createdAtLabel) ?? 0;
+      grouped.set(event.createdAtLabel, current + resolveValue(event));
+    });
+
+  const points = Array.from(grouped.entries()).slice(-maxPoints).map(([label, value]) => ({
+    label: label.split(' ').slice(0, 2).join(' '),
+    value,
+  }));
+
+  return points.length ? points : [{ label: 'No data', value: 0 }];
+}
+
+function sortRows<T>(rows: T[], sortState: { key: string; direction: 'asc' | 'desc' }, accessors: Record<string, (row: T) => string | number>) {
+  const accessor = accessors[sortState.key];
+  if (!accessor) {
+    return rows;
+  }
+
+  return [...rows].sort((left, right) => {
+    const leftValue = accessor(left);
+    const rightValue = accessor(right);
+    const result = typeof leftValue === 'number' && typeof rightValue === 'number'
+      ? leftValue - rightValue
+      : String(leftValue).localeCompare(String(rightValue));
+    return sortState.direction === 'asc' ? result : -result;
+  });
+}
+
+function toneLabel(tone: OperationalTone) {
+  if (tone === 'success') return 'Stable';
+  if (tone === 'warning') return 'Watch';
+  if (tone === 'error') return 'Critical';
+  return 'Tracking';
+}
+
+function getBookingStatusTone(status: BookingStatus): OperationalTone {
+  if (status === 'completed') return 'success';
+  if (status === 'cancelled') return 'error';
+  if (status === 'pending') return 'warning';
+  return 'info';
+}
+
+function getPromotionStateTone(isActive: boolean): OperationalTone {
+  return isActive ? 'success' : 'info';
+}
+
+function getInvitationDeliveryTone(status: CompanyInvitation['emailDeliveryStatus']): OperationalTone {
+  if (status === 'failed') return 'error';
+  if (status === 'pending') return 'warning';
+  return 'success';
+}
+
+function getCountdownInfo(label: string) {
+  const target = parseFlexibleDate(label);
+  if (!target) {
+    return { sortValue: Number.MAX_SAFE_INTEGER, label: 'No end date', tone: 'info' as const };
+  }
+
+  const days = daysBetween(target);
+  if (days < 0) {
+    return { sortValue: days, label: `${Math.abs(days)}d overdue`, tone: 'error' as const };
+  }
+  if (days === 0) {
+    return { sortValue: days, label: 'Ends today', tone: 'warning' as const };
+  }
+  if (days <= 7) {
+    return { sortValue: days, label: `${days}d left`, tone: 'warning' as const };
+  }
+
+  return { sortValue: days, label: `${days}d left`, tone: 'success' as const };
+}
+
+function getBookingAgingInfo(booking: Booking) {
+  const target = parseFlexibleDate(booking.scheduleDate);
+  if (!target) {
+    return { sortValue: Number.MAX_SAFE_INTEGER, label: 'Undated', tone: 'info' as const };
+  }
+
+  const days = daysBetween(target);
+  if (days < 0) {
+    return { sortValue: Math.abs(days), label: `${Math.abs(days)}d overdue`, tone: booking.status === 'completed' ? 'success' as const : 'error' as const };
+  }
+  if (days === 0) {
+    return { sortValue: 0, label: 'Today', tone: booking.status === 'completed' ? 'success' as const : 'warning' as const };
+  }
+  if (days <= 3) {
+    return { sortValue: days, label: `${days}d out`, tone: 'warning' as const };
+  }
+
+  return { sortValue: days, label: `${days}d out`, tone: 'info' as const };
+}
+
+function dayKeyFromLabel(label: string) {
+  const parsed = parseFlexibleDate(label);
+  if (!parsed) {
+    return null;
+  }
+  const year = parsed.getFullYear();
+  const month = `${parsed.getMonth() + 1}`.padStart(2, '0');
+  const day = `${parsed.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function buildSeriesFromDateLabels(labels: string[], maxPoints = 6) {
+  const grouped = new Map<string, number>();
+  labels.forEach((label) => {
+    const key = dayKeyFromLabel(label);
+    if (!key) {
+      return;
+    }
+    grouped.set(key, (grouped.get(key) ?? 0) + 1);
+  });
+
+  const ordered = Array.from(grouped.entries())
+    .sort((left, right) => Date.parse(left[0]) - Date.parse(right[0]))
+    .slice(-maxPoints)
+    .map(([, count]) => count);
+
+  return ordered.length ? ordered : [0];
+}
+
+function buildCompanyBookingSparkline(bookings: Booking[], companyId: string, maxPoints = 6) {
+  return buildSeriesFromDateLabels(bookings.filter((booking) => booking.companyId === companyId).map((booking) => booking.scheduleDate), maxPoints);
+}
+
+function buildPromotionVelocitySparkline(auditEvents: AuditEvent[], promotion: OfferPromotion, maxPoints = 6) {
+  const labels = auditEvents
+    .filter((event) => event.entityType === 'promotion' && (event.entityId === promotion.id || event.companyId === promotion.companyId))
+    .map((event) => event.createdAtLabel);
+
+  return buildSeriesFromDateLabels(labels, maxPoints);
+}
+
+function buildBookingStatusVelocitySparkline(auditEvents: AuditEvent[], bookingId: string, maxPoints = 6) {
+  const labels = auditEvents
+    .filter((event) => event.entityType === 'booking' && event.entityId === bookingId)
+    .map((event) => event.createdAtLabel);
+
+  return buildSeriesFromDateLabels(labels, maxPoints);
+}
+
+function getTrendInsight(
+  focus: 'activity' | 'bookings' | 'revenue' | 'publishing',
+  activityTrend: Array<{ label: string; value: number }>,
+  secondaryTrend: Array<{ label: string; value: number }>,
+  tertiaryTrend: Array<{ label: string; value: number }>,
+  days: number,
+) {
+  const source = focus === 'activity' ? activityTrend : focus === 'bookings' ? secondaryTrend : tertiaryTrend;
+  const total = source.reduce((sum, point) => sum + point.value, 0);
+  const latest = source[source.length - 1]?.value ?? 0;
+  const earliest = source[0]?.value ?? 0;
+  const delta = latest - earliest;
+  return {
+    title: `${focus.charAt(0).toUpperCase() + focus.slice(1)} drill-down`,
+    description: `Viewing the last ${days} days. This panel makes the selected trend easier to compare against the current operating window.`,
+    highlight: `${Math.round(total)} total tracked value · ${delta >= 0 ? '+' : ''}${Math.round(delta)} change from first visible point`,
+    footer: `Latest point: ${Math.round(latest)} · Earliest point: ${Math.round(earliest)}`,
+  };
+}
+
+function summarizeTrendPoints(points: Array<{ label: string; value: number }>) {
+  const total = points.reduce((sum, point) => sum + point.value, 0);
+  const average = points.length ? total / points.length : 0;
+  const peak = points.reduce((current, point) => (point.value > current.value ? point : current), points[0] ?? { label: 'No data', value: 0 });
+  const latest = points[points.length - 1] ?? { label: 'No data', value: 0 };
+  return { average, peak, latest };
+}
+
+function getCatalogRisk(item: CatalogItem, companyIsActive: boolean) {
+  if (!companyIsActive) {
+    return { tone: 'error' as const, label: 'Company paused', detail: 'This listing belongs to a paused company, so storefront visibility is at risk.' };
+  }
+  if (!item.imageUrl) {
+    return { tone: 'warning' as const, label: 'Image missing', detail: 'This listing is missing a storefront image and will underperform visually.' };
+  }
+  if (!item.isPublished) {
+    return { tone: 'info' as const, label: 'Draft', detail: 'This listing is still private and needs publishing before customers can discover it.' };
+  }
+  return { tone: 'success' as const, label: 'Ready', detail: 'This listing is visually complete and live in the marketplace.' };
+}
+
+function getPromotionRisk(promotion: OfferPromotion) {
+  const endsAt = parseFlexibleDate(promotion.endsAtLabel);
+  const daysUntilEnd = endsAt ? daysBetween(endsAt) : null;
+  if (promotion.isActive && daysUntilEnd !== null && daysUntilEnd < 0) {
+    return { tone: 'error' as const, label: 'Expired live offer', detail: 'This promotion appears to have passed its end date while still marked active.' };
+  }
+  if (!promotion.isActive) {
+    return { tone: 'info' as const, label: 'Paused', detail: 'This promotion is saved but not currently driving marketplace demand.' };
+  }
+  if (promotion.isActive && daysUntilEnd !== null && daysUntilEnd <= 7) {
+    return { tone: 'warning' as const, label: 'Ending soon', detail: 'This active promotion is nearing its end date and should be reviewed or extended.' };
+  }
+  if (!promotion.discountLabel || !promotion.endsAtLabel) {
+    return { tone: 'warning' as const, label: 'Missing details', detail: 'This live promotion is missing commercial clarity such as discount or end date.' };
+  }
+  return { tone: 'success' as const, label: 'Campaign ready', detail: 'This promotion is active and has the key details customers expect.' };
+}
+
+function getBookingRisk(booking: Booking) {
+  const scheduledDate = parseFlexibleDate(booking.scheduleDate);
+  const scheduledDelta = scheduledDate ? daysBetween(scheduledDate) : null;
+  if (booking.status === 'cancelled') {
+    return { tone: 'error' as const, label: 'Cancelled', detail: 'This booking dropped out of the fulfilment flow and may need review.' };
+  }
+  if (booking.status === 'pending' && scheduledDelta !== null && scheduledDelta < 0) {
+    return { tone: 'error' as const, label: 'Stale pending', detail: 'This booking is still pending even though its scheduled date has already passed.' };
+  }
+  if (booking.status === 'pending') {
+    return { tone: 'warning' as const, label: 'Awaiting action', detail: 'This booking has not received the first company response yet.' };
+  }
+  if (scheduledDelta !== null && scheduledDelta <= 0 && booking.status !== 'completed') {
+    return { tone: 'warning' as const, label: 'Date risk', detail: 'This booking is near or past its scheduled date and should remain closely monitored.' };
+  }
+  if (booking.status === 'completed') {
+    return { tone: 'success' as const, label: 'Delivered', detail: 'This booking completed successfully and is no longer at operational risk.' };
+  }
+  return { tone: 'info' as const, label: 'In progress', detail: 'This booking is moving through fulfilment and should stay visible until completion.' };
+}
+
+function buildCompanyOperationalSnapshot(
+  company: Company,
+  bookings: Booking[],
+  catalogItems: CatalogItem[],
+  offerPromotions: OfferPromotion[],
+  notifications: AppNotification[],
+  invitations: CompanyInvitation[],
+  ratings: Array<{ companyId: string; score: number }>,
+  auditEvents: AuditEvent[],
+) {
+  const companyBookings = bookings.filter((entry) => entry.companyId === company.id);
+  const pendingBookings = companyBookings.filter((entry) => entry.status === 'pending').length;
+  const stalePendingBookings = companyBookings.filter((entry) => getBookingRisk(entry).label === 'Stale pending').length;
+  const publishedItems = catalogItems.filter((entry) => entry.companyId === company.id && entry.isPublished).length;
+  const activePromotions = offerPromotions.filter((entry) => entry.companyId === company.id && entry.isActive).length;
+  const expiringPromotions = offerPromotions.filter((entry) => entry.companyId === company.id).filter((entry) => getPromotionRisk(entry).label === 'Ending soon' || getPromotionRisk(entry).label === 'Expired live offer').length;
+  const unreadAlerts = notifications.filter((entry) => entry.companyId === company.id && !entry.isRead).length;
+  const pendingInvitation = invitations.find((entry) => entry.companyId === company.id && entry.status === 'pending');
+  const companyRatings = ratings.filter((entry) => entry.companyId === company.id);
+  const companyAverageRating = averageScore(companyRatings);
+  const lowRatingRisk = companyRatings.length >= 3 && companyAverageRating < 4;
+  const companyRecentEvents = auditEvents.filter((event) => event.companyId === company.id).slice(0, 8);
+  const recentErrors = companyRecentEvents.filter((event) => event.status === 'error').length;
+
+  let tone: OperationalTone = 'success';
+  if (!company.isActive || pendingBookings > 3 || stalePendingBookings > 0 || expiringPromotions > 0 || lowRatingRisk || recentErrors > 0 || (pendingInvitation && pendingInvitation.emailDeliveryStatus !== 'sent')) {
+    tone = 'warning';
+  }
+  if ((!company.isActive && pendingBookings > 0) || stalePendingBookings > 1 || (companyRatings.length >= 3 && companyAverageRating < 3.5)) {
+    tone = 'error';
+  }
+
+  const riskLabel = stalePendingBookings
+    ? `${stalePendingBookings} stale pending`
+    : lowRatingRisk
+      ? `${companyAverageRating.toFixed(1)} / 5 rating`
+      : expiringPromotions
+        ? `${expiringPromotions} offers near expiry`
+        : pendingInvitation
+          ? pendingInvitation.emailDeliveryStatus === 'sent' ? 'Invite delivered' : 'Invite issue'
+          : `${companyAverageRating ? `${companyAverageRating.toFixed(1)} / 5 rating` : 'No reviews yet'}`;
+
+  return {
+    id: company.id,
+    title: company.name,
+    detail: `${company.isActive ? 'Active' : 'Paused'} · ${publishedItems} live items · ${activePromotions} active promotions · ${pendingBookings} pending bookings${stalePendingBookings ? ` · ${stalePendingBookings} stale` : ''}`,
+    statusLabel: `${riskLabel}${unreadAlerts ? ` · ${unreadAlerts} alerts` : ''}`,
+    tone,
+  };
+}
+
+function OperationalStatusRow({
+  title,
+  detail,
+  statusLabel,
+  tone,
+  actionLabel,
+  onPress,
+}: {
+  title: string;
+  detail: string;
+  statusLabel: string;
+  tone: OperationalTone;
+  actionLabel?: string;
+  onPress?: () => void;
+}) {
+  return (
+    <View style={styles.operationalRow}>
+      <View style={styles.infoBodyGrow}>
+        <View style={styles.operationalTitleRow}>
+          <Text style={styles.infoTitle}>{title}</Text>
+          <View style={[styles.operationalToneBadge, tone === 'success' && styles.operationalToneBadgeSuccess, tone === 'info' && styles.operationalToneBadgeInfo, tone === 'warning' && styles.operationalToneBadgeWarning, tone === 'error' && styles.operationalToneBadgeError]}>
+            <Text style={[styles.operationalToneBadgeText, tone === 'success' && styles.operationalToneBadgeTextSuccess, tone === 'info' && styles.operationalToneBadgeTextInfo, tone === 'warning' && styles.operationalToneBadgeTextWarning, tone === 'error' && styles.operationalToneBadgeTextError]}>{toneLabel(tone)}</Text>
+          </View>
+        </View>
+        <Text style={styles.infoSubtitle}>{detail}</Text>
+        <Text style={styles.operationalMetaText}>{statusLabel}</Text>
+      </View>
+      {actionLabel && onPress ? <SecondaryButton label={actionLabel} onPress={onPress} /> : null}
+    </View>
+  );
+}
+
+function AuditEventRow({ event }: { event: AuditEvent }) {
+  return (
+    <View style={styles.auditRow}>
+      <View style={styles.auditHeaderRow}>
+        <Text style={styles.infoTitle}>{event.summary}</Text>
+        <View style={[styles.operationalToneBadge, event.status === 'success' && styles.operationalToneBadgeSuccess, event.status === 'info' && styles.operationalToneBadgeInfo, event.status === 'warning' && styles.operationalToneBadgeWarning, event.status === 'error' && styles.operationalToneBadgeError]}>
+          <Text style={[styles.operationalToneBadgeText, event.status === 'success' && styles.operationalToneBadgeTextSuccess, event.status === 'info' && styles.operationalToneBadgeTextInfo, event.status === 'warning' && styles.operationalToneBadgeTextWarning, event.status === 'error' && styles.operationalToneBadgeTextError]}>{event.action}</Text>
+        </View>
+      </View>
+      <Text style={styles.infoSubtitle}>{event.actorEmail} · {event.createdAtLabel}</Text>
+      {event.metadata.length ? (
+        <View style={styles.auditTagRow}>
+          {event.metadata.slice(0, 4).map((entry) => (
+            <View key={`${event.id}-${entry}`} style={styles.auditTag}>
+              <Text style={styles.auditTagText}>{entry}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function MiniTrendCard({
+  title,
+  subtitle,
+  points,
+  tone,
+  format = 'number',
+  selected = false,
+  onPress,
+}: {
+  title: string;
+  subtitle: string;
+  points: Array<{ label: string; value: number }>;
+  tone: OperationalTone;
+  format?: 'number' | 'currency';
+  selected?: boolean;
+  onPress?: () => void;
+}) {
+  const maxValue = Math.max(...points.map((point) => point.value), 1);
+
+  return (
+    <Pressable style={[styles.trendCard, selected && styles.trendCardSelected]} onPress={onPress}>
+      <View style={styles.trendCardHeader}>
+        <View style={styles.infoBodyGrow}>
+          <Text style={styles.infoTitle}>{title}</Text>
+          <Text style={styles.infoSubtitle}>{subtitle}</Text>
+        </View>
+        <View style={[styles.operationalToneBadge, tone === 'success' && styles.operationalToneBadgeSuccess, tone === 'info' && styles.operationalToneBadgeInfo, tone === 'warning' && styles.operationalToneBadgeWarning, tone === 'error' && styles.operationalToneBadgeError]}>
+          <Text style={[styles.operationalToneBadgeText, tone === 'success' && styles.operationalToneBadgeTextSuccess, tone === 'info' && styles.operationalToneBadgeTextInfo, tone === 'warning' && styles.operationalToneBadgeTextWarning, tone === 'error' && styles.operationalToneBadgeTextError]}>Trend</Text>
+        </View>
+      </View>
+      <View style={styles.trendBarsRow}>
+        {points.map((point) => (
+          <View key={`${title}-${point.label}`} style={styles.trendBarColumn}>
+            <Text style={styles.trendBarValue}>{format === 'currency' ? formatMetricValue(point.value) : Math.round(point.value)}</Text>
+            <View style={styles.trendBarTrack}>
+              <View
+                style={[
+                  styles.trendBarFill,
+                  tone === 'success' && styles.trendBarFillSuccess,
+                  tone === 'info' && styles.trendBarFillInfo,
+                  tone === 'warning' && styles.trendBarFillWarning,
+                  tone === 'error' && styles.trendBarFillError,
+                  { height: `${Math.max((point.value / maxValue) * 100, point.value > 0 ? 16 : 4)}%` },
+                ]}
+              />
+            </View>
+            <Text style={styles.trendBarLabel}>{point.label}</Text>
+          </View>
+        ))}
+      </View>
+    </Pressable>
+  );
+}
+
+function TrendDrilldownCard({
+  title,
+  description,
+  highlight,
+  footer,
+  points,
+  format = 'number',
+}: {
+  title: string;
+  description: string;
+  highlight: string;
+  footer: string;
+  points: Array<{ label: string; value: number }>;
+  format?: 'number' | 'currency';
+}) {
+  const summary = summarizeTrendPoints(points);
+  const formatPoint = (value: number) => format === 'currency' ? formatMetricValue(value) : `${Math.round(value)}`;
+
+  return (
+    <View style={styles.trendDrilldownCard}>
+      <Text style={styles.infoTitle}>{title}</Text>
+      <Text style={styles.infoSubtitle}>{description}</Text>
+      <Text style={styles.trendDrilldownHighlight}>{highlight}</Text>
+      <View style={styles.trendAnnotationRow}>
+        <View style={styles.trendAnnotationChip}>
+          <Text style={styles.trendAnnotationLabel}>Peak</Text>
+          <Text style={styles.trendAnnotationValue}>{formatPoint(summary.peak.value)}</Text>
+          <Text style={styles.trendAnnotationHint}>{summary.peak.label}</Text>
+        </View>
+        <View style={styles.trendAnnotationChip}>
+          <Text style={styles.trendAnnotationLabel}>Average</Text>
+          <Text style={styles.trendAnnotationValue}>{formatPoint(summary.average)}</Text>
+          <Text style={styles.trendAnnotationHint}>Visible window</Text>
+        </View>
+        <View style={styles.trendAnnotationChip}>
+          <Text style={styles.trendAnnotationLabel}>Latest</Text>
+          <Text style={styles.trendAnnotationValue}>{formatPoint(summary.latest.value)}</Text>
+          <Text style={styles.trendAnnotationHint}>{summary.latest.label}</Text>
+        </View>
+      </View>
+      <View style={styles.trendTooltipCard}>
+        <Text style={styles.trendTooltipTitle}>Reading tip</Text>
+        <Text style={styles.trendTooltipBody}>Use the peak chip to spot the busiest day, the average to judge baseline demand, and the latest point to see whether the current run-rate is improving or cooling off.</Text>
+      </View>
+      <Text style={styles.trendDrilldownFooter}>{footer}</Text>
+    </View>
+  );
+}
+
+function TableStatusPill({ label, tone }: { label: string; tone: OperationalTone }) {
+  return (
+    <View style={[
+      styles.tablePill,
+      tone === 'success' && styles.tablePillSuccess,
+      tone === 'info' && styles.tablePillInfo,
+      tone === 'warning' && styles.tablePillWarning,
+      tone === 'error' && styles.tablePillError,
+    ]}>
+      <Text style={[
+        styles.tablePillText,
+        tone === 'success' && styles.tablePillTextSuccess,
+        tone === 'info' && styles.tablePillTextInfo,
+        tone === 'warning' && styles.tablePillTextWarning,
+        tone === 'error' && styles.tablePillTextError,
+      ]}>{label}</Text>
+    </View>
+  );
+}
+
+function MiniSparkline({ values, tone = 'info' }: { values: number[]; tone?: OperationalTone }) {
+  const maxValue = Math.max(...values, 1);
+  return (
+    <View style={styles.sparklineRow}>
+      {values.map((value, index) => (
+        <View key={`spark-${index}`} style={styles.sparklineTrack}>
+          <View
+            style={[
+              styles.sparklineFill,
+              tone === 'success' && styles.sparklineFillSuccess,
+              tone === 'info' && styles.sparklineFillInfo,
+              tone === 'warning' && styles.sparklineFillWarning,
+              tone === 'error' && styles.sparklineFillError,
+              { height: `${Math.max((value / maxValue) * 100, value > 0 ? 18 : 8)}%` },
+            ]}
+          />
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function CustomerHomeBannerCard({
+  imageUrl,
+  title,
+  subtitle,
+  width,
+  onPress,
+}: {
+  imageUrl: string;
+  title: string;
+  subtitle: string;
+  width: number;
+  onPress: () => void;
+}) {
+
+  return (
+    <Pressable style={[styles.customerHomeBannerCard, { width }]} onPress={onPress}>
+      <Image source={{ uri: imageUrl }} style={styles.customerHomeBannerImage} resizeMode="cover" />
+      <LinearGradient colors={['transparent', 'rgba(0,0,0,0.16)', 'rgba(0,0,0,0.82)']} style={styles.customerHomeBannerOverlay}>
+        <View style={styles.customerHomeBannerTopRow}>
+          <View style={styles.customerHomeBannerSponsorPill}>
+            <Text style={styles.customerHomeBannerSponsorText}>Featured</Text>
+          </View>
+          <Text style={styles.customerHomeBannerCompany}>Jahzeen Picks</Text>
+        </View>
+        <View style={styles.customerHomeBannerBody}>
+          <Text style={styles.customerHomeBannerTitle} numberOfLines={2}>{title}</Text>
+          <Text style={styles.customerHomeBannerMeta} numberOfLines={2}>{subtitle}</Text>
+          <View style={styles.customerHomeBannerFooter}>
+            <Text style={styles.customerHomeBannerPrice}>Explore</Text>
+            <View style={styles.customerHomeBannerCta}>
+              <Text style={styles.customerHomeBannerCtaText}>open</Text>
+            </View>
+          </View>
+        </View>
+      </LinearGradient>
+    </Pressable>
+  );
+}
+
+function CustomerHomeLotCard({ item, promotion, onPress }: { item: CatalogItem; promotion?: OfferPromotion; onPress: () => void }) {
+  const countdown = promotion?.endsAtLabel ? getCountdownInfo(promotion.endsAtLabel).label : item.durationLabel || item.category;
+
+  return (
+    <Pressable style={styles.customerHomeLotCard} onPress={onPress}>
+      <View style={styles.customerHomeLotImageWrap}>
+        {item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.customerHomeLotImage} resizeMode="cover" /> : null}
+      </View>
+      <Text style={styles.customerHomeLotTitle} numberOfLines={2}>{item.title}</Text>
+      <View style={styles.customerHomeLotMetaRow}>
+        <Ionicons name="time-outline" size={14} color={colors.accent} />
+        <Text style={styles.customerHomeLotMetaText}>{countdown}</Text>
+      </View>
+      <View style={styles.customerHomeLotMetaRow}>
+        <Ionicons name="business-outline" size={14} color="#8E98A3" />
+        <Text style={styles.customerHomeLotMetaText}>{item.companyName}</Text>
+      </View>
+      <Text style={styles.customerHomeLotPrice}>QAR {item.price.toFixed(0)}</Text>
+    </Pressable>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  options,
+  placeholder,
+  error,
+  onSelect,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  placeholder?: string;
+  error?: string;
+  onSelect: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <View style={styles.fieldWrap}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <Pressable style={[styles.selectFieldButton, error && styles.inputError]} onPress={() => setOpen(true)}>
+        <Text style={[styles.selectFieldText, !value && styles.selectFieldPlaceholder]}>{value || placeholder || 'Select an option'}</Text>
+        <Ionicons name="chevron-down-outline" size={18} color={colors.muted} />
+      </Pressable>
+      {error ? <FieldError text={error} /> : null}
+
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <View style={styles.selectFieldOverlay}>
+          <Pressable style={styles.selectFieldBackdrop} onPress={() => setOpen(false)} />
+          <View style={styles.selectFieldSheet}>
+            <Text style={styles.selectFieldSheetTitle}>{label}</Text>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.selectFieldSheetList}>
+              {options.map((option) => (
+                <Pressable
+                  key={option}
+                  style={styles.selectFieldOption}
+                  onPress={() => {
+                    onSelect(option);
+                    setOpen(false);
+                  }}
+                >
+                  <Text style={styles.selectFieldOptionText}>{option}</Text>
+                  {value === option ? <Ionicons name="checkmark-outline" size={18} color={colors.primary} /> : null}
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+function SortableDataTable<T>({
+  columns,
+  rows,
+  sortState,
+  onSortChange,
+  keyExtractor,
+  renderActions,
+  getRowTone,
+  maxHeight = 440,
+  stickyLeadingColumnCount = 0,
+  stickyLeadColumns = false,
+  filterStorageKey,
+}: {
+  columns: Array<{ key: string; label: string; sortable?: boolean; render: (row: T) => React.ReactNode }>;
+  rows: T[];
+  sortState: { key: string; direction: 'asc' | 'desc' };
+  onSortChange: React.Dispatch<React.SetStateAction<{ key: string; direction: 'asc' | 'desc' }>>;
+  keyExtractor: (row: T) => string;
+  renderActions?: (row: T) => React.ReactNode;
+  getRowTone?: (row: T) => OperationalTone | undefined;
+  maxHeight?: number;
+  stickyLeadingColumnCount?: number;
+  stickyLeadColumns?: boolean;
+  filterStorageKey?: string;
+}) {
+  const [toneQuickFilter, setToneQuickFilter] = useState<'all' | 'error' | 'warning' | 'success'>(
+    filterStorageKey ? (tableToneFilterMemory[filterStorageKey] ?? 'all') : 'all',
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!filterStorageKey) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    AsyncStorage.getItem(`${TABLE_TONE_FILTER_STORAGE_PREFIX}${filterStorageKey}`)
+      .then((storedValue) => {
+        if (cancelled || !storedValue) {
+          return;
+        }
+        if (storedValue === 'all' || storedValue === 'error' || storedValue === 'warning' || storedValue === 'success') {
+          tableToneFilterMemory[filterStorageKey] = storedValue;
+          setToneQuickFilter(storedValue);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [filterStorageKey]);
+
+  useEffect(() => {
+    if (!filterStorageKey) {
+      return;
+    }
+
+    setToneQuickFilter(tableToneFilterMemory[filterStorageKey] ?? 'all');
+  }, [filterStorageKey]);
+
+  useEffect(() => {
+    if (!filterStorageKey) {
+      return;
+    }
+
+    tableToneFilterMemory[filterStorageKey] = toneQuickFilter;
+    AsyncStorage.setItem(`${TABLE_TONE_FILTER_STORAGE_PREFIX}${filterStorageKey}`, toneQuickFilter).catch(() => undefined);
+  }, [filterStorageKey, toneQuickFilter]);
+  const visibleRows = useMemo(() => {
+    if (!getRowTone || toneQuickFilter === 'all') {
+      return rows;
+    }
+    return rows.filter((row) => getRowTone(row) === toneQuickFilter);
+  }, [rows, getRowTone, toneQuickFilter]);
+
+  const criticalCount = useMemo(() => getRowTone ? rows.filter((row) => getRowTone(row) === 'error').length : 0, [rows, getRowTone]);
+  const watchCount = useMemo(() => getRowTone ? rows.filter((row) => getRowTone(row) === 'warning').length : 0, [rows, getRowTone]);
+  const stableCount = useMemo(() => getRowTone ? rows.filter((row) => getRowTone(row) === 'success').length : 0, [rows, getRowTone]);
+
+  return (
+    <View style={styles.dataTableWrap}>
+      {getRowTone ? (
+        <View style={styles.dataTableQuickFilterRow}>
+          <ChoiceChip label={`All (${rows.length})`} selected={toneQuickFilter === 'all'} onPress={() => setToneQuickFilter('all')} />
+          <ChoiceChip label={`Critical (${criticalCount})`} selected={toneQuickFilter === 'error'} onPress={() => setToneQuickFilter('error')} />
+          <ChoiceChip label={`Watch (${watchCount})`} selected={toneQuickFilter === 'warning'} onPress={() => setToneQuickFilter('warning')} />
+          <ChoiceChip label={`Stable (${stableCount})`} selected={toneQuickFilter === 'success'} onPress={() => setToneQuickFilter('success')} />
+        </View>
+      ) : null}
+      <ScrollView style={[styles.dataTableScroll, { maxHeight }]} nestedScrollEnabled stickyHeaderIndices={[0]} showsVerticalScrollIndicator={false}>
+        <View style={styles.dataTableHeader}>
+          {columns.map((column, columnIndex) => (
+            <Pressable
+              key={column.key}
+              style={[
+                styles.dataTableHeaderCell,
+                column.sortable && styles.dataTableHeaderCellSortable,
+                stickyLeadColumns && columnIndex < stickyLeadingColumnCount && styles.dataTableStickyLeadHeaderCell,
+              ]}
+              onPress={() => {
+                if (!column.sortable) return;
+                onSortChange((current) => ({
+                  key: column.key,
+                  direction: current.key === column.key && current.direction === 'asc' ? 'desc' : 'asc',
+                }));
+              }}
+            >
+              <Text style={styles.dataTableHeaderText}>{column.label}</Text>
+              {column.sortable && sortState.key === column.key ? <Text style={styles.dataTableSortText}>{sortState.direction === 'asc' ? '↑' : '↓'}</Text> : null}
+            </Pressable>
+          ))}
+          {renderActions ? <View style={styles.dataTableActionHeader}><Text style={styles.dataTableHeaderText}>Actions</Text></View> : null}
+        </View>
+        {visibleRows.map((row, index) => {
+          const rowTone = getRowTone?.(row);
+          return (
+            <View
+              key={keyExtractor(row)}
+              style={[
+                styles.dataTableRow,
+                index % 2 === 1 && styles.dataTableRowAlt,
+                rowTone === 'warning' && styles.dataTableRowWarning,
+                rowTone === 'error' && styles.dataTableRowError,
+                rowTone === 'success' && styles.dataTableRowSuccess,
+              ]}
+            >
+              {columns.map((column, columnIndex) => {
+                const content = column.render(row);
+                return (
+                  <View
+                    key={`${keyExtractor(row)}-${column.key}`}
+                    style={[
+                      styles.dataTableCell,
+                      stickyLeadColumns && columnIndex < stickyLeadingColumnCount && styles.dataTableStickyLeadCell,
+                    ]}
+                  >
+                    {typeof content === 'string' || typeof content === 'number' ? (
+                      <Text style={styles.dataTableCellText}>{content}</Text>
+                    ) : (
+                      content
+                    )}
+                  </View>
+                );
+              })}
+              {renderActions ? <View style={styles.dataTableActionCell}>{renderActions(row)}</View> : null}
+            </View>
+          );
+        })}
+      </ScrollView>
     </View>
   );
 }
@@ -2578,6 +4570,7 @@ function validateCatalogDraft(draft: {
   if (!draft.summary.trim()) errors.summary = 'Summary is required.';
   if (!draft.description.trim()) errors.description = 'Description is required.';
   if (!draft.category.trim()) errors.category = 'Category is required.';
+  if (draft.category.trim() && !APP_CATEGORY_OPTIONS.includes(draft.category.trim())) errors.category = 'Choose a category from the application list.';
   if (!draft.durationLabel.trim()) errors.durationLabel = 'Duration is required.';
   if (!draft.price.trim() || Number.isNaN(Number(draft.price)) || Number(draft.price) < 0) errors.price = 'Price must be a valid positive number.';
   if (!draft.loyaltyPoints.trim() || Number.isNaN(Number(draft.loyaltyPoints)) || Number(draft.loyaltyPoints) < 0) errors.loyaltyPoints = 'Loyalty points must be zero or more.';
@@ -3204,6 +5197,23 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
   },
+  customerHeaderPlainHome: {
+    marginBottom: 10,
+  },
+  customerHeaderCenteredBrand: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  customerHeaderCenteredTitle: {
+    color: colors.text,
+    fontSize: 26,
+    fontWeight: '300',
+    letterSpacing: 0.6,
+  },
+  customerHeaderCenteredTitleDark: {
+    color: '#F7F8FA',
+  },
   customerHeaderCard: {
     marginHorizontal: 18,
     marginTop: 12,
@@ -3453,8 +5463,680 @@ const styles = StyleSheet.create({
     paddingBottom: 140,
     gap: 16,
   },
+  customerWorkspaceHost: {
+    flex: 1,
+    minHeight: 0,
+  },
   customerWorkspace: {
+    flex: 1,
     gap: 16,
+  },
+  customerTabScroll: {
+    flex: 1,
+  },
+  customerTabScrollContent: {
+    paddingHorizontal: 18,
+    paddingBottom: 140,
+    gap: 16,
+  },
+  customerCategoryDrawerOverlay: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  customerCategoryDrawerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(18, 25, 33, 0.28)',
+  },
+  customerCategoryDrawer: {
+    width: '84%',
+    maxWidth: 340,
+    paddingHorizontal: 18,
+    paddingVertical: 22,
+    backgroundColor: '#FFF8EF',
+    borderLeftWidth: 1,
+    borderLeftColor: '#E6D8BF',
+    gap: 14,
+    shadowColor: '#17252F',
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+    shadowOffset: { width: -4, height: 0 },
+    elevation: 12,
+  },
+  customerCategoryDrawerTitle: {
+    color: colors.text,
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  customerCategorySearchWrap: {
+    minHeight: 50,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E1D7C6',
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  customerCategorySearchInput: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 15,
+    paddingVertical: 0,
+  },
+  customerCategoryDrawerList: {
+    gap: 10,
+    paddingBottom: 12,
+  },
+  customerCategoryDrawerRow: {
+    minHeight: 54,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E6DDCF',
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  customerCategoryDrawerRowText: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  customerHomeScreen: {
+    gap: 18,
+  },
+  customerHomeCarouselHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  customerHomeCarouselEyebrow: {
+    color: '#7A8791',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  customerHomePaidBadge: {
+    color: '#7F8792',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  customerHomeCarouselRow: {
+    gap: 14,
+    paddingRight: 18,
+  },
+  customerHomeBannerCard: {
+    height: 178,
+    borderRadius: 22,
+    overflow: 'hidden',
+    backgroundColor: '#E8DED0',
+    borderWidth: 1,
+    borderColor: '#D8C9AF',
+  },
+  customerHomeBannerImage: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  customerHomeBannerOverlay: {
+    flex: 1,
+    padding: 16,
+    justifyContent: 'space-between',
+  },
+  customerHomeBannerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  customerHomeBannerSponsorPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF24',
+    borderWidth: 1,
+    borderColor: '#FFFFFF40',
+  },
+  customerHomeBannerSponsorText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  customerHomeBannerCompany: {
+    color: '#E8ECF1',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  customerHomeBannerBody: {
+    gap: 8,
+  },
+  customerHomeBannerTitle: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    lineHeight: 28,
+    fontWeight: '800',
+  },
+  customerHomeBannerMeta: {
+    color: '#D6DBE2',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  customerHomeBannerFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  customerHomeBannerPrice: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  customerHomeBannerCta: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: colors.accent,
+  },
+  customerHomeBannerCtaText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  customerHomeSearchBar: {
+    minHeight: 64,
+    borderRadius: 22,
+    backgroundColor: '#FFF8EF',
+    borderWidth: 1,
+    borderColor: '#E3D6C1',
+    paddingHorizontal: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  customerHomeSearchSection: {
+    gap: 10,
+  },
+  customerHomeSearchInput: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '500',
+    paddingVertical: 0,
+  },
+  customerHomeSearchClearButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3EBDD',
+  },
+  customerHomeSearchMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 2,
+  },
+  customerHomeSearchMetaText: {
+    flex: 1,
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  customerHomeSearchLink: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  customerHomeSearchText: {
+    color: '#B9BEC7',
+    fontSize: 18,
+    fontWeight: '500',
+  },
+  customerHomeSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  customerHomeSectionHeaderCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  customerHomeSectionTitle: {
+    color: colors.text,
+    fontSize: 26,
+    fontWeight: '300',
+  },
+  customerHomeSectionSubtitle: {
+    color: colors.muted,
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  customerHomeSectionMeta: {
+    color: '#50626F',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  customerHomeLotRow: {
+    gap: 16,
+    paddingRight: 18,
+  },
+  customerHomeLotCard: {
+    width: 248,
+    gap: 10,
+  },
+  customerHomeLotImageWrap: {
+    height: 226,
+    borderRadius: 22,
+    overflow: 'hidden',
+    backgroundColor: '#E9DFD1',
+    borderWidth: 1,
+    borderColor: '#DDD0BC',
+  },
+  customerHomeLotImage: {
+    width: '100%',
+    height: '100%',
+  },
+  customerHomeLotTitle: {
+    color: colors.text,
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '500',
+  },
+  customerHomeLotMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  customerHomeLotMetaText: {
+    color: colors.muted,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  customerHomeLotPrice: {
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  customerHomePrimaryCta: {
+    minHeight: 62,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.accent,
+    borderWidth: 1,
+    borderColor: '#FFFFFF20',
+  },
+  customerHomePrimaryCtaText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  customerHomeSectionBlock: {
+    gap: 14,
+    paddingTop: 10,
+  },
+  customerHomeCategoryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  customerHomeCategoryChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#FFF8EF',
+    borderWidth: 1,
+    borderColor: '#DDD0BC',
+  },
+  customerHomeCategoryChipText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  customerHomeActiveFilterChip: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#E6F0FA',
+    borderWidth: 1,
+    borderColor: '#B8D1EA',
+  },
+  customerHomeActiveFilterChipText: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  customerHomeStatsPanel: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  customerHomeStatCard: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 18,
+    backgroundColor: '#FFF8EF',
+    borderWidth: 1,
+    borderColor: '#E3D6C1',
+    gap: 6,
+  },
+  customerHomeStatValue: {
+    color: colors.text,
+    fontSize: 24,
+    fontWeight: '800',
+  },
+  customerHomeStatLabel: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  customerHomeEmptyCard: {
+    backgroundColor: '#FFF8EF',
+    borderColor: '#E3D6C1',
+  },
+  customerCategoryHubRow: {
+    gap: 12,
+    paddingRight: 18,
+  },
+  customerCategoryHubCard: {
+    width: 236,
+    minHeight: 126,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    backgroundColor: '#FFF8EF',
+    borderWidth: 1,
+    borderColor: '#E4D7C4',
+    gap: 8,
+  },
+  customerCategoryHubTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  customerCategoryHubIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E9F1FA',
+  },
+  customerCategoryHubCount: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  customerCategoryHubTitle: {
+    color: colors.text,
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '700',
+  },
+  customerCategoryHubMeta: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  customerBrowseStatsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  customerBrowseStatCard: {
+    flex: 1,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: '#FFF8EF',
+    borderWidth: 1,
+    borderColor: '#E4D7C4',
+    gap: 4,
+  },
+  customerBrowseStatValue: {
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  customerBrowseStatLabel: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  customerLandingHero: {
+    height: 210,
+    borderRadius: 24,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#DFCDAF',
+    backgroundColor: '#E7DDCF',
+  },
+  customerLandingHeroImage: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  customerLandingHeroOverlay: {
+    flex: 1,
+    justifyContent: 'space-between',
+    padding: 18,
+  },
+  customerLandingHeroTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  customerLandingHeroIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF2A',
+    borderWidth: 1,
+    borderColor: '#FFFFFF45',
+  },
+  customerLandingHeroBadge: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  customerLandingHeroBody: {
+    gap: 8,
+  },
+  customerLandingHeroTitle: {
+    color: '#FFFFFF',
+    fontSize: 28,
+    lineHeight: 32,
+    fontWeight: '800',
+  },
+  customerLandingHeroSubtitle: {
+    color: '#EDF2F7',
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: '500',
+  },
+  customerBrowseSectionBlock: {
+    gap: 14,
+  },
+  customerBrowseGroupStack: {
+    gap: 12,
+  },
+  customerBrowseGroupCard: {
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    backgroundColor: '#FFFBF5',
+    borderWidth: 1,
+    borderColor: '#E9DCC8',
+    gap: 12,
+  },
+  customerBrowseGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  customerBrowseGroupTitleWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  customerBrowseGroupIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E9F1FA',
+  },
+  customerBrowseGroupTitle: {
+    color: colors.text,
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  customerBrowseGroupCount: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  customerBrowseChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  customerBrowseChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E3D8C8',
+  },
+  customerBrowseChipActive: {
+    backgroundColor: '#E6F0FA',
+    borderColor: '#B8D1EA',
+  },
+  customerBrowseChipText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  customerBrowseChipTextActive: {
+    color: colors.primary,
+  },
+  customerExploreStickyHeader: {
+    marginHorizontal: -18,
+    paddingHorizontal: 18,
+    paddingTop: 2,
+    paddingBottom: 12,
+    gap: 10,
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E7DCCB',
+  },
+  customerExploreStickySearchBar: {
+    minHeight: 56,
+    borderRadius: 18,
+    backgroundColor: '#FFF8EF',
+    borderWidth: 1,
+    borderColor: '#E3D6C1',
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  customerExploreStickySearchInput: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '500',
+    paddingVertical: 0,
+  },
+  customerExploreSearchClearButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3EBDD',
+  },
+  customerExploreSortRow: {
+    gap: 8,
+    paddingRight: 10,
+  },
+  customerExploreSortChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E3D7C5',
+  },
+  customerExploreSortChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  customerExploreSortChipText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  customerExploreSortChipTextActive: {
+    color: '#FFFFFF',
+  },
+  customerExploreFilterBar: {
+    gap: 10,
+  },
+  customerExploreFilterRow: {
+    gap: 8,
+    paddingRight: 10,
+  },
+  customerExploreFilterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#FFF8EF',
+    borderWidth: 1,
+    borderColor: '#E3D7C5',
+  },
+  customerExploreFilterChipActive: {
+    backgroundColor: '#E6F0FA',
+    borderColor: '#B8D1EA',
+  },
+  customerExploreFilterChipText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  customerExploreFilterChipTextActive: {
+    color: colors.primary,
+  },
+  customerExploreResetButton: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#FCEFEA',
+    borderWidth: 1,
+    borderColor: '#F2C8BE',
+  },
+  customerExploreResetButtonText: {
+    color: '#A33E31',
+    fontSize: 12,
+    fontWeight: '700',
   },
   customerCanvasDark: {
     backgroundColor: '#111922',
@@ -3600,6 +6282,76 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     color: colors.text,
+  },
+  selectFieldButton: {
+    minHeight: 48,
+    backgroundColor: '#FAF8F2',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  selectFieldText: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 15,
+  },
+  selectFieldPlaceholder: {
+    color: colors.muted,
+  },
+  selectFieldOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(15, 24, 33, 0.24)',
+  },
+  selectFieldBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  selectFieldSheet: {
+    maxHeight: '72%',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    backgroundColor: '#FFF8EF',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: '#E2D5C1',
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 24,
+    gap: 14,
+  },
+  selectFieldSheetTitle: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  selectFieldSheetList: {
+    gap: 10,
+    paddingBottom: 8,
+  },
+  selectFieldOption: {
+    minHeight: 52,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2D7C7',
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  selectFieldOptionText: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '600',
   },
   inputError: {
     borderColor: colors.accent,
@@ -4734,6 +7486,441 @@ const styles = StyleSheet.create({
   verificationTitle: {
     color: colors.text,
     fontWeight: '800',
+  },
+  statusRail: {
+    gap: 12,
+  },
+  operationalRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: '#F8FBFE',
+    borderWidth: 1,
+    borderColor: '#DAE7F2',
+  },
+  operationalTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 4,
+  },
+  operationalToneBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  operationalToneBadgeSuccess: {
+    backgroundColor: '#E8F6EE',
+    borderColor: '#B9E4CA',
+  },
+  operationalToneBadgeInfo: {
+    backgroundColor: '#EEF5FB',
+    borderColor: '#CFE0EF',
+  },
+  operationalToneBadgeWarning: {
+    backgroundColor: '#FFF4E6',
+    borderColor: '#F2C98D',
+  },
+  operationalToneBadgeError: {
+    backgroundColor: '#FDEBE7',
+    borderColor: '#F6C2B8',
+  },
+  operationalToneBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  operationalToneBadgeTextSuccess: {
+    color: colors.success,
+  },
+  operationalToneBadgeTextInfo: {
+    color: colors.primary,
+  },
+  operationalToneBadgeTextWarning: {
+    color: '#A35B00',
+  },
+  operationalToneBadgeTextError: {
+    color: colors.accent,
+  },
+  operationalMetaText: {
+    marginTop: 6,
+    color: colors.primary,
+    fontWeight: '700',
+  },
+  filterChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+  },
+  stackTight: {
+    gap: 10,
+  },
+  auditRow: {
+    gap: 8,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: '#FCFDFE',
+    borderWidth: 1,
+    borderColor: '#E1EBF3',
+  },
+  auditHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  auditTagRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  auditTag: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#EFF4F9',
+  },
+  auditTagText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  trendCard: {
+    gap: 10,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: '#F9FBFD',
+    borderWidth: 1,
+    borderColor: '#DFE8F1',
+  },
+  trendCardSelected: {
+    borderColor: '#0F3D69',
+    backgroundColor: '#F1F7FD',
+  },
+  trendCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  trendBarsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 10,
+    minHeight: 120,
+  },
+  trendBarColumn: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 6,
+  },
+  trendBarValue: {
+    color: colors.text,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  trendBarTrack: {
+    width: '100%',
+    maxWidth: 28,
+    height: 72,
+    borderRadius: 999,
+    backgroundColor: '#E7EEF5',
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+  },
+  trendBarFill: {
+    width: '100%',
+    minHeight: 4,
+    borderRadius: 999,
+  },
+  trendBarFillSuccess: {
+    backgroundColor: colors.success,
+  },
+  trendBarFillInfo: {
+    backgroundColor: colors.primary,
+  },
+  trendBarFillWarning: {
+    backgroundColor: '#D99233',
+  },
+  trendBarFillError: {
+    backgroundColor: colors.accent,
+  },
+  trendBarLabel: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  trendDrilldownCard: {
+    gap: 10,
+    padding: 16,
+    borderRadius: 20,
+    backgroundColor: '#F5F9FC',
+    borderWidth: 1,
+    borderColor: '#D8E6F1',
+  },
+  trendDrilldownHighlight: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  trendDrilldownFooter: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  dataTableWrap: {
+    borderWidth: 1,
+    borderColor: '#DFE8F1',
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: '#FBFCFE',
+  },
+  dataTableQuickFilterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#DFE8F1',
+    backgroundColor: '#F6FAFE',
+  },
+  dataTableScroll: {
+    maxHeight: 440,
+  },
+  dataTableHeader: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    backgroundColor: '#EEF4FA',
+    borderBottomWidth: 1,
+    borderBottomColor: '#DFE8F1',
+    zIndex: 2,
+  },
+  dataTableHeaderCell: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dataTableHeaderCellSortable: {
+    backgroundColor: 'transparent',
+  },
+  dataTableStickyLeadHeaderCell: {
+    backgroundColor: '#EAF2FA',
+    borderRightWidth: 1,
+    borderRightColor: '#D7E4F0',
+    zIndex: 3,
+    shadowColor: '#0E3A63',
+    shadowOffset: { width: 3, height: 0 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  dataTableHeaderText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  dataTableSortText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  dataTableActionHeader: {
+    width: 300,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    justifyContent: 'center',
+  },
+  dataTableRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E8EEF4',
+  },
+  dataTableRowAlt: {
+    backgroundColor: '#F9FBFD',
+  },
+  dataTableRowWarning: {
+    backgroundColor: '#FFF9EF',
+  },
+  dataTableRowError: {
+    backgroundColor: '#FFF2EF',
+  },
+  dataTableRowSuccess: {
+    backgroundColor: '#F4FBF7',
+  },
+  dataTableCell: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    justifyContent: 'center',
+  },
+  dataTableStickyLeadCell: {
+    backgroundColor: '#F8FBFF',
+    borderRightWidth: 1,
+    borderRightColor: '#E1EAF2',
+    shadowColor: '#0E3A63',
+    shadowOffset: { width: 2, height: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  dataTableCellText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  dataTableActionCell: {
+    width: 300,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    justifyContent: 'center',
+  },
+  tableActionWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  tableStatusActionWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  tablePill: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  tablePillSuccess: {
+    backgroundColor: '#EAF7F0',
+    borderColor: '#BFE4CE',
+  },
+  tablePillInfo: {
+    backgroundColor: '#EEF5FB',
+    borderColor: '#CFE0EF',
+  },
+  tablePillWarning: {
+    backgroundColor: '#FFF4E6',
+    borderColor: '#F2C98D',
+  },
+  tablePillError: {
+    backgroundColor: '#FDEBE7',
+    borderColor: '#F6C2B8',
+  },
+  tablePillText: {
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  tablePillTextSuccess: {
+    color: colors.success,
+  },
+  tablePillTextInfo: {
+    color: colors.primary,
+  },
+  tablePillTextWarning: {
+    color: '#A35B00',
+  },
+  tablePillTextError: {
+    color: colors.accent,
+  },
+  sparklineRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 4,
+    height: 26,
+    minWidth: 64,
+  },
+  sparklineTrack: {
+    flex: 1,
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: '#E7EEF5',
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+  },
+  sparklineFill: {
+    width: '100%',
+    minHeight: 2,
+    borderRadius: 999,
+  },
+  sparklineFillSuccess: {
+    backgroundColor: colors.success,
+  },
+  sparklineFillInfo: {
+    backgroundColor: colors.primary,
+  },
+  sparklineFillWarning: {
+    backgroundColor: '#D99233',
+  },
+  sparklineFillError: {
+    backgroundColor: colors.accent,
+  },
+  trendAnnotationRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 10,
+  },
+  trendAnnotationChip: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E1EAF2',
+    gap: 4,
+  },
+  trendAnnotationLabel: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  trendAnnotationValue: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  trendAnnotationHint: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  trendTooltipCard: {
+    gap: 4,
+    padding: 12,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E1EAF2',
+  },
+  trendTooltipTitle: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  trendTooltipBody: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
   },
   busyIndicator: {
     marginTop: 8,

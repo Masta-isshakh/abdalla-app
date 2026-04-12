@@ -12,6 +12,23 @@ export type NotificationAudience = 'admin' | 'company' | 'customer';
 
 export type NotificationKind = 'booking' | 'promotion' | 'invitation' | 'system';
 
+export type AuditActorRole = Exclude<AppRole, 'guest'> | 'system';
+
+export type AuditEntityType =
+  | 'company'
+  | 'invitation'
+  | 'catalogItem'
+  | 'promotion'
+  | 'booking'
+  | 'loyaltyProgram'
+  | 'profile'
+  | 'address'
+  | 'rating'
+  | 'auth'
+  | 'system';
+
+export type AuditStatus = 'success' | 'warning' | 'error' | 'info';
+
 export interface AuthUser {
   userId: string;
   email: string;
@@ -130,6 +147,20 @@ export interface AppNotification {
   kind: NotificationKind;
   destinationTab: string;
   isRead: boolean;
+  createdAtLabel: string;
+}
+
+export interface AuditEvent {
+  id: string;
+  actorRole: AuditActorRole;
+  actorEmail: string;
+  entityType: AuditEntityType;
+  entityId: string;
+  companyId?: string;
+  action: string;
+  status: AuditStatus;
+  summary: string;
+  metadata: string[];
   createdAtLabel: string;
 }
 
@@ -253,6 +284,18 @@ export interface NotificationDraft {
   kind: NotificationKind;
   destinationTab: string;
   isRead?: boolean;
+}
+
+export interface AuditEventDraft {
+  actorRole?: AuditActorRole;
+  actorEmail?: string;
+  entityType: AuditEntityType;
+  entityId: string;
+  companyId?: string;
+  action: string;
+  status: AuditStatus;
+  summary: string;
+  metadata?: string[];
 }
 
 export interface LoyaltyProgramDraft {
