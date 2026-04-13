@@ -14,6 +14,9 @@ import {
 import { dataClient } from '../lib/amplify';
 import {
   Address,
+  AvailabilitySlot,
+  AvailabilitySlotDraft,
+  AppCategorySetting,
   AppNotification,
   AppRole,
   AppUserRecord,
@@ -38,8 +41,9 @@ import {
   UserProfile,
 } from '../app-types';
 
-const STORAGE_KEY = 'jahzeen-platform-state-v4';
+const STORAGE_KEY = 'jahzeen-platform-state-v5';
 const MANUAL_ADMIN_EMAILS = ['owner@jahzeen.app', 'admin@jahzeen.app'];
+const APP_DEFAULT_COMPANY_CATEGORY = 'Home Cleaning';
 const CUSTOM_MUTATION_DOCUMENTS: Record<string, string> = {
   sendCompanyInvitationEmail: `
     mutation SendCompanyInvitationEmail(
@@ -138,12 +142,14 @@ type PersistedState = {
   addresses: Address[];
   users: AppUserRecord[];
   companies: Company[];
+  appCategorySettings: AppCategorySetting[];
   invitations: CompanyInvitation[];
   catalogItems: CatalogItem[];
   offerPromotions: OfferPromotion[];
   notifications: AppNotification[];
   auditEvents: AuditEvent[];
   bookings: Booking[];
+  availabilitySlots: AvailabilitySlot[];
   ratings: Array<{ id: string; bookingId: string; companyId: string; itemId: string; customerEmail: string; score: number; review: string; createdAtLabel: string }>;
   loyaltyPrograms: LoyaltyProgram[];
 };
@@ -160,12 +166,14 @@ interface AppContextValue {
   addresses: Address[];
   users: AppUserRecord[];
   companies: Company[];
+  appCategorySettings: AppCategorySetting[];
   invitations: CompanyInvitation[];
   catalogItems: CatalogItem[];
   offerPromotions: OfferPromotion[];
   notifications: AppNotification[];
   auditEvents: AuditEvent[];
   bookings: Booking[];
+  availabilitySlots: AvailabilitySlot[];
   ratings: PersistedState['ratings'];
   loyaltyPrograms: LoyaltyProgram[];
   currentUserRecord: AppUserRecord | null;
@@ -191,6 +199,9 @@ interface AppContextValue {
   deleteOfferPromotion: (promotionId: string) => Promise<void>;
   markNotificationRead: (notificationId: string) => Promise<void>;
   saveLoyaltyProgram: (scope: 'admin' | 'company', companyId: string | undefined, draft: LoyaltyProgramDraft) => Promise<void>;
+  saveCategorySetting: (category: string, isComingSoon: boolean) => Promise<void>;
+  saveAvailabilitySlot: (companyId: string, draft: AvailabilitySlotDraft) => Promise<void>;
+  deleteAvailabilitySlot: (slotId: string) => Promise<void>;
   placeBooking: (draft: BookingDraft) => Promise<Booking>;
   changeBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
   submitRating: (bookingId: string, score: number, review: string) => Promise<void>;
@@ -257,12 +268,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [addresses, setAddresses] = useState<Address[]>([starterAddress]);
   const [users, setUsers] = useState<AppUserRecord[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [appCategorySettings, setAppCategorySettings] = useState<AppCategorySetting[]>([]);
   const [invitations, setInvitations] = useState<CompanyInvitation[]>([]);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [offerPromotions, setOfferPromotions] = useState<OfferPromotion[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [availabilitySlots, setAvailabilitySlots] = useState<AvailabilitySlot[]>([]);
   const [ratings, setRatings] = useState<PersistedState['ratings']>([]);
   const [loyaltyPrograms, setLoyaltyPrograms] = useState<LoyaltyProgram[]>([]);
 
@@ -277,13 +290,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setProfile(parsed.profile ?? starterProfile);
           setAddresses(parsed.addresses?.length ? parsed.addresses : [starterAddress]);
           setUsers(parsed.users ?? []);
-          setCompanies(parsed.companies ?? []);
+          setCompanies((parsed.companies ?? []).map((entry) => ({
+            ...entry,
+            category: entry.category ?? APP_DEFAULT_COMPANY_CATEGORY,
+            profileImageUrl: entry.profileImageUrl ?? '',
+          })));
+          setAppCategorySettings((parsed as PersistedState & { appCategorySettings?: AppCategorySetting[] }).appCategorySettings ?? []);
           setInvitations(parsed.invitations ?? []);
           setCatalogItems(parsed.catalogItems ?? []);
           setOfferPromotions(parsed.offerPromotions ?? []);
           setNotifications(parsed.notifications ?? []);
           setAuditEvents(parsed.auditEvents ?? []);
           setBookings(parsed.bookings ?? []);
+          setAvailabilitySlots((parsed as PersistedState & { availabilitySlots?: AvailabilitySlot[] }).availabilitySlots ?? []);
           setRatings(parsed.ratings ?? []);
           setLoyaltyPrograms(parsed.loyaltyPrograms ?? []);
         }
@@ -316,19 +335,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         addresses,
         users,
         companies,
+        appCategorySettings,
         invitations,
         catalogItems,
         offerPromotions,
         notifications,
         auditEvents,
         bookings,
+        availabilitySlots,
         ratings,
         loyaltyPrograms,
       }),
     ).catch(() => {
       // Ignore persistence errors.
     });
-  }, [initialized, profile, addresses, users, companies, invitations, catalogItems, offerPromotions, notifications, auditEvents, bookings, ratings, loyaltyPrograms]);
+  }, [initialized, profile, addresses, users, companies, appCategorySettings, invitations, catalogItems, offerPromotions, notifications, auditEvents, bookings, availabilitySlots, ratings, loyaltyPrograms]);
 
   const currentUserRecord = useMemo(() => {
     if (!authUser) {
@@ -637,15 +658,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   async function syncCloudRecords() {
     try {
-      const [remoteUsers, remoteCompanies, remoteInvitations, remoteItems, remotePromotions, remoteNotifications, remoteAuditEvents, remoteBookings, remoteRatings, remotePrograms, remoteAddresses, remoteProfiles] = await Promise.all([
+      const [remoteUsers, remoteCompanies, remoteCategorySettings, remoteInvitations, remoteItems, remotePromotions, remoteNotifications, remoteAuditEvents, remoteBookings, remoteSlots, remoteRatings, remotePrograms, remoteAddresses, remoteProfiles] = await Promise.all([
         safeList('AppUser'),
         safeList('Company'),
+        safeList('AppCategorySetting'),
         safeList('CompanyInvitation'),
         safeList('CatalogItem'),
         safeList('OfferPromotion'),
         safeList('AppNotification'),
         safeList('AuditEvent'),
         safeList('Booking'),
+        safeList('AvailabilitySlot'),
         safeList('Rating'),
         safeList('LoyaltyProgram'),
         safeList('Address'),
@@ -656,7 +679,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setUsers(remoteUsers.map((entry: any) => ({ id: entry.id, email: entry.email, fullName: entry.fullName, phone: entry.phone ?? '', role: entry.role, companyId: entry.companyId ?? undefined, companyName: entry.companyName ?? undefined, invitedByEmail: entry.invitedByEmail ?? undefined, status: entry.status })));
       }
       if (remoteCompanies.length) {
-        setCompanies(remoteCompanies.map((entry: any) => ({ id: entry.id, name: entry.name, slug: entry.slug, description: entry.description ?? '', supportEmail: entry.supportEmail, supportPhone: entry.supportPhone ?? '', accentColor: entry.accentColor ?? '#0F7B45', logoText: entry.logoText ?? entry.name.slice(0, 2).toUpperCase(), ownerEmail: entry.ownerEmail ?? '', isActive: !!entry.isActive, createdAtLabel: entry.createdAtLabel ?? nowLabel() })));
+        setCompanies(remoteCompanies.map((entry: any) => ({ id: entry.id, name: entry.name, slug: entry.slug, description: entry.description ?? '', category: entry.category ?? APP_DEFAULT_COMPANY_CATEGORY, supportEmail: entry.supportEmail, supportPhone: entry.supportPhone ?? '', accentColor: entry.accentColor ?? '#0F7B45', logoText: entry.logoText ?? entry.name.slice(0, 2).toUpperCase(), profileImageUrl: entry.profileImageUrl ?? '', ownerEmail: entry.ownerEmail ?? '', isActive: !!entry.isActive, createdAtLabel: entry.createdAtLabel ?? nowLabel() })));
+      }
+      if (remoteCategorySettings.length) {
+        setAppCategorySettings(remoteCategorySettings.map((entry: any) => ({ id: entry.id, category: entry.category, isComingSoon: !!entry.isComingSoon })));
       }
       if (remoteInvitations.length) {
         setInvitations(remoteInvitations.map((entry: any) => ({ id: entry.id, companyId: entry.companyId, companyName: entry.companyName, email: entry.email, invitedByEmail: entry.invitedByEmail, status: entry.status, message: entry.message ?? '', emailDeliveryStatus: entry.emailDeliveryStatus ?? 'pending', emailDeliveryError: entry.emailDeliveryError ?? undefined, emailSentAtLabel: entry.emailSentAtLabel ?? undefined })));
@@ -674,7 +700,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setAuditEvents(remoteAuditEvents.map((entry: any) => ({ id: entry.id, actorRole: entry.actorRole, actorEmail: entry.actorEmail, entityType: entry.entityType, entityId: entry.entityId, companyId: entry.companyId ?? undefined, action: entry.action, status: entry.status, summary: entry.summary, metadata: parseList(entry.metadata), createdAtLabel: entry.createdAtLabel ?? nowLabel() })));
       }
       if (remoteBookings.length) {
-        setBookings(remoteBookings.map((entry: any) => ({ id: entry.id, bookingNumber: entry.bookingNumber, customerEmail: entry.customerEmail, customerName: entry.customerName, companyId: entry.companyId, companyName: entry.companyName, itemId: entry.itemId, itemTitle: entry.itemTitle, kind: entry.kind, scheduleDate: entry.scheduleDate, scheduleTime: entry.scheduleTime, addressLabel: entry.addressLabel, addressLine: entry.addressLine, paymentMethod: entry.paymentMethod, notes: entry.notes ?? '', status: entry.status, subtotal: Number(entry.subtotal ?? 0), serviceFee: Number(entry.serviceFee ?? 0), discount: Number(entry.discount ?? 0), total: Number(entry.total ?? 0), loyaltyPointsEarned: Number(entry.loyaltyPointsEarned ?? 0), ratingSubmitted: !!entry.ratingSubmitted, timeline: parseTimeline(entry.timeline) })));
+        setBookings(remoteBookings.map((entry: any) => ({ id: entry.id, bookingNumber: entry.bookingNumber, customerEmail: entry.customerEmail, customerName: entry.customerName, companyId: entry.companyId, companyName: entry.companyName, itemId: entry.itemId, itemTitle: entry.itemTitle, slotId: entry.slotId ?? undefined, kind: entry.kind, scheduleDate: entry.scheduleDate, scheduleTime: entry.scheduleTime, addressLabel: entry.addressLabel, addressLine: entry.addressLine, paymentMethod: entry.paymentMethod, notes: entry.notes ?? '', status: entry.status, subtotal: Number(entry.subtotal ?? 0), serviceFee: Number(entry.serviceFee ?? 0), discount: Number(entry.discount ?? 0), total: Number(entry.total ?? 0), loyaltyPointsEarned: Number(entry.loyaltyPointsEarned ?? 0), ratingSubmitted: !!entry.ratingSubmitted, timeline: parseTimeline(entry.timeline) })));
+      }
+      if (remoteSlots.length) {
+        setAvailabilitySlots(remoteSlots.map((entry: any) => ({ id: entry.id, companyId: entry.companyId, companyName: entry.companyName, dateLabel: entry.dateLabel, timeLabel: entry.timeLabel, status: entry.status, note: entry.note ?? '' })));
       }
       if (remoteRatings.length) {
         setRatings(remoteRatings.map((entry: any) => ({ id: entry.id, bookingId: entry.bookingId, companyId: entry.companyId, itemId: entry.itemId, customerEmail: entry.customerEmail, score: Number(entry.score ?? 0), review: entry.review ?? '', createdAtLabel: entry.createdAtLabel ?? nowLabel() })));
@@ -855,7 +884,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function createCompany(draft: CompanyDraft) {
-    const company: Company = { id: `company-${Date.now()}`, name: draft.name, slug: slugify(draft.name), description: draft.description, supportEmail: draft.supportEmail, supportPhone: draft.supportPhone, accentColor: draft.accentColor, logoText: draft.logoText, ownerEmail: '', isActive: true, createdAtLabel: nowLabel() };
+    const company: Company = { id: `company-${Date.now()}`, name: draft.name, slug: slugify(draft.name), description: draft.description, category: draft.category, supportEmail: draft.supportEmail, supportPhone: draft.supportPhone, accentColor: draft.accentColor, logoText: draft.logoText, profileImageUrl: draft.profileImageUrl, ownerEmail: '', isActive: true, createdAtLabel: nowLabel() };
     setCompanies((current) => [company, ...current]);
     await safeCreate('Company', { ...company });
     await createAuditEvent({ entityType: 'company', entityId: company.id, companyId: company.id, action: 'createCompany', status: 'success', summary: `Created company workspace for ${company.name}.`, metadata: [company.supportEmail, company.accentColor] });
@@ -863,7 +892,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function updateCompany(companyId: string, draft: CompanyDraft) {
-    setCompanies((current) => current.map((entry) => (entry.id === companyId ? { ...entry, name: draft.name, slug: slugify(draft.name), description: draft.description, supportEmail: draft.supportEmail, supportPhone: draft.supportPhone, accentColor: draft.accentColor, logoText: draft.logoText } : entry)));
+    setCompanies((current) => current.map((entry) => (entry.id === companyId ? { ...entry, name: draft.name, slug: slugify(draft.name), description: draft.description, category: draft.category, supportEmail: draft.supportEmail, supportPhone: draft.supportPhone, accentColor: draft.accentColor, logoText: draft.logoText, profileImageUrl: draft.profileImageUrl } : entry)));
     await safeUpdate('Company', { id: companyId, ...draft, slug: slugify(draft.name) });
     await createAuditEvent({ entityType: 'company', entityId: companyId, companyId, action: 'updateCompany', status: 'success', summary: `Updated company workspace details for ${draft.name}.`, metadata: [draft.supportEmail, draft.accentColor] });
   }
@@ -889,7 +918,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   async function inviteCompany(draft: InvitationDraft) {
     const existingCompany = companies.find((entry) => entry.name === draft.companyName);
-    const company = existingCompany ?? (await createCompany({ name: draft.companyName, description: 'New partner workspace', supportEmail: draft.email, supportPhone: '', accentColor: '#145DA0', logoText: draft.companyName.slice(0, 2).toUpperCase() }));
+    const company = existingCompany ?? (await createCompany({ name: draft.companyName, description: 'New partner workspace', category: APP_DEFAULT_COMPANY_CATEGORY, supportEmail: draft.email, supportPhone: '', accentColor: '#0F7B45', logoText: draft.companyName.slice(0, 2).toUpperCase(), profileImageUrl: '' }));
     const invitation: CompanyInvitation = { id: `invite-${Date.now()}`, companyId: company.id, companyName: company.name, email: draft.email.trim().toLowerCase(), invitedByEmail: authUser?.email ?? 'admin@jahzeen.app', status: 'pending', message: draft.message, emailDeliveryStatus: 'pending' };
     setInvitations((current) => [invitation, ...current]);
     await safeCreate('CompanyInvitation', { ...invitation });
@@ -1045,6 +1074,69 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await createAuditEvent({ entityType: 'loyaltyProgram', entityId: nextProgram.id, companyId, action: existing ? 'updateLoyaltyProgram' : 'createLoyaltyProgram', status: nextProgram.isActive ? 'success' : 'info', summary: `${nextProgram.title} loyalty program ${nextProgram.isActive ? 'is active' : 'was paused'}.`, metadata: [scope, `${nextProgram.pointsPerBooking} pts`] });
   }
 
+  async function saveCategorySetting(category: string, isComingSoon: boolean) {
+    const normalizedCategory = category.trim();
+    if (!normalizedCategory) {
+      throw new Error('Category name is required.');
+    }
+
+    const existing = appCategorySettings.find((entry) => entry.category === normalizedCategory);
+    const nextSetting: AppCategorySetting = {
+      id: existing?.id ?? `category-setting-${slugify(normalizedCategory)}`,
+      category: normalizedCategory,
+      isComingSoon,
+    };
+
+    setAppCategorySettings((current) => {
+      const remaining = current.filter((entry) => entry.category !== normalizedCategory);
+      return [nextSetting, ...remaining].sort((left, right) => left.category.localeCompare(right.category));
+    });
+
+    if (existing) {
+      await safeUpdate('AppCategorySetting', { ...nextSetting });
+    } else {
+      await safeCreate('AppCategorySetting', { ...nextSetting });
+    }
+
+    await createAuditEvent({ entityType: 'system', entityId: nextSetting.id, action: 'updateCategorySetting', status: isComingSoon ? 'warning' : 'success', summary: `${normalizedCategory} is now ${isComingSoon ? 'coming soon' : 'live for booking'}.`, metadata: [normalizedCategory, isComingSoon ? 'comingSoon' : 'live'] });
+  }
+
+  async function saveAvailabilitySlot(companyId: string, draft: AvailabilitySlotDraft) {
+    const company = companies.find((entry) => entry.id === companyId);
+    if (!company) {
+      throw new Error('No active company workspace was found for this schedule slot.');
+    }
+
+    const nextSlot: AvailabilitySlot = {
+      id: draft.id ?? `slot-${Date.now()}`,
+      companyId,
+      companyName: company.name,
+      dateLabel: draft.dateLabel,
+      timeLabel: draft.timeLabel,
+      status: draft.status,
+      note: draft.note,
+    };
+
+    setAvailabilitySlots((current) => draft.id ? current.map((entry) => (entry.id === draft.id ? nextSlot : entry)) : [nextSlot, ...current]);
+
+    if (draft.id) {
+      await safeUpdate('AvailabilitySlot', { ...nextSlot });
+    } else {
+      await safeCreate('AvailabilitySlot', { ...nextSlot });
+    }
+
+    await createAuditEvent({ entityType: 'system', entityId: nextSlot.id, companyId, action: draft.id ? 'updateAvailabilitySlot' : 'createAvailabilitySlot', status: nextSlot.status === 'blocked' ? 'warning' : 'success', summary: `${company.name} ${draft.id ? 'updated' : 'added'} a ${nextSlot.status} slot for ${nextSlot.dateLabel} ${nextSlot.timeLabel}.`, metadata: [nextSlot.status, nextSlot.note].filter(Boolean) });
+  }
+
+  async function deleteAvailabilitySlot(slotId: string) {
+    const slot = availabilitySlots.find((entry) => entry.id === slotId);
+    setAvailabilitySlots((current) => current.filter((entry) => entry.id !== slotId));
+    await safeDelete('AvailabilitySlot', slotId);
+    if (slot) {
+      await createAuditEvent({ entityType: 'system', entityId: slotId, companyId: slot.companyId, action: 'deleteAvailabilitySlot', status: 'warning', summary: `${slot.companyName} removed a schedule slot.`, metadata: [slot.dateLabel, slot.timeLabel] });
+    }
+  }
+
   async function placeBooking(draft: BookingDraft) {
     if (!authUser) {
       throw new Error('Please sign in before booking.');
@@ -1052,12 +1144,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const item = catalogItems.find((entry) => entry.id === draft.itemId && entry.companyId === draft.companyId);
     const address = addresses.find((entry) => entry.id === draft.addressId) ?? addresses[0];
     const companyProgram = loyaltyPrograms.find((entry) => entry.scope === 'company' && entry.companyId === draft.companyId && entry.isActive);
+    const selectedSlot = draft.slotId ? availabilitySlots.find((entry) => entry.id === draft.slotId && entry.companyId === draft.companyId) : null;
     if (!item || !address) {
       throw new Error('Booking details are incomplete.');
     }
-    const booking: Booking = { id: `booking-${Date.now()}`, bookingNumber: `JHZ-${String(Date.now()).slice(-6)}`, customerEmail: authUser.email, customerName: profile.fullName || authUser.fullName, companyId: item.companyId, companyName: item.companyName, itemId: item.id, itemTitle: item.title, kind: item.kind, scheduleDate: draft.scheduleDate, scheduleTime: draft.scheduleTime, addressLabel: address.label, addressLine: formatAddress(address), paymentMethod: draft.paymentMethod, notes: draft.notes, status: 'pending', subtotal: item.price, serviceFee: item.kind === 'service' ? 10 : 0, discount: 0, total: item.price + (item.kind === 'service' ? 10 : 0), loyaltyPointsEarned: companyProgram?.pointsPerBooking ?? item.loyaltyPoints, ratingSubmitted: false, timeline: [{ id: 'pending', title: 'Booking requested', time: 'Just now', done: true }, { id: 'approval', title: 'Awaiting company approval', time: 'Pending', done: false }, { id: 'service', title: 'Service or delivery window', time: `${draft.scheduleDate} · ${draft.scheduleTime}`, done: false }] };
+
+    if (selectedSlot && selectedSlot.status !== 'available') {
+      throw new Error('That time slot is no longer available. Please choose another slot.');
+    }
+
+    const bookingDate = selectedSlot?.dateLabel ?? draft.scheduleDate;
+    const bookingTime = selectedSlot?.timeLabel ?? draft.scheduleTime;
+    const booking: Booking = { id: `booking-${Date.now()}`, bookingNumber: `JHZ-${String(Date.now()).slice(-6)}`, customerEmail: authUser.email, customerName: profile.fullName || authUser.fullName, companyId: item.companyId, companyName: item.companyName, itemId: item.id, itemTitle: item.title, slotId: selectedSlot?.id, kind: item.kind, scheduleDate: bookingDate, scheduleTime: bookingTime, addressLabel: address.label, addressLine: formatAddress(address), paymentMethod: draft.paymentMethod, notes: draft.notes, status: 'pending', subtotal: item.price, serviceFee: item.kind === 'service' ? 10 : 0, discount: 0, total: item.price + (item.kind === 'service' ? 10 : 0), loyaltyPointsEarned: companyProgram?.pointsPerBooking ?? item.loyaltyPoints, ratingSubmitted: false, timeline: [{ id: 'pending', title: 'Booking requested', time: 'Just now', done: true }, { id: 'approval', title: 'Awaiting company approval', time: 'Pending', done: false }, { id: 'service', title: 'Service or delivery window', time: `${bookingDate} · ${bookingTime}`, done: false }] };
     setBookings((current) => [booking, ...current]);
     await safeCreate('Booking', { ...booking, timeline: JSON.stringify(booking.timeline) });
+    if (selectedSlot) {
+      setAvailabilitySlots((current) => current.map((entry) => (entry.id === selectedSlot.id ? { ...entry, status: 'booked', note: `Booked by ${authUser.email}` } : entry)));
+      await safeUpdate('AvailabilitySlot', { id: selectedSlot.id, status: 'booked', note: `Booked by ${authUser.email}` });
+    }
     await Promise.all([
       createNotification({ recipientRole: 'customer', recipientEmail: authUser.email, title: `Booking ${booking.bookingNumber} submitted`, body: `${booking.itemTitle} is waiting for company approval.`, kind: 'booking', destinationTab: 'orders' }),
       createNotification({ recipientRole: 'company', companyId: booking.companyId, title: `New booking for ${booking.itemTitle}`, body: `${booking.customerName} placed ${booking.bookingNumber}.`, kind: 'booking', destinationTab: 'bookings' }),
@@ -1099,7 +1203,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, signInChallenge, activeRole, profile, addresses, users, companies, invitations, catalogItems, offerPromotions, notifications, auditEvents, bookings, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, signInWithEmail, completeNewPassword, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, deleteCatalogItem, saveOfferPromotion, deleteOfferPromotion, markNotificationRead, saveLoyaltyProgram, placeBooking, changeBookingStatus, submitRating }}>
+    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, signInChallenge, activeRole, profile, addresses, users, companies, appCategorySettings, invitations, catalogItems, offerPromotions, notifications, auditEvents, bookings, availabilitySlots, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, signInWithEmail, completeNewPassword, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, deleteCatalogItem, saveOfferPromotion, deleteOfferPromotion, markNotificationRead, saveLoyaltyProgram, saveCategorySetting, saveAvailabilitySlot, deleteAvailabilitySlot, placeBooking, changeBookingStatus, submitRating }}>
       {children}
     </AppContext.Provider>
   );

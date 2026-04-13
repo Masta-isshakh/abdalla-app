@@ -24,6 +24,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { readableBookingStatus, useAppState } from '../context/AppContext';
 import {
   Address,
+  AvailabilitySlot,
+  AppCategorySetting,
   AppNotification,
   AppRole,
   AuditEvent,
@@ -54,80 +56,82 @@ type CustomerSortMode = 'popular' | 'newest' | 'priceLow' | 'priceHigh';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 const colors = {
-  background: '#F6F4EE',
+  background: '#F4F8F4',
   surface: '#FFFFFF',
-  text: '#17252F',
-  muted: '#66757A',
-  border: '#DED7C8',
-  primary: '#145DA0',
-  accent: '#F25F4C',
-  hero: '#F7E8D0',
-  paleBlue: '#DCECF9',
+  text: '#0F2A1A',
+  muted: '#5A6D61',
+  border: '#CFE0D2',
+  primary: '#0F7B45',
+  accent: '#16A34A',
+  hero: '#E8F5EC',
+  paleBlue: '#D8EFE1',
   success: '#0F7B45',
   successSurface: '#E8F6EE',
   errorSurface: '#FDEBE7',
-  infoSurface: '#EEF5FB',
+  infoSurface: '#ECF6F0',
 };
 
 const tableToneFilterMemory: Record<string, 'all' | 'error' | 'warning' | 'success'> = {};
 const TABLE_TONE_FILTER_STORAGE_PREFIX = 'jahzeen-table-tone-filter:';
 const CUSTOMER_FILTER_STORAGE_PREFIX = 'jahzeen-customer-filters:';
-const APP_CATEGORY_OPTIONS = [
-  'Commercial Properties for Sale',
-  'Commercial Properties for Rent',
-  'Residential Properties for Rent',
-  'Lands',
-  'Residential Properties for Sale',
-  'Furniture',
-  'Cars',
-  'Motorcycles',
-  'Car Rentals',
-  'Offshore Tools',
-  'Spare Parts',
-  'Heavy Equipment',
-  'Pest Control',
-  'Home Cleaning',
-  'Maintenance',
-  'Beauty Services',
-  'Appliances',
-  'Electronics',
-];
+const CATEGORY_DEFINITIONS = [
+  { label: 'Home Cleaning', comingSoon: false },
+  { label: 'Car Wash', comingSoon: false },
+  { label: 'Car Service', comingSoon: false },
+  { label: 'Pest Control', comingSoon: false },
+  { label: 'Home Moving', comingSoon: false },
+  { label: 'Furniture Cleaning', comingSoon: false },
+  { label: 'Deep Cleaning', comingSoon: false },
+  { label: 'Water Tank Cleaning', comingSoon: false },
+  { label: 'AC Cleaning', comingSoon: false },
+  { label: 'New AC', comingSoon: true },
+  { label: 'Car Winch', comingSoon: true },
+  { label: 'Water Delivery', comingSoon: false },
+] as const;
+const APP_CATEGORY_OPTIONS: string[] = CATEGORY_DEFINITIONS.map((entry) => entry.label);
+const DEFAULT_COMING_SOON_CATEGORIES: Set<string> = new Set(CATEGORY_DEFINITIONS.filter((entry) => entry.comingSoon).map((entry) => entry.label));
+
+type CompanyFormState = {
+  name: string;
+  description: string;
+  category: string;
+  supportEmail: string;
+  supportPhone: string;
+  accentColor: string;
+  logoText: string;
+  profileImageUrl: string;
+};
 const CATEGORY_GROUPS: Array<{ key: string; title: string; icon: keyof typeof Ionicons.glyphMap; categories: string[] }> = [
   {
-    key: 'real-estate',
-    title: 'Real Estate',
-    icon: 'business-outline',
+    key: 'home-services',
+    title: 'Home Services',
+    icon: 'home-outline',
     categories: [
-      'Residential Properties for Sale',
-      'Residential Properties for Rent',
-      'Commercial Properties for Sale',
-      'Commercial Properties for Rent',
-      'Lands',
+      'Home Cleaning',
+      'Deep Cleaning',
+      'Furniture Cleaning',
+      'Water Tank Cleaning',
+      'Pest Control',
+      'Home Moving',
     ],
   },
   {
-    key: 'vehicles',
-    title: 'Vehicles',
+    key: 'car-services',
+    title: 'Car Services',
     icon: 'car-sport-outline',
-    categories: ['Cars', 'Motorcycles', 'Car Rentals', 'Spare Parts', 'Heavy Equipment', 'Offshore Tools'],
+    categories: ['Car Wash', 'Car Service', 'Car Winch'],
   },
   {
-    key: 'services',
-    title: 'Services',
-    icon: 'construct-outline',
-    categories: ['Pest Control', 'Home Cleaning', 'Maintenance', 'Beauty Services'],
+    key: 'ac-services',
+    title: 'AC Services',
+    icon: 'snow-outline',
+    categories: ['AC Cleaning', 'New AC'],
   },
   {
-    key: 'electronics',
-    title: 'Electronics',
-    icon: 'hardware-chip-outline',
-    categories: ['Electronics', 'Appliances'],
-  },
-  {
-    key: 'home-living',
-    title: 'Home & Living',
-    icon: 'bed-outline',
-    categories: ['Furniture'],
+    key: 'utilities',
+    title: 'Utilities',
+    icon: 'water-outline',
+    categories: ['Water Delivery'],
   },
 ];
 const HOME_CAROUSEL_IMAGES = [
@@ -165,6 +169,7 @@ function WorkspaceScreen() {
     catalogItems,
     changeBookingStatus,
     companies,
+    appCategorySettings,
     confirmEmailCode,
     createCompany,
     currentCompany,
@@ -182,6 +187,7 @@ function WorkspaceScreen() {
     needsConfirmation,
     signInChallenge,
     offerPromotions,
+    availabilitySlots,
     placeBooking,
     profile,
     ratings,
@@ -190,6 +196,8 @@ function WorkspaceScreen() {
     saveAddress,
     saveCatalogItem,
     saveLoyaltyProgram,
+    saveCategorySetting,
+    saveAvailabilitySlot,
     saveOfferPromotion,
     saveProfile,
     setCompanyActive,
@@ -200,11 +208,12 @@ function WorkspaceScreen() {
     updateCompany,
     users,
     deleteOfferPromotion,
+    deleteAvailabilitySlot,
     markNotificationRead,
   } = useAppState();
 
   const [adminTab, setAdminTab] = useState<'overview' | 'companies' | 'publishing' | 'bookings' | 'settings'>('overview');
-  const [companyTab, setCompanyTab] = useState<'overview' | 'catalog' | 'offers' | 'bookings' | 'loyalty'>('overview');
+  const [companyTab, setCompanyTab] = useState<'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty'>('overview');
   const [customerTab, setCustomerTab] = useState<'home' | 'browse' | 'explore' | 'orders' | 'profile' | 'notifications'>('home');
   const [customerDarkMode, setCustomerDarkMode] = useState(false);
   const [customerSortMode, setCustomerSortMode] = useState<CustomerSortMode>('popular');
@@ -220,6 +229,7 @@ function WorkspaceScreen() {
   const [bookingComposer, setBookingComposer] = useState({
     itemId: '',
     companyId: '',
+    slotId: '',
     scheduleDate: 'Today',
     scheduleTime: '6:00 PM',
     addressId: addresses[0]?.id ?? '',
@@ -227,13 +237,15 @@ function WorkspaceScreen() {
     paymentMethod: profile.defaultPaymentMethod as PaymentMethod,
   });
 
-  const [companyForm, setCompanyForm] = useState({
+  const [companyForm, setCompanyForm] = useState<CompanyFormState>({
     name: '',
     description: '',
+    category: APP_CATEGORY_OPTIONS[0],
     supportEmail: '',
     supportPhone: '',
-    accentColor: '#145DA0',
+    accentColor: '#0F7B45',
     logoText: '',
+    profileImageUrl: '',
   });
   const [inviteForm, setInviteForm] = useState({ companyName: '', email: '', message: '' });
   const [catalogForm, setCatalogForm] = useState({
@@ -251,13 +263,15 @@ function WorkspaceScreen() {
     imageUrl: '',
     imageHint: '',
   });
-  const [companySettingsForm, setCompanySettingsForm] = useState({
+  const [companySettingsForm, setCompanySettingsForm] = useState<CompanyFormState>({
     name: '',
     description: '',
+    category: APP_CATEGORY_OPTIONS[0],
     supportEmail: '',
     supportPhone: '',
-    accentColor: '#145DA0',
+    accentColor: '#0F7B45',
     logoText: '',
+    profileImageUrl: '',
   });
   const [loyaltyForm, setLoyaltyForm] = useState({
     title: '',
@@ -278,6 +292,13 @@ function WorkspaceScreen() {
     endsAtLabel: '',
     isActive: true,
     sortOrder: '0',
+  });
+  const [scheduleForm, setScheduleForm] = useState({
+    id: '',
+    dateLabel: 'Tomorrow',
+    timeLabel: '10:00 AM',
+    status: 'available' as AvailabilitySlot['status'],
+    note: '',
   });
 
   const [selectedAdminCompanyId, setSelectedAdminCompanyId] = useState<string | null>(null);
@@ -398,10 +419,12 @@ function WorkspaceScreen() {
       setCompanyForm({
         name: selectedAdminCompany.name,
         description: selectedAdminCompany.description,
+        category: selectedAdminCompany.category,
         supportEmail: selectedAdminCompany.supportEmail,
         supportPhone: selectedAdminCompany.supportPhone,
         accentColor: selectedAdminCompany.accentColor,
         logoText: selectedAdminCompany.logoText,
+        profileImageUrl: selectedAdminCompany.profileImageUrl,
       });
       return;
     }
@@ -409,10 +432,12 @@ function WorkspaceScreen() {
     setCompanyForm({
       name: '',
       description: '',
+      category: APP_CATEGORY_OPTIONS[0],
       supportEmail: '',
       supportPhone: '',
-      accentColor: '#145DA0',
+      accentColor: '#0F7B45',
       logoText: '',
+      profileImageUrl: '',
     });
   }, [selectedAdminCompany]);
 
@@ -421,10 +446,12 @@ function WorkspaceScreen() {
       setCompanySettingsForm({
         name: currentCompany.name,
         description: currentCompany.description,
+        category: currentCompany.category,
         supportEmail: currentCompany.supportEmail,
         supportPhone: currentCompany.supportPhone,
         accentColor: currentCompany.accentColor,
         logoText: currentCompany.logoText,
+        profileImageUrl: currentCompany.profileImageUrl,
       });
     }
   }, [currentCompany]);
@@ -456,6 +483,10 @@ function WorkspaceScreen() {
   const currentCompanyProgram = useMemo(
     () => loyaltyPrograms.find((entry) => entry.scope === 'company' && entry.companyId === currentCompany?.id) ?? null,
     [currentCompany?.id, loyaltyPrograms],
+  );
+  const companyAvailabilitySlots = useMemo(
+    () => availabilitySlots.filter((entry) => entry.companyId === currentCompany?.id).sort((left, right) => `${left.dateLabel} ${left.timeLabel}`.localeCompare(`${right.dateLabel} ${right.timeLabel}`)),
+    [availabilitySlots, currentCompany?.id],
   );
   const activeMarketplacePromotions = useMemo(
     () => offerPromotions
@@ -618,10 +649,12 @@ function WorkspaceScreen() {
     setCompanyForm({
       name: '',
       description: '',
+      category: APP_CATEGORY_OPTIONS[0],
       supportEmail: '',
       supportPhone: '',
-      accentColor: '#145DA0',
+      accentColor: '#0F7B45',
       logoText: '',
+      profileImageUrl: '',
     });
   }
 
@@ -643,6 +676,42 @@ function WorkspaceScreen() {
       imageUrl: '',
       imageHint: '',
     });
+  }
+
+  async function handleCompanyImagePick() {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setAdminBanner({ tone: 'error', text: 'Allow photo access to upload a company profile image.' });
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+        base64: true,
+      });
+
+      if (result.canceled || !result.assets[0]) {
+        return;
+      }
+
+      const asset = result.assets[0];
+      const mimeType = asset.mimeType || 'image/jpeg';
+      const profileImageUrl = asset.base64 ? `data:${mimeType};base64,${asset.base64}` : asset.uri;
+
+      setCompanyForm((current) => ({ ...current, profileImageUrl }));
+      setAdminBanner({ tone: 'success', text: 'Company profile image selected.' });
+    } catch (error) {
+      setAdminBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to select an image.' });
+    }
+  }
+
+  function handleCompanyImageClear() {
+    setCompanyForm((current) => ({ ...current, profileImageUrl: '' }));
+    setAdminBanner({ tone: 'info', text: 'Company profile image removed from this draft.' });
   }
 
   async function handleCatalogImagePick() {
@@ -743,6 +812,15 @@ function WorkspaceScreen() {
       setAdminBanner({ tone: 'info', text: `Invitation revoked for ${invitation.email}.` });
     } catch (error) {
       setAdminBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to revoke invitation.' });
+    }
+  }
+
+  async function handleCategoryLaunchChange(category: string, isComingSoon: boolean) {
+    try {
+      await saveCategorySetting(category, isComingSoon);
+      setAdminBanner({ tone: 'success', text: `${category} updated.` });
+    } catch (error) {
+      setAdminBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to update category launch status.' });
     }
   }
 
@@ -883,6 +961,43 @@ function WorkspaceScreen() {
     }
   }
 
+  async function handleScheduleSave() {
+    if (!currentCompany) {
+      return;
+    }
+
+    if (!scheduleForm.dateLabel.trim() || !scheduleForm.timeLabel.trim()) {
+      setCompanyBanner({ tone: 'error', text: 'Add both date and time for the schedule slot.' });
+      return;
+    }
+
+    try {
+      await saveAvailabilitySlot(currentCompany.id, {
+        id: scheduleForm.id || undefined,
+        dateLabel: scheduleForm.dateLabel.trim(),
+        timeLabel: scheduleForm.timeLabel.trim(),
+        status: scheduleForm.status,
+        note: scheduleForm.note.trim(),
+      });
+      setScheduleForm({ id: '', dateLabel: 'Tomorrow', timeLabel: '10:00 AM', status: 'available', note: '' });
+      setCompanyBanner({ tone: 'success', text: 'Schedule slot saved.' });
+    } catch (error) {
+      setCompanyBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to save schedule slot.' });
+    }
+  }
+
+  async function handleScheduleDelete(slotId: string) {
+    try {
+      await deleteAvailabilitySlot(slotId);
+      if (scheduleForm.id === slotId) {
+        setScheduleForm({ id: '', dateLabel: 'Tomorrow', timeLabel: '10:00 AM', status: 'available', note: '' });
+      }
+      setCompanyBanner({ tone: 'info', text: 'Schedule slot removed.' });
+    } catch (error) {
+      setCompanyBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to delete schedule slot.' });
+    }
+  }
+
   async function handleAuthAction() {
     const errors = authMode === 'signin' ? validateSignInDraft(signInForm) : validateSignUpDraft(signUpForm);
     setAuthErrors(errors);
@@ -962,8 +1077,8 @@ function WorkspaceScreen() {
     }
 
     if (activeRole === 'company') {
-      setCompanyTab((['overview', 'catalog', 'offers', 'bookings', 'loyalty'] as const).includes(notification.destinationTab as any)
-        ? (notification.destinationTab as 'overview' | 'catalog' | 'offers' | 'bookings' | 'loyalty')
+      setCompanyTab((['overview', 'catalog', 'offers', 'schedule', 'bookings', 'loyalty'] as const).includes(notification.destinationTab as any)
+        ? (notification.destinationTab as 'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty')
         : 'overview');
       return;
     }
@@ -1049,7 +1164,7 @@ function WorkspaceScreen() {
 
     try {
       await placeBooking(bookingComposer);
-      setBookingComposer((current) => ({ ...current, itemId: '', companyId: '', notes: '' }));
+      setBookingComposer((current) => ({ ...current, itemId: '', companyId: '', slotId: '', notes: '' }));
       setBookingErrors({});
       setCustomerTab('orders');
       setCustomerBanner({ tone: 'success', text: 'Booking placed successfully.' });
@@ -1104,7 +1219,7 @@ function WorkspaceScreen() {
             </Pressable>
 
             <Pressable style={styles.customerHeaderCenteredBrand} onPress={() => setCustomerTab('home')}>
-              <Text style={[styles.customerHeaderCenteredTitle, customerDarkMode && styles.customerHeaderCenteredTitleDark]}>Jahzeen</Text>
+              <Text style={[styles.customerHeaderCenteredTitle, customerDarkMode && styles.customerHeaderCenteredTitleDark]}>Abdalla</Text>
             </Pressable>
 
             <View style={styles.customerHeaderActions}>
@@ -1130,7 +1245,10 @@ function WorkspaceScreen() {
               onTabChange={setCustomerTab}
               authUser={authUser}
               currentUserRole={currentUserRecord?.role ?? 'customer'}
+              companies={companies}
+              categorySettings={appCategorySettings}
               marketplaceItems={marketplaceItems}
+              availabilitySlots={availabilitySlots}
               featuredOffers={activeMarketplacePromotions}
               ratings={ratings}
               notifications={customerNotifications}
@@ -1142,6 +1260,7 @@ function WorkspaceScreen() {
                   ...current,
                   itemId: item.id,
                   companyId: item.companyId,
+                  slotId: '',
                 }))
               }
               onPlaceBooking={handleBookingPlace}
@@ -1257,7 +1376,7 @@ function WorkspaceScreen() {
         <LinearGradient colors={[colors.hero, '#FFF8EF']} style={styles.heroCard}>
           <View style={styles.heroTopRow}>
             <View style={styles.heroTextWrap}>
-              <Text style={styles.brandName}>Jahzeen</Text>
+              <Text style={styles.brandName}>Abdalla</Text>
               <Text style={styles.brandTagline}>Built for empty-start marketplaces that grow company by company.</Text>
             </View>
             <View style={styles.workspaceUtilityRow}>
@@ -1286,6 +1405,7 @@ function WorkspaceScreen() {
             ratings={ratings}
             users={users}
             companies={companies}
+            categorySettings={appCategorySettings}
             invitations={invitations}
             form={companyForm}
             onFormChange={setCompanyForm}
@@ -1296,11 +1416,14 @@ function WorkspaceScreen() {
             onResetCompany={resetAdminDrafts}
             onDeleteCompany={deleteCompany}
             onToggleCompany={setCompanyActive}
+            onPickCompanyImage={handleCompanyImagePick}
+            onClearCompanyImage={handleCompanyImageClear}
             inviteForm={inviteForm}
             onInviteFormChange={setInviteForm}
             inviteErrors={inviteFormErrors}
             inviteSubmitting={inviteSubmitting}
             onInvite={handleInvitationSend}
+            onSaveCategorySetting={handleCategoryLaunchChange}
             onResendInvitation={handleInvitationResend}
             onRevokeInvitation={handleInvitationRevoke}
             onOpenNotification={handleNotificationOpen}
@@ -1345,6 +1468,11 @@ function WorkspaceScreen() {
             onDeleteOffer={handleOfferDelete}
             onOpenNotification={handleNotificationOpen}
             onChangeBookingStatus={changeBookingStatus}
+            companyAvailabilitySlots={companyAvailabilitySlots}
+            scheduleForm={scheduleForm}
+            onScheduleFormChange={setScheduleForm}
+            onSaveSchedule={handleScheduleSave}
+            onDeleteSchedule={handleScheduleDelete}
             loyaltyForm={loyaltyForm}
             onLoyaltyFormChange={setLoyaltyForm}
             loyaltyErrors={loyaltyFormErrors}
@@ -1373,22 +1501,27 @@ type AdminWorkspaceProps = {
   ratings: Array<{ id: string; companyId: string; score: number }>;
   users: Array<{ id: string; fullName: string; role: string; email: string; companyName?: string }>;
   companies: Company[];
+  categorySettings: AppCategorySetting[];
   invitations: CompanyInvitation[];
   form: {
     name: string;
     description: string;
+    category: string;
     supportEmail: string;
     supportPhone: string;
     accentColor: string;
     logoText: string;
+    profileImageUrl: string;
   };
   onFormChange: React.Dispatch<React.SetStateAction<{
     name: string;
     description: string;
+    category: string;
     supportEmail: string;
     supportPhone: string;
     accentColor: string;
     logoText: string;
+    profileImageUrl: string;
   }>>;
   formErrors: ValidationMap;
   selectedCompany: Company | null;
@@ -1397,11 +1530,14 @@ type AdminWorkspaceProps = {
   onResetCompany: () => void;
   onDeleteCompany: (companyId: string) => Promise<void>;
   onToggleCompany: (companyId: string, isActive: boolean) => Promise<void>;
+  onPickCompanyImage: () => void;
+  onClearCompanyImage: () => void;
   inviteForm: { companyName: string; email: string; message: string };
   onInviteFormChange: React.Dispatch<React.SetStateAction<{ companyName: string; email: string; message: string }>>;
   inviteErrors: ValidationMap;
   inviteSubmitting: boolean;
   onInvite: () => void;
+  onSaveCategorySetting: (category: string, isComingSoon: boolean) => void;
   onResendInvitation: (invitation: CompanyInvitation) => void;
   onRevokeInvitation: (invitation: CompanyInvitation) => void;
   onOpenNotification: (notification: AppNotification) => void;
@@ -1421,6 +1557,7 @@ function AdminWorkspace({
   ratings,
   users,
   companies,
+  categorySettings,
   invitations,
   form,
   onFormChange,
@@ -1431,11 +1568,14 @@ function AdminWorkspace({
   onResetCompany,
   onDeleteCompany,
   onToggleCompany,
+  onPickCompanyImage,
+  onClearCompanyImage,
   inviteForm,
   onInviteFormChange,
   inviteErrors,
   inviteSubmitting,
   onInvite,
+  onSaveCategorySetting,
   onResendInvitation,
   onRevokeInvitation,
   onOpenNotification,
@@ -1529,6 +1669,15 @@ function AdminWorkspace({
     status: (promotion) => (promotion.isActive ? 1 : 0),
   });
   const adminTrendDetails = getTrendInsight(adminTrendFocus, adminActivityTrend, adminBookingTrend, adminRevenueTrend, adminTrendWindow);
+  const categorySettingMap = useMemo(() => new Map(categorySettings.map((entry) => [entry.category, entry.isComingSoon])), [categorySettings]);
+  const launchCategories = useMemo(
+    () => APP_CATEGORY_OPTIONS.map((category) => ({
+      category,
+      isComingSoon: categorySettingMap.get(category) ?? DEFAULT_COMING_SOON_CATEGORIES.has(category),
+      providerCount: companies.filter((company) => company.category === category && company.isActive).length,
+    })),
+    [categorySettingMap, companies],
+  );
 
   return (
     <>
@@ -1547,7 +1696,7 @@ function AdminWorkspace({
 
       {tab === 'overview' ? (
         <>
-          <LinearGradient colors={['#12385E', '#1D5F97', '#2F84C8']} style={styles.workspaceShowcase}>
+          <LinearGradient colors={['#0B5D33', '#0F7B45', '#16A34A']} style={styles.workspaceShowcase}>
             <View style={styles.workspaceShowcaseTopRow}>
               <View style={styles.workspaceShowcaseTextWrap}>
                 <Text style={styles.workspaceShowcaseEyebrow}>Admin workspace</Text>
@@ -1672,7 +1821,43 @@ function AdminWorkspace({
               </View>
             </SectionCard>
 
-            <SectionCard title="Management rules" subtitle="Company creation now happens through invitations in Settings. This page is dedicated to operational management only.">
+            <SectionCard title={selectedCompany ? 'Edit company profile' : 'Create company profile'} subtitle="When admins create a company, they must assign a category and upload the company profile image used in customer listings.">
+              <View style={styles.rowGap}>
+                <FormField label="Company name" value={form.name} onChangeText={(value) => onFormChange((current) => ({ ...current, name: value }))} error={formErrors.name} />
+                <SelectField label="Company category" value={form.category} options={APP_CATEGORY_OPTIONS} placeholder="Choose a category" error={formErrors.category} onSelect={(value) => onFormChange((current) => ({ ...current, category: value }))} />
+              </View>
+              <FormField label="Description" value={form.description} onChangeText={(value) => onFormChange((current) => ({ ...current, description: value }))} error={formErrors.description} multiline />
+              <View style={styles.rowGap}>
+                <FormField label="Support email" value={form.supportEmail} onChangeText={(value) => onFormChange((current) => ({ ...current, supportEmail: value }))} error={formErrors.supportEmail} />
+                <FormField label="Support phone" value={form.supportPhone} onChangeText={(value) => onFormChange((current) => ({ ...current, supportPhone: value }))} error={formErrors.supportPhone} />
+              </View>
+              <View style={styles.rowGap}>
+                <FormField label="Accent color" value={form.accentColor} onChangeText={(value) => onFormChange((current) => ({ ...current, accentColor: value }))} error={formErrors.accentColor} />
+                <FormField label="Logo text" value={form.logoText} onChangeText={(value) => onFormChange((current) => ({ ...current, logoText: value }))} error={formErrors.logoText} />
+              </View>
+              <View style={styles.catalogUploadPanel}>
+                {form.profileImageUrl ? (
+                  <Image source={{ uri: form.profileImageUrl }} style={styles.catalogUploadPreviewImage} resizeMode="cover" />
+                ) : (
+                  <View style={styles.catalogUploadPlaceholder}>
+                    <Ionicons name="image-outline" size={30} color={colors.primary} />
+                    <Text style={styles.catalogUploadPlaceholderTitle}>Upload company profile image</Text>
+                    <Text style={styles.catalogUploadPlaceholderBody}>This image is shown on the customer home and explore screens as the company cover.</Text>
+                  </View>
+                )}
+                <View style={styles.catalogUploadActions}>
+                  <SecondaryButton label={form.profileImageUrl ? 'Replace image' : 'Upload image'} tone="contrast" onPress={onPickCompanyImage} />
+                  {form.profileImageUrl ? <SecondaryButton label="Remove image" onPress={onClearCompanyImage} /> : null}
+                </View>
+              </View>
+              {formErrors.profileImageUrl ? <FieldError text={formErrors.profileImageUrl} /> : null}
+              <View style={styles.rowGap}>
+                <PrimaryButton label={selectedCompany ? 'Save company profile' : 'Create company'} onPress={onSaveCompany} />
+                <SecondaryButton label="Reset form" onPress={onResetCompany} />
+              </View>
+            </SectionCard>
+
+            <SectionCard title="Management rules" subtitle="Use this page to create company profiles and manage activation status with clear operational guardrails.">
               <View style={styles.managementRuleList}>
                 <ManagementRule text="Deactivate a company to remove its published items from the customer marketplace." />
                 <ManagementRule text="Reactivate a company to restore its storefront immediately." />
@@ -1925,6 +2110,24 @@ function AdminWorkspace({
             <SectionCard title="Admin accounts" subtitle="Manual admin accounts survive refresh by resolving the role from Cognito session groups and the approved admin email list.">
               {adminUsers.length ? adminUsers.map((user) => <InfoRow key={user.id} title={user.fullName} subtitle={user.email} />) : <EmptyState title="No admin records yet" body="Manual admin sign-in creates the persistent admin user record after authentication." />}
             </SectionCard>
+
+            <SectionCard title="Category launch control" subtitle="Choose exactly which categories stay visible as coming soon and which ones are open for booking.">
+              <View style={styles.managementRuleList}>
+                {launchCategories.map((entry) => (
+                  <View key={`category-setting-${entry.category}`} style={styles.categorySettingRow}>
+                    <View style={styles.infoBodyGrow}>
+                      <Text style={styles.categorySettingTitle}>{entry.category}</Text>
+                      <Text style={styles.categorySettingMeta}>{entry.providerCount} active providers · {entry.isComingSoon ? 'Coming Soon' : 'Live'}</Text>
+                    </View>
+                    <SecondaryButton
+                      label={entry.isComingSoon ? 'Mark live' : 'Mark coming soon'}
+                      tone={entry.isComingSoon ? 'contrast' : 'default'}
+                      onPress={() => onSaveCategorySetting(entry.category, !entry.isComingSoon)}
+                    />
+                  </View>
+                ))}
+              </View>
+            </SectionCard>
           </View>
         </View>
       ) : null}
@@ -1934,24 +2137,28 @@ function AdminWorkspace({
 
 type CompanyWorkspaceProps = {
   wide: boolean;
-  tab: 'overview' | 'catalog' | 'offers' | 'bookings' | 'loyalty';
-  onTabChange: (tab: 'overview' | 'catalog' | 'offers' | 'bookings' | 'loyalty') => void;
+  tab: 'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty';
+  onTabChange: (tab: 'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty') => void;
   currentCompany: Company | null;
   companySettingsForm: {
     name: string;
     description: string;
+    category: string;
     supportEmail: string;
     supportPhone: string;
     accentColor: string;
     logoText: string;
+    profileImageUrl: string;
   };
   onCompanySettingsFormChange: React.Dispatch<React.SetStateAction<{
     name: string;
     description: string;
+    category: string;
     supportEmail: string;
     supportPhone: string;
     accentColor: string;
     logoText: string;
+    profileImageUrl: string;
   }>>;
   companyErrors: ValidationMap;
   onSaveSettings: () => void;
@@ -2030,6 +2237,23 @@ type CompanyWorkspaceProps = {
   onDeleteOffer: (promotionId: string) => Promise<void>;
   onOpenNotification: (notification: AppNotification) => void;
   onChangeBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
+  companyAvailabilitySlots: AvailabilitySlot[];
+  scheduleForm: {
+    id: string;
+    dateLabel: string;
+    timeLabel: string;
+    status: AvailabilitySlot['status'];
+    note: string;
+  };
+  onScheduleFormChange: React.Dispatch<React.SetStateAction<{
+    id: string;
+    dateLabel: string;
+    timeLabel: string;
+    status: AvailabilitySlot['status'];
+    note: string;
+  }>>;
+  onSaveSchedule: () => void;
+  onDeleteSchedule: (slotId: string) => Promise<void>;
   loyaltyForm: {
     title: string;
     description: string;
@@ -2087,6 +2311,11 @@ function CompanyWorkspace({
   onDeleteOffer,
   onOpenNotification,
   onChangeBookingStatus,
+  companyAvailabilitySlots,
+  scheduleForm,
+  onScheduleFormChange,
+  onSaveSchedule,
+  onDeleteSchedule,
   loyaltyForm,
   onLoyaltyFormChange,
   loyaltyErrors,
@@ -2211,11 +2440,12 @@ function CompanyWorkspace({
           { key: 'overview', label: 'Overview' },
           { key: 'catalog', label: 'Catalog' },
           { key: 'offers', label: 'Offers' },
+          { key: 'schedule', label: 'Schedule' },
           { key: 'bookings', label: 'Bookings' },
           { key: 'loyalty', label: 'Loyalty' },
         ]}
         selectedKey={tab}
-        onChange={(value) => onTabChange(value as 'overview' | 'catalog' | 'offers' | 'bookings' | 'loyalty')}
+        onChange={(value) => onTabChange(value as 'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty')}
       />
       {banner ? <StatusBanner tone={banner.tone} text={banner.text} /> : null}
 
@@ -2330,6 +2560,7 @@ function CompanyWorkspace({
                   <>
                     <FormField label="Company name" value={companySettingsForm.name} onChangeText={(value) => onCompanySettingsFormChange((current) => ({ ...current, name: value }))} error={companyErrors.name} />
                     <FormField label="Description" value={companySettingsForm.description} onChangeText={(value) => onCompanySettingsFormChange((current) => ({ ...current, description: value }))} error={companyErrors.description} multiline />
+                    <SelectField label="Company category" value={companySettingsForm.category} options={APP_CATEGORY_OPTIONS} placeholder="Choose a category" error={companyErrors.category} onSelect={(value) => onCompanySettingsFormChange((current) => ({ ...current, category: value }))} />
                     <View style={styles.rowGap}>
                       <FormField label="Support email" value={companySettingsForm.supportEmail} onChangeText={(value) => onCompanySettingsFormChange((current) => ({ ...current, supportEmail: value }))} error={companyErrors.supportEmail} />
                       <FormField label="Support phone" value={companySettingsForm.supportPhone} onChangeText={(value) => onCompanySettingsFormChange((current) => ({ ...current, supportPhone: value }))} error={companyErrors.supportPhone} />
@@ -2709,6 +2940,44 @@ function CompanyWorkspace({
         )
       ) : null}
 
+      {tab === 'schedule' ? (
+        <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
+          <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
+            <SectionCard title={scheduleForm.id ? 'Edit schedule slot' : 'Add schedule slot'} subtitle="Providers can add available times, block busy periods, and keep customer booking slots accurate.">
+              <View style={styles.rowGap}>
+                <FormField label="Date" value={scheduleForm.dateLabel} onChangeText={(value) => onScheduleFormChange((current) => ({ ...current, dateLabel: value }))} />
+                <FormField label="Time" value={scheduleForm.timeLabel} onChangeText={(value) => onScheduleFormChange((current) => ({ ...current, timeLabel: value }))} />
+              </View>
+              <FormField label="Note" value={scheduleForm.note} onChangeText={(value) => onScheduleFormChange((current) => ({ ...current, note: value }))} placeholder="Optional note or unavailable reason" />
+              <View style={styles.toggleRow}>
+                <ChoiceChip label="Available" selected={scheduleForm.status === 'available'} onPress={() => onScheduleFormChange((current) => ({ ...current, status: 'available' }))} />
+                <ChoiceChip label="Blocked" selected={scheduleForm.status === 'blocked'} onPress={() => onScheduleFormChange((current) => ({ ...current, status: 'blocked' }))} />
+                <ChoiceChip label="Booked" selected={scheduleForm.status === 'booked'} onPress={() => onScheduleFormChange((current) => ({ ...current, status: 'booked' }))} />
+              </View>
+              <View style={styles.rowGap}>
+                <PrimaryButton label={scheduleForm.id ? 'Save slot' : 'Add slot'} onPress={onSaveSchedule} />
+                {scheduleForm.id ? <SecondaryButton label="Clear editing" onPress={() => onScheduleFormChange({ id: '', dateLabel: 'Tomorrow', timeLabel: '10:00 AM', status: 'available', note: '' })} /> : null}
+              </View>
+            </SectionCard>
+          </View>
+          <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
+            <SectionCard title="Current schedule" subtitle="Booked slots are automatically closed after checkout so no other customer can reserve the same time.">
+              {companyAvailabilitySlots.length ? companyAvailabilitySlots.map((slot) => (
+                <InfoRow
+                  key={slot.id}
+                  title={`${slot.dateLabel} · ${slot.timeLabel}`}
+                  subtitle={`${slot.status.toUpperCase()}${slot.note ? ` · ${slot.note}` : ''}`}
+                  actionLabel="Edit"
+                  onAction={() => onScheduleFormChange({ id: slot.id, dateLabel: slot.dateLabel, timeLabel: slot.timeLabel, status: slot.status, note: slot.note })}
+                  secondaryActionLabel="Delete"
+                  onSecondaryAction={() => onDeleteSchedule(slot.id)}
+                />
+              )) : <EmptyState title="No schedule yet" body="Add available dates and time slots so customers can book real availability." />}
+            </SectionCard>
+          </View>
+        </View>
+      ) : null}
+
       {tab === 'bookings' ? (
         <SectionCard title="Company bookings" subtitle="Status controls are kept inside the company workspace so admins do not need to manage fulfilment.">
           <View style={styles.filterChipRow}>
@@ -2796,13 +3065,17 @@ type CustomerWorkspaceProps = {
   onTabChange: (tab: 'home' | 'browse' | 'explore' | 'orders' | 'profile' | 'notifications') => void;
   authUser: { email: string } | null;
   currentUserRole: string;
+  companies: Company[];
+  categorySettings: AppCategorySetting[];
   marketplaceItems: CatalogItem[];
+  availabilitySlots: AvailabilitySlot[];
   featuredOffers: Array<{ promotion: OfferPromotion; item: CatalogItem }>;
   ratings: Array<{ id: string; bookingId: string; companyId: string; itemId: string; customerEmail: string; score: number; review: string; createdAtLabel: string }>;
   notifications: AppNotification[];
   bookingComposer: {
     itemId: string;
     companyId: string;
+    slotId: string;
     scheduleDate: string;
     scheduleTime: string;
     addressId: string;
@@ -2812,6 +3085,7 @@ type CustomerWorkspaceProps = {
   onBookingComposerChange: React.Dispatch<React.SetStateAction<{
     itemId: string;
     companyId: string;
+    slotId: string;
     scheduleDate: string;
     scheduleTime: string;
     addressId: string;
@@ -2870,7 +3144,10 @@ function CustomerWorkspace({
   onTabChange,
   authUser,
   currentUserRole,
+  companies,
+  categorySettings,
   marketplaceItems,
+  availabilitySlots,
   featuredOffers,
   ratings,
   notifications,
@@ -2922,12 +3199,25 @@ function CustomerWorkspace({
   banner,
 }: CustomerWorkspaceProps) {
   const customerWidth = useWindowDimensions().width;
-  const [activeBrowseGroupKey, setActiveBrowseGroupKey] = useState<string>(CATEGORY_GROUPS[0]?.key ?? 'real-estate');
+  const homeCarouselRef = useRef<ScrollView | null>(null);
+  const homeCarouselIndexRef = useRef(0);
+  const carouselDotValues = useRef(HOME_CAROUSEL_IMAGES.map((_, index) => new Animated.Value(index === 0 ? 1 : 0))).current;
+  const [activeBrowseGroupKey, setActiveBrowseGroupKey] = useState<string>(CATEGORY_GROUPS[0]?.key ?? 'home-services');
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
+  const [providerDetailOpen, setProviderDetailOpen] = useState(false);
+  const [homeCarouselPage, setHomeCarouselPage] = useState(0);
   const normalizedCustomerSearch = customerSearchQuery.trim().toLowerCase();
   const normalizedSelectedCategory = selectedCustomerCategory?.trim() || null;
+  const categorySettingMap = useMemo(() => new Map(categorySettings.map((entry) => [entry.category, entry.isComingSoon])), [categorySettings]);
+  const comingSoonCategories = useMemo(
+    () => new Set(APP_CATEGORY_OPTIONS.filter((category) => categorySettingMap.get(category) ?? DEFAULT_COMING_SOON_CATEGORIES.has(category))),
+    [categorySettingMap],
+  );
+  const selectedCategoryComingSoon = normalizedSelectedCategory ? comingSoonCategories.has(normalizedSelectedCategory) : false;
+  const activeCompanies = useMemo(() => companies.filter((company) => company.isActive), [companies]);
   const allCategories = useMemo(
-    () => Array.from(new Set([...APP_CATEGORY_OPTIONS, ...marketplaceItems.map((item) => item.category).filter(Boolean)])).sort((a, b) => a.localeCompare(b)),
-    [marketplaceItems],
+    () => Array.from(new Set([...APP_CATEGORY_OPTIONS, ...companies.map((company) => company.category).filter(Boolean), ...marketplaceItems.map((item) => item.category).filter(Boolean)])).sort((a, b) => a.localeCompare(b)),
+    [companies, marketplaceItems],
   );
   const itemRatingMeta = useMemo(() => {
     const next: Record<string, { count: number; average: number }> = {};
@@ -2948,14 +3238,17 @@ function CustomerWorkspace({
     () =>
       CATEGORY_GROUPS.map((group) => {
         const categories = group.categories.filter((category) => allCategories.includes(category));
-        const listingsCount = marketplaceItems.filter((item) => categories.includes(item.category)).length;
+        const listingsCount = activeCompanies.filter((company) => {
+          const companyItems = marketplaceItems.filter((item) => item.companyId === company.id);
+          return [company.category, ...companyItems.map((item) => item.category)].some((category) => categories.includes(category));
+        }).length;
         return {
           ...group,
           categories,
           listingsCount,
         };
       }).filter((group) => group.categories.length),
-    [allCategories, marketplaceItems],
+    [activeCompanies, allCategories, marketplaceItems],
   );
   const newestRank = (item: CatalogItem, index: number) => {
     const match = item.id.match(/(\d{10,})$/);
@@ -2991,6 +3284,47 @@ function CustomerWorkspace({
     })
     .sort(sortItems)
     .map(({ item }) => item);
+  const filteredCompanies = activeCompanies.filter((company) => {
+    if (selectedCategoryComingSoon) {
+      return false;
+    }
+    const companyItems = marketplaceItems.filter((item) => item.companyId === company.id);
+    const companyCategories = new Set([company.category, ...companyItems.map((item) => item.category)].filter(Boolean));
+    const matchesCategory = !normalizedSelectedCategory || companyCategories.has(normalizedSelectedCategory);
+    const matchesSearch = !normalizedCustomerSearch || [company.name, company.description, company.category, ...Array.from(companyCategories)]
+      .filter(Boolean)
+      .some((value) => value.toLowerCase().includes(normalizedCustomerSearch));
+    return matchesCategory && matchesSearch;
+  });
+  const homeCompanies = filteredCompanies.slice(0, 8);
+  const selectedProvider = useMemo(
+    () => filteredCompanies.find((company) => company.id === (selectedProviderId || bookingComposer.companyId)) ?? activeCompanies.find((company) => company.id === (selectedProviderId || bookingComposer.companyId)) ?? null,
+    [activeCompanies, bookingComposer.companyId, filteredCompanies, selectedProviderId],
+  );
+  const selectedProviderServices = useMemo(
+    () => selectedProvider ? marketplaceItems.filter((item) => item.companyId === selectedProvider.id && item.isPublished) : [],
+    [marketplaceItems, selectedProvider],
+  );
+  const selectedProviderSlots = useMemo(
+    () => selectedProvider ? availabilitySlots.filter((slot) => slot.companyId === selectedProvider.id).sort((left, right) => `${left.dateLabel} ${left.timeLabel}`.localeCompare(`${right.dateLabel} ${right.timeLabel}`)) : [],
+    [availabilitySlots, selectedProvider],
+  );
+  const availableSelectedProviderSlots = selectedProviderSlots.filter((slot) => slot.status === 'available');
+  const availableSelectedProviderSlotsByDate = useMemo(() => {
+    const groups = new Map<string, AvailabilitySlot[]>();
+    availableSelectedProviderSlots.forEach((slot) => {
+      const current = groups.get(slot.dateLabel) ?? [];
+      current.push(slot);
+      groups.set(slot.dateLabel, current);
+    });
+
+    return Array.from(groups.entries()).map(([dateLabel, slots]) => ({ dateLabel, slots }));
+  }, [availableSelectedProviderSlots]);
+  const selectedProviderRatings = useMemo(
+    () => selectedProvider ? ratings.filter((entry) => entry.companyId === selectedProvider.id) : [],
+    [ratings, selectedProvider],
+  );
+  const selectedProviderAverageRating = averageScore(selectedProviderRatings);
   const customerItems = filteredMarketplaceItems.slice(0, 6);
   const featuredItems = featuredOffers.slice(0, 3);
   const categories = allCategories.slice(0, 10);
@@ -3001,7 +3335,7 @@ function CustomerWorkspace({
     subtitle: index % 2 === 0 ? 'Discover standout listings across the marketplace.' : 'Preview premium inventory and services before you search deeper.',
   }));
   const liveEntries = (featuredOffers.length ? featuredOffers : marketplaceItems.slice(0, 8).map((item) => ({ item, promotion: undefined }))).slice(0, 8);
-  const liveCompanyCount = new Set(marketplaceItems.map((item) => item.companyId)).size;
+  const liveCompanyCount = activeCompanies.length;
   const marketplaceCounts = {
     listings: marketplaceItems.length,
     services: marketplaceItems.filter((item) => item.kind === 'service').length,
@@ -3031,6 +3365,7 @@ function CustomerWorkspace({
           : 'Price: High to Low',
   ].filter(Boolean).join(' · ');
   const carouselCardWidth = Math.max(Math.min(customerWidth - 74, wide ? 620 : 540), 270);
+  const carouselItemWidth = carouselCardWidth + 12;
 
   useEffect(() => {
     if (!normalizedSelectedCategory) {
@@ -3042,6 +3377,53 @@ function CustomerWorkspace({
       setActiveBrowseGroupKey(group.key);
     }
   }, [groupedCategoryCards, normalizedSelectedCategory]);
+
+  useEffect(() => {
+    if (bookingComposer.companyId) {
+      setSelectedProviderId(bookingComposer.companyId);
+    }
+  }, [bookingComposer.companyId]);
+
+  useEffect(() => {
+    if (!selectedProviderId) {
+      return;
+    }
+    const stillExists = activeCompanies.some((company) => company.id === selectedProviderId);
+    if (!stillExists) {
+      setSelectedProviderId(null);
+      setProviderDetailOpen(false);
+    }
+  }, [activeCompanies, selectedProviderId]);
+
+  const openProviderDetails = (companyId: string) => {
+    setSelectedProviderId(companyId);
+    setProviderDetailOpen(true);
+  };
+
+  useEffect(() => {
+    carouselDotValues.forEach((value, index) => {
+      Animated.timing(value, {
+        toValue: index === homeCarouselPage ? 1 : 0,
+        duration: 220,
+        useNativeDriver: false,
+      }).start();
+    });
+  }, [carouselDotValues, homeCarouselPage]);
+
+  useEffect(() => {
+    if (tab !== 'home' || carouselEntries.length < 2) {
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      const nextIndex = (homeCarouselIndexRef.current + 1) % carouselEntries.length;
+      homeCarouselRef.current?.scrollTo({ x: nextIndex * carouselItemWidth, animated: true });
+      homeCarouselIndexRef.current = nextIndex;
+      setHomeCarouselPage(nextIndex);
+    }, 2000);
+
+    return () => clearInterval(intervalId);
+  }, [tab, carouselEntries.length, carouselItemWidth]);
   const customerTheme = {
     canvas: darkMode ? styles.customerCanvasDark : undefined,
     card: darkMode ? styles.customerSectionDark : undefined,
@@ -3069,7 +3451,21 @@ function CustomerWorkspace({
             <Text style={styles.customerHomeCarouselEyebrow}>Discover the marketplace</Text>
           </View>
           {carouselEntries.length ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} pagingEnabled snapToInterval={carouselCardWidth + 14} decelerationRate="fast" contentContainerStyle={styles.customerHomeCarouselRow}>
+            <ScrollView
+              ref={homeCarouselRef}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              pagingEnabled
+              snapToInterval={carouselItemWidth}
+              decelerationRate="fast"
+              onMomentumScrollEnd={(event) => {
+                const offsetX = event.nativeEvent.contentOffset.x;
+                const computedIndex = Math.round(offsetX / carouselItemWidth);
+                homeCarouselIndexRef.current = Math.max(0, Math.min(computedIndex, carouselEntries.length - 1));
+                setHomeCarouselPage(homeCarouselIndexRef.current);
+              }}
+              contentContainerStyle={styles.customerHomeCarouselRow}
+            >
               {carouselEntries.map((entry, index) => (
                 <CustomerHomeBannerCard
                   key={`${entry.title}-${index}`}
@@ -3086,6 +3482,23 @@ function CustomerWorkspace({
           ) : (
             <EmptyState title="Marketplace is empty" body="Once companies publish live listings, the home carousel will lead customers into the storefront." cardStyle={styles.customerHomeEmptyCard} titleStyle={styles.customerHomeSectionTitle} bodyStyle={styles.customerHomeSectionSubtitle} />
           )}
+          {carouselEntries.length ? (
+            <View style={styles.customerCarouselDotsRow}>
+              {carouselDotValues.map((value, index) => (
+                <Animated.View
+                  key={`carousel-dot-${index}`}
+                  style={[
+                    styles.customerCarouselDot,
+                    {
+                      width: value.interpolate({ inputRange: [0, 1], outputRange: [8, 18] }),
+                      opacity: value.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1] }),
+                      backgroundColor: value.interpolate({ inputRange: [0, 1], outputRange: ['#B8CABC', colors.primary] as any }),
+                    },
+                  ]}
+                />
+              ))}
+            </View>
+          ) : null}
 
           <View style={styles.customerHomeSearchSection}>
             <View style={styles.customerHomeSearchBar}>
@@ -3097,7 +3510,7 @@ function CustomerWorkspace({
                 autoCorrect={false}
                 autoCapitalize="none"
                 returnKeyType="search"
-                placeholder="Search products and services"
+                placeholder="Search companies or services"
                 placeholderTextColor="#8A8F98"
                 style={styles.customerHomeSearchInput}
               />
@@ -3110,8 +3523,8 @@ function CustomerWorkspace({
             <View style={styles.customerHomeSearchMetaRow}>
               <Text style={styles.customerHomeSearchMetaText}>
                 {normalizedCustomerSearch
-                  ? `${filteredMarketplaceItems.length} matching products and services`
-                  : 'Search products and services across the marketplace'}
+                  ? `${filteredCompanies.length} matching companies`
+                  : 'Search companies by service category'}
               </Text>
               {normalizedCustomerSearch ? (
                 <Pressable onPress={() => onTabChange('explore')}>
@@ -3125,23 +3538,24 @@ function CustomerWorkspace({
             <View style={styles.customerHomeSectionBlock}>
               <View style={styles.customerHomeSectionHeaderCompact}>
                 <Text style={styles.customerHomeSectionTitle}>Search results</Text>
-                <Text style={styles.customerHomeSectionMeta}>{filteredMarketplaceItems.length} found</Text>
+                <Text style={styles.customerHomeSectionMeta}>{filteredCompanies.length} found</Text>
               </View>
-              {searchPreviewItems.length ? (
+              {homeCompanies.length ? (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.customerHomeLotRow}>
-                  {searchPreviewItems.map((item) => (
-                    <CustomerHomeLotCard
-                      key={`search-${item.id}`}
-                      item={item}
+                  {homeCompanies.map((company) => (
+                    <CustomerCompanyCard
+                      key={`search-company-${company.id}`}
+                      company={company}
+                      variant="featured"
                       onPress={() => {
-                        onSelectItem(item);
+                        openProviderDetails(company.id);
                         onTabChange('explore');
                       }}
                     />
                   ))}
                 </ScrollView>
               ) : (
-                <EmptyState title="No products or services found" body="Try a different keyword or clear the selected category to widen the search." cardStyle={styles.customerHomeEmptyCard} titleStyle={styles.customerHomeSectionTitle} bodyStyle={styles.customerHomeSectionSubtitle} />
+                <EmptyState title="No companies found" body="Try a different keyword or clear the selected category to widen results." cardStyle={styles.customerHomeEmptyCard} titleStyle={styles.customerHomeSectionTitle} bodyStyle={styles.customerHomeSectionSubtitle} />
               )}
             </View>
           ) : null}
@@ -3167,10 +3581,11 @@ function CustomerWorkspace({
                       <View style={styles.customerCategoryHubIconWrap}>
                         <Ionicons name={group.icon} size={18} color={colors.primary} />
                       </View>
-                      <Text style={styles.customerCategoryHubCount}>{group.listingsCount} ads</Text>
+                      <Text style={styles.customerCategoryHubCount}>{group.listingsCount} providers</Text>
                     </View>
                     <Text style={styles.customerCategoryHubTitle}>{group.title}</Text>
                     <Text style={styles.customerCategoryHubMeta}>{group.categories.slice(0, 2).join(' · ')}</Text>
+                    {group.categories.some((category) => comingSoonCategories.has(category)) ? <Text style={styles.customerCategoryComingSoonText}>Coming Soon</Text> : null}
                   </Pressable>
                 ))}
               </ScrollView>
@@ -3179,20 +3594,20 @@ function CustomerWorkspace({
 
           <View style={styles.customerHomeSectionHeader}>
             <View style={styles.infoBodyGrow}>
-              <Text style={styles.customerHomeSectionTitle}>Jahzeen Live Picks</Text>
-              <Text style={styles.customerHomeSectionSubtitle}>Browse now and discover standout listings from trusted companies.</Text>
+              <Text style={styles.customerHomeSectionTitle}>Featured Companies</Text>
+              <Text style={styles.customerHomeSectionSubtitle}>Discover verified companies and browse by the service category they provide.</Text>
             </View>
           </View>
 
-          {liveEntries.length ? (
+          {homeCompanies.length ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.customerHomeLotRow}>
-              {liveEntries.map((entry) => (
-                <CustomerHomeLotCard
-                  key={entry.item.id}
-                  item={entry.item}
-                  promotion={entry.promotion}
+              {homeCompanies.map((company) => (
+                <CustomerCompanyCard
+                  key={`featured-company-${company.id}`}
+                  company={company}
+                  variant="featured"
                   onPress={() => {
-                    onSelectItem(entry.item);
+                    openProviderDetails(company.id);
                     onTabChange('explore');
                   }}
                 />
@@ -3201,7 +3616,7 @@ function CustomerWorkspace({
           ) : null}
 
           <Pressable style={styles.customerHomePrimaryCta} onPress={() => onTabChange('explore')}>
-            <Text style={styles.customerHomePrimaryCtaText}>see more lots</Text>
+            <Text style={styles.customerHomePrimaryCtaText}>See more companies</Text>
           </Pressable>
 
           <View style={styles.customerHomeSectionBlock}>
@@ -3211,15 +3626,25 @@ function CustomerWorkspace({
             </View>
             {categories.length ? (
               <View style={styles.customerHomeCategoryRow}>
-                {categories.map((category) => (
-                  <Pressable key={category} style={styles.customerHomeCategoryChip} onPress={() => {
-                    onSelectCustomerCategory(category);
-                    onCustomerSearchQueryChange('');
-                    onTabChange('explore');
-                  }}>
-                    <Text style={styles.customerHomeCategoryChipText}>{category}</Text>
-                  </Pressable>
-                ))}
+                {categories.map((category) => {
+                  const isComingSoon = comingSoonCategories.has(category);
+                  return (
+                    <Pressable
+                      key={category}
+                      style={[styles.customerHomeCategoryChip, isComingSoon && styles.customerHomeCategoryChipDisabled]}
+                      onPress={isComingSoon ? undefined : () => {
+                        onSelectCustomerCategory(category);
+                        setSelectedProviderId(null);
+                        onCustomerSearchQueryChange('');
+                        onTabChange('explore');
+                      }}
+                    >
+                      <Text style={[styles.customerHomeCategoryChipText, isComingSoon && styles.customerHomeCategoryChipDisabledText]}>
+                        {isComingSoon ? `${category} · Coming Soon` : category}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </View>
             ) : null}
           </View>
@@ -3236,12 +3661,12 @@ function CustomerWorkspace({
               <Text style={styles.customerHomeStatLabel}>Live companies</Text>
             </View>
             <View style={styles.customerHomeStatCard}>
-              <Text style={styles.customerHomeStatValue}>{marketplaceItems.length}</Text>
-              <Text style={styles.customerHomeStatLabel}>Visible listings</Text>
+              <Text style={styles.customerHomeStatValue}>{filteredCompanies.length}</Text>
+              <Text style={styles.customerHomeStatLabel}>Matched companies</Text>
             </View>
             <View style={styles.customerHomeStatCard}>
-              <Text style={styles.customerHomeStatValue}>{featuredItems.length || Math.min(3, marketplaceItems.length)}</Text>
-              <Text style={styles.customerHomeStatLabel}>Featured now</Text>
+              <Text style={styles.customerHomeStatValue}>{allCategories.length}</Text>
+              <Text style={styles.customerHomeStatLabel}>Service categories</Text>
             </View>
           </View>
         </View>
@@ -3252,7 +3677,7 @@ function CustomerWorkspace({
         <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false}>
           <SectionCard
             title="Browse categories"
-            subtitle="Structured marketplace categories inspired by auction apps, refined for Jahzeen."
+            subtitle="Structured marketplace categories optimized for company-first discovery."
             cardStyle={customerTheme.card}
             titleStyle={customerTheme.title}
             subtitleStyle={customerTheme.subtitle}
@@ -3280,7 +3705,7 @@ function CustomerWorkspace({
                     <View style={styles.customerLandingHeroIconWrap}>
                       <Ionicons name={activeBrowseGroup.icon} size={18} color="#FFFFFF" />
                     </View>
-                    <Text style={styles.customerLandingHeroBadge}>{activeBrowseGroup.listingsCount} live ads</Text>
+                    <Text style={styles.customerLandingHeroBadge}>{activeBrowseGroup.listingsCount} live providers</Text>
                   </View>
                   <View style={styles.customerLandingHeroBody}>
                     <Text style={styles.customerLandingHeroTitle}>{activeBrowseGroup.title}</Text>
@@ -3299,28 +3724,33 @@ function CustomerWorkspace({
                   <Text style={styles.customerHomeSectionMeta}>{activeBrowseGroup.categories.length} options</Text>
                 </View>
                 <View style={styles.customerBrowseChipRow}>
-                  {activeBrowseGroup.categories.map((category) => (
-                    <Pressable
-                      key={`landing-${category}`}
-                      style={[
-                        styles.customerBrowseChip,
-                        normalizedSelectedCategory === category && styles.customerBrowseChipActive,
-                      ]}
-                      onPress={() => {
-                        onSelectCustomerCategory(category);
-                        onTabChange('explore');
-                      }}
-                    >
-                      <Text
+                  {activeBrowseGroup.categories.map((category) => {
+                    const isComingSoon = comingSoonCategories.has(category);
+                    return (
+                      <Pressable
+                        key={`landing-${category}`}
                         style={[
-                          styles.customerBrowseChipText,
-                          normalizedSelectedCategory === category && styles.customerBrowseChipTextActive,
+                          styles.customerBrowseChip,
+                          normalizedSelectedCategory === category && styles.customerBrowseChipActive,
+                          isComingSoon && styles.customerBrowseChipDisabled,
                         ]}
+                        onPress={isComingSoon ? undefined : () => {
+                          onSelectCustomerCategory(category);
+                          onTabChange('explore');
+                        }}
                       >
-                        {category}
-                      </Text>
-                    </Pressable>
-                  ))}
+                        <Text
+                          style={[
+                            styles.customerBrowseChipText,
+                            normalizedSelectedCategory === category && styles.customerBrowseChipTextActive,
+                            isComingSoon && styles.customerBrowseChipDisabledText,
+                          ]}
+                        >
+                          {isComingSoon ? `${category} · Soon` : category}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
                 </View>
               </View>
             ) : null}
@@ -3363,32 +3793,37 @@ function CustomerWorkspace({
                         </View>
                         <Text style={styles.customerBrowseGroupTitle}>{group.title}</Text>
                       </View>
-                      <Text style={styles.customerBrowseGroupCount}>{group.listingsCount} ads</Text>
+                      <Text style={styles.customerBrowseGroupCount}>{group.listingsCount} providers</Text>
                     </View>
                     <View style={styles.customerBrowseChipRow}>
-                      {group.categories.map((category) => (
-                        <Pressable
-                          key={`${group.key}-${category}`}
-                          style={[
-                            styles.customerBrowseChip,
-                            normalizedSelectedCategory === category && styles.customerBrowseChipActive,
-                          ]}
-                          onPress={() => {
-                            onSelectCustomerCategory(category);
-                            setActiveBrowseGroupKey(group.key);
-                            onTabChange('explore');
-                          }}
-                        >
-                          <Text
+                      {group.categories.map((category) => {
+                        const isComingSoon = comingSoonCategories.has(category);
+                        return (
+                          <Pressable
+                            key={`${group.key}-${category}`}
                             style={[
-                              styles.customerBrowseChipText,
-                              normalizedSelectedCategory === category && styles.customerBrowseChipTextActive,
+                              styles.customerBrowseChip,
+                              normalizedSelectedCategory === category && styles.customerBrowseChipActive,
+                              isComingSoon && styles.customerBrowseChipDisabled,
                             ]}
+                            onPress={isComingSoon ? undefined : () => {
+                              onSelectCustomerCategory(category);
+                              setActiveBrowseGroupKey(group.key);
+                              onTabChange('explore');
+                            }}
                           >
-                            {category}
-                          </Text>
-                        </Pressable>
-                      ))}
+                            <Text
+                              style={[
+                                styles.customerBrowseChipText,
+                                normalizedSelectedCategory === category && styles.customerBrowseChipTextActive,
+                                isComingSoon && styles.customerBrowseChipDisabledText,
+                              ]}
+                            >
+                              {isComingSoon ? `${category} · Soon` : category}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
                     </View>
                   </Pressable>
                 ))}
@@ -3409,7 +3844,7 @@ function CustomerWorkspace({
                 autoCorrect={false}
                 autoCapitalize="none"
                 returnKeyType="search"
-                placeholder="Search products and services"
+                placeholder="Search companies or services"
                 placeholderTextColor="#8A8F98"
                 style={styles.customerExploreStickySearchInput}
               />
@@ -3483,25 +3918,29 @@ function CustomerWorkspace({
             </View>
           </View>
 
-          <SectionCard title="Explore offers" subtitle={activeFilterSummary || 'Browse live products and services without authentication.'} cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
-            {filteredMarketplaceItems.length ? (
+          <SectionCard title="Explore companies" subtitle={activeFilterSummary || 'Browse active companies by service category.'} cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+            {selectedCategoryComingSoon ? (
+              <EmptyState title="Coming Soon" body={`${normalizedSelectedCategory} will appear in the app before launch, but booking is not open yet.`} cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
+            ) : null}
+            {filteredCompanies.length ? (
               <View style={[styles.catalogGrid, wide && styles.catalogGridWide]}>
-                {filteredMarketplaceItems.map((item) => (
-                  <CustomerOfferCard key={item.id} item={item} darkMode={darkMode} ctaLabel="Book now" onPress={() => onSelectItem(item)} />
+                {filteredCompanies.map((company) => (
+                  <CustomerCompanyCard key={`explore-company-${company.id}`} company={company} variant="compact" onPress={() => openProviderDetails(company.id)} />
                 ))}
               </View>
             ) : (
-              <EmptyState title="No results match" body="Try another search or clear the selected category to see more listings." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
+              <EmptyState title="No companies match" body={selectedCategoryComingSoon ? 'This category is visible in the marketplace but booking will open later.' : 'Try another search or clear the selected category to see more companies.'} cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
             )}
           </SectionCard>
 
           {bookingComposer.itemId ? (
-            <SectionCard title="Booking composer" subtitle={authUser ? 'Everything required to place the order is validated before submission.' : 'Guests can prepare an order here, then sign in from Profile to complete it.'} cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+            <SectionCard title="Booking composer" subtitle={authUser ? 'Customer flow: provider → service → time slot → payment → confirmation.' : 'Guests can prepare an order here, then sign in from Profile to complete it.'} cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
               <View style={styles.rowGap}>
                 <FormField label="Date" value={bookingComposer.scheduleDate} onChangeText={(value) => onBookingComposerChange((current) => ({ ...current, scheduleDate: value }))} error={bookingErrors.scheduleDate} theme={customerTheme.inputTheme} />
                 <FormField label="Time" value={bookingComposer.scheduleTime} onChangeText={(value) => onBookingComposerChange((current) => ({ ...current, scheduleTime: value }))} error={bookingErrors.scheduleTime} theme={customerTheme.inputTheme} />
               </View>
               <FormField label="Notes" value={bookingComposer.notes} onChangeText={(value) => onBookingComposerChange((current) => ({ ...current, notes: value }))} multiline theme={customerTheme.inputTheme} />
+              {bookingErrors.slotId ? <FieldError text={bookingErrors.slotId} /> : null}
               <View style={styles.toggleRow}>
                 <ChoiceChip label="Card" selected={bookingComposer.paymentMethod === 'card'} onPress={() => onBookingComposerChange((current) => ({ ...current, paymentMethod: 'card' }))} />
                 <ChoiceChip label="Cash" selected={bookingComposer.paymentMethod === 'cash'} onPress={() => onBookingComposerChange((current) => ({ ...current, paymentMethod: 'cash' }))} />
@@ -3513,6 +3952,25 @@ function CustomerWorkspace({
           ) : null}
         </ScrollView>
       ) : null}
+
+      <ProviderDetailsModal
+        visible={providerDetailOpen && !!selectedProvider}
+        provider={selectedProvider}
+        averageRating={selectedProviderAverageRating}
+        ratingCount={selectedProviderRatings.length}
+        services={selectedProviderServices}
+        slotGroups={availableSelectedProviderSlotsByDate}
+        selectedItemId={bookingComposer.itemId}
+        selectedSlotId={bookingComposer.slotId}
+        onClose={() => setProviderDetailOpen(false)}
+        onSelectService={(item) => onSelectItem(item)}
+        onSelectSlot={(slot) => {
+          if (!selectedProvider) {
+            return;
+          }
+          onBookingComposerChange((current) => ({ ...current, companyId: selectedProvider.id, slotId: slot.id, scheduleDate: slot.dateLabel, scheduleTime: slot.timeLabel }));
+        }}
+      />
 
       {tab === 'orders' ? (
         <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false}>
@@ -4254,7 +4712,7 @@ function CustomerHomeBannerCard({
           <View style={styles.customerHomeBannerSponsorPill}>
             <Text style={styles.customerHomeBannerSponsorText}>Featured</Text>
           </View>
-          <Text style={styles.customerHomeBannerCompany}>Jahzeen Picks</Text>
+          <Text style={styles.customerHomeBannerCompany}>Abdalla Picks</Text>
         </View>
         <View style={styles.customerHomeBannerBody}>
           <Text style={styles.customerHomeBannerTitle} numberOfLines={2}>{title}</Text>
@@ -4534,18 +4992,23 @@ function isHexColor(value: string) {
 function validateCompanyDraft(draft: {
   name: string;
   description: string;
+  category: string;
   supportEmail: string;
   supportPhone: string;
   accentColor: string;
   logoText: string;
+  profileImageUrl: string;
 }) {
   const errors: ValidationMap = {};
   if (!draft.name.trim()) errors.name = 'Company name is required.';
   if (!draft.description.trim()) errors.description = 'Description is required.';
+  if (!draft.category.trim()) errors.category = 'Company category is required.';
+  if (draft.category.trim() && !APP_CATEGORY_OPTIONS.includes(draft.category.trim())) errors.category = 'Choose a category from the application list.';
   if (!isEmail(draft.supportEmail)) errors.supportEmail = 'Use a valid support email.';
   if (!draft.supportPhone.trim()) errors.supportPhone = 'Support phone is required.';
-  if (!isHexColor(draft.accentColor)) errors.accentColor = 'Use a hex color like #145DA0.';
+  if (!isHexColor(draft.accentColor)) errors.accentColor = 'Use a hex color like #0F7B45.';
   if (!draft.logoText.trim()) errors.logoText = 'Logo text is required.';
+  if (!draft.profileImageUrl.trim()) errors.profileImageUrl = 'Company profile image is required.';
   return errors;
 }
 
@@ -4636,13 +5099,14 @@ function validateAddressDraft(draft: Address) {
 }
 
 function validateBookingDraft(
-  draft: { itemId: string; scheduleDate: string; scheduleTime: string; addressId: string },
+  draft: { itemId: string; slotId?: string; scheduleDate: string; scheduleTime: string; addressId: string },
   authUser: { email: string } | null,
   addresses: Address[],
 ) {
   const errors: ValidationMap = {};
   if (!authUser) errors.auth = 'Sign in to place a booking.';
   if (!draft.itemId) errors.itemId = 'Choose an item first.';
+  if (!draft.slotId) errors.slotId = 'Choose an available time slot first.';
   if (!draft.scheduleDate.trim()) errors.scheduleDate = 'Booking date is required.';
   if (!draft.scheduleTime.trim()) errors.scheduleTime = 'Booking time is required.';
   if (!draft.addressId || !addresses.find((entry) => entry.id === draft.addressId)) errors.addressId = 'Save a default address before booking.';
@@ -4805,6 +5269,117 @@ function OperationPopup({ visible, tone, text, onClose }: { visible: boolean; to
   );
 }
 
+function ProviderDetailsModal({
+  visible,
+  provider,
+  averageRating,
+  ratingCount,
+  services,
+  slotGroups,
+  selectedItemId,
+  selectedSlotId,
+  onClose,
+  onSelectService,
+  onSelectSlot,
+}: {
+  visible: boolean;
+  provider: Company | null;
+  averageRating: number;
+  ratingCount: number;
+  services: CatalogItem[];
+  slotGroups: Array<{ dateLabel: string; slots: AvailabilitySlot[] }>;
+  selectedItemId: string;
+  selectedSlotId: string;
+  onClose: () => void;
+  onSelectService: (item: CatalogItem) => void;
+  onSelectSlot: (slot: AvailabilitySlot) => void;
+}) {
+  if (!provider) {
+    return null;
+  }
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.providerModalBackdrop} onPress={onClose}>
+        <Pressable style={styles.providerModalSheet} onPress={() => undefined}>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.providerModalContent}>
+            <View style={styles.providerModalHero}>
+              {provider.profileImageUrl ? <Image source={{ uri: provider.profileImageUrl }} style={styles.providerModalHeroImage} resizeMode="cover" /> : null}
+              <LinearGradient colors={['rgba(15,42,26,0.08)', 'rgba(15,42,26,0.82)']} style={styles.providerModalHeroOverlay}>
+                <View style={styles.providerModalHeroTopRow}>
+                  <View style={styles.providerModalBadge}>
+                    <Text style={styles.providerModalBadgeText}>{provider.category}</Text>
+                  </View>
+                  <Pressable style={styles.providerModalCloseButton} onPress={onClose}>
+                    <Ionicons name="close" size={18} color="#FFFFFF" />
+                  </Pressable>
+                </View>
+                <View style={styles.providerModalHeroBody}>
+                  <Text style={styles.providerModalTitle}>{provider.name}</Text>
+                  <Text style={styles.providerModalSubtitle}>{averageRating ? `${averageRating.toFixed(1)} / 5` : 'No ratings yet'} · {ratingCount} reviews</Text>
+                </View>
+              </LinearGradient>
+            </View>
+
+            <Text style={styles.customerProviderDetailDescription}>{provider.description}</Text>
+
+            <View style={styles.customerProviderSection}>
+              <Text style={styles.customerProviderSectionTitle}>1. Select service</Text>
+              <View style={styles.customerProviderServiceStack}>
+                {services.length ? services.map((item) => (
+                  <Pressable
+                    key={`provider-service-${item.id}`}
+                    style={[styles.customerProviderServiceCard, selectedItemId === item.id && styles.customerProviderServiceCardActive]}
+                    onPress={() => onSelectService(item)}
+                  >
+                    <View style={styles.rowBetween}>
+                      <View style={styles.infoBodyGrow}>
+                        <Text style={styles.customerProviderServiceTitle}>{item.title}</Text>
+                        <Text style={styles.customerProviderServiceMeta}>{item.summary}</Text>
+                      </View>
+                      <Text style={styles.customerProviderServicePrice}>QAR {item.price.toFixed(0)}</Text>
+                    </View>
+                  </Pressable>
+                )) : <EmptyState title="No services yet" body="This provider has no published services yet." />}
+              </View>
+            </View>
+
+            <View style={styles.customerProviderSection}>
+              <Text style={styles.customerProviderSectionTitle}>2. Choose date and time</Text>
+              <View style={styles.providerSlotDateGroupStack}>
+                {slotGroups.length ? slotGroups.map((group) => (
+                  <View key={`slot-group-${group.dateLabel}`} style={styles.providerSlotDateGroupCard}>
+                    <View style={styles.providerSlotDateHeader}>
+                      <Ionicons name="calendar-outline" size={16} color={colors.primary} />
+                      <Text style={styles.providerSlotDateHeaderText}>{group.dateLabel}</Text>
+                    </View>
+                    <View style={styles.customerProviderSlotWrap}>
+                      {group.slots.map((slot) => (
+                        <Pressable
+                          key={`slot-${slot.id}`}
+                          style={[styles.customerProviderSlotChip, selectedSlotId === slot.id && styles.customerProviderSlotChipActive]}
+                          onPress={() => onSelectSlot(slot)}
+                        >
+                          <Text style={[styles.customerProviderSlotChipText, selectedSlotId === slot.id && styles.customerProviderSlotChipTextActive]}>{slot.timeLabel}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                )) : <EmptyState title="No available slots" body="This provider has not published available booking times yet." />}
+              </View>
+            </View>
+
+            <View style={styles.customerProviderSection}>
+              <Text style={styles.customerProviderSectionTitle}>3. Payment and confirmation</Text>
+              <Text style={styles.customerProviderPaymentHint}>Close this sheet after selecting a service and slot, then finish payment below. Once booked, the selected slot closes automatically.</Text>
+            </View>
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 function ManagementRule({ text }: { text: string }) {
   return (
     <View style={styles.managementRuleRow}>
@@ -4885,6 +5460,68 @@ function CustomerMetricCard({ label, value, darkMode }: { label: string; value: 
   );
 }
 
+function CustomerCompanyCard({ company, onPress, variant = 'featured' }: { company: Company; onPress: () => void; variant?: 'featured' | 'compact' }) {
+  const companyMonogram = company.name.trim().charAt(0).toUpperCase() || 'A';
+  const isCompact = variant === 'compact';
+  const responseMinutes = 10 + ((company.id.length + company.name.length) % 21);
+
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.companyDiscoveryCard,
+        isCompact && styles.companyDiscoveryCardCompact,
+        company.isActive && styles.companyDiscoveryCardActive,
+        pressed && styles.companyDiscoveryCardPressed,
+      ]}
+      onPress={onPress}
+    >
+      <View style={[styles.companyDiscoveryCover, isCompact && styles.companyDiscoveryCoverCompact]}>
+        {company.profileImageUrl ? <Image source={{ uri: company.profileImageUrl }} style={styles.companyDiscoveryCoverImage} resizeMode="cover" /> : null}
+        {!company.profileImageUrl ? (
+          <View style={[styles.companyDiscoveryFallbackBadge, isCompact && styles.companyDiscoveryFallbackBadgeCompact]}>
+            <Text style={[styles.companyDiscoveryFallbackBadgeText, isCompact && styles.companyDiscoveryFallbackBadgeTextCompact]}>{companyMonogram}</Text>
+          </View>
+        ) : null}
+        <LinearGradient colors={['rgba(7, 29, 17, 0.03)', 'rgba(7, 29, 17, 0.88)']} style={[styles.companyDiscoveryCoverOverlay, isCompact && styles.companyDiscoveryCoverOverlayCompact]}>
+          <View style={styles.companyDiscoveryCoverTopRow}>
+            <View style={[styles.companyDiscoveryCategoryPill, isCompact && styles.companyDiscoveryCategoryPillCompact]}>
+              <Text style={[styles.companyDiscoveryCategoryPillText, isCompact && styles.companyDiscoveryCategoryPillTextCompact]}>{company.category || 'Company'}</Text>
+            </View>
+            <View style={[styles.companyDiscoveryStatePill, company.isActive ? styles.companyDiscoveryStatePillActive : styles.companyDiscoveryStatePillPaused]}>
+              <Text style={styles.companyDiscoveryStatePillText}>{company.isActive ? 'Active' : 'Paused'}</Text>
+            </View>
+          </View>
+          <Text style={[styles.companyDiscoverySupportText, isCompact && styles.companyDiscoverySupportTextCompact]} numberOfLines={1}>{company.supportPhone || company.supportEmail}</Text>
+        </LinearGradient>
+      </View>
+
+      <View style={[styles.companyDiscoveryBody, isCompact && styles.companyDiscoveryBodyCompact]}>
+        <Text style={[styles.companyDiscoveryTitle, isCompact && styles.companyDiscoveryTitleCompact]} numberOfLines={1}>{company.name}</Text>
+        <Text style={[styles.companyDiscoveryDescription, isCompact && styles.companyDiscoveryDescriptionCompact]} numberOfLines={2}>{company.description}</Text>
+        <View style={styles.companyDiscoveryMetaRow}>
+          <View style={styles.companyDiscoveryMetaChip}>
+            <Ionicons name="location-outline" size={12} color="#2D5D3F" />
+            <Text style={styles.companyDiscoveryMetaChipText}>Qatar</Text>
+          </View>
+          <View style={styles.companyDiscoveryMetaChip}>
+            <Ionicons name="time-outline" size={12} color="#2D5D3F" />
+            <Text style={styles.companyDiscoveryMetaChipText}>~{responseMinutes} min</Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={[styles.companyDiscoveryFooterRow, isCompact && styles.companyDiscoveryFooterRowCompact]}>
+        <View style={styles.companyDiscoveryCategoryMetaPill}>
+          <Text style={styles.companyDiscoveryCategoryMetaText}>{company.category}</Text>
+        </View>
+        <View style={styles.companyDiscoveryCtaPill}>
+          <Text style={styles.companyDiscoveryCtaText}>Open</Text>
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
 function CustomerOfferCard({ item, darkMode, ctaLabel, onPress }: { item: CatalogItem; darkMode: boolean; ctaLabel: string; onPress: () => void }) {
   return (
     <Pressable style={[styles.marketplaceCard, darkMode && styles.marketplaceCardDark]} onPress={onPress}>
@@ -4947,7 +5584,7 @@ function CompanyCard({ company, actionLabel, onAction, secondaryActionLabel, onS
     <View style={styles.infoCard}>
       <View style={styles.infoBodyGrow}>
         <Text style={styles.infoTitle}>{company.name}</Text>
-        <Text style={styles.infoSubtitle}>{company.supportEmail} · {company.createdAtLabel} · {company.isActive ? 'Active' : 'Paused'}</Text>
+        <Text style={styles.infoSubtitle}>{company.category} · {company.supportEmail} · {company.createdAtLabel} · {company.isActive ? 'Active' : 'Paused'}</Text>
       </View>
       <View style={styles.inlineActionGroup}>
         {actionLabel && onAction ? (
@@ -5042,10 +5679,10 @@ function CompanyCatalogCard({ item, index, onAction, onSecondaryAction }: { item
             )}
             <View style={styles.companyCatalogIllustrationPanel}>
               <View style={[styles.companyCatalogIllustrationOrb, item.isPublished ? styles.companyCatalogIllustrationOrbPublished : styles.companyCatalogIllustrationOrbDraft]}>
-                <Ionicons name={illustrationIcon as keyof typeof Ionicons.glyphMap} size={28} color={item.isPublished ? '#145DA0' : '#B56A17'} />
+                <Ionicons name={illustrationIcon as keyof typeof Ionicons.glyphMap} size={28} color={item.isPublished ? colors.primary : '#B56A17'} />
               </View>
               <View style={styles.companyCatalogIllustrationTextWrap}>
-                <Text style={styles.companyCatalogIllustrationTitle}>{item.companyName || 'Jahzeen partner'}</Text>
+                <Text style={styles.companyCatalogIllustrationTitle}>{item.companyName || 'Abdalla partner'}</Text>
                 <Text style={styles.companyCatalogIllustrationSubtitle}>{item.imageHint || 'Branded catalog presentation'}</Text>
               </View>
             </View>
@@ -5304,8 +5941,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#145DA0',
-    shadowColor: '#145DA0',
+    backgroundColor: colors.primary,
+    shadowColor: colors.primary,
     shadowOpacity: 0.2,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 8 },
@@ -5566,8 +6203,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   customerHomeCarouselRow: {
-    gap: 14,
+    gap: 12,
     paddingRight: 18,
+  },
+  customerCarouselDotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: -2,
+  },
+  customerCarouselDot: {
+    height: 8,
+    borderRadius: 999,
   },
   customerHomeBannerCard: {
     height: 178,
@@ -5649,15 +6297,15 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   customerHomeSearchBar: {
-    minHeight: 64,
-    borderRadius: 22,
-    backgroundColor: '#FFF8EF',
+    minHeight: 50,
+    borderRadius: 16,
+    backgroundColor: '#FFFCF8',
     borderWidth: 1,
-    borderColor: '#E3D6C1',
-    paddingHorizontal: 18,
+    borderColor: '#D9E5DC',
+    paddingHorizontal: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 9,
   },
   customerHomeSearchSection: {
     gap: 10,
@@ -5665,17 +6313,17 @@ const styles = StyleSheet.create({
   customerHomeSearchInput: {
     flex: 1,
     color: colors.text,
-    fontSize: 18,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '600',
     paddingVertical: 0,
   },
   customerHomeSearchClearButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F3EBDD',
+    backgroundColor: '#EEF4EF',
   },
   customerHomeSearchMetaRow: {
     flexDirection: 'row',
@@ -5800,10 +6448,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#DDD0BC',
   },
+  customerHomeCategoryChipDisabled: {
+    backgroundColor: '#F5F5F5',
+    borderColor: '#D8D8D8',
+    opacity: 0.6,
+  },
   customerHomeCategoryChipText: {
     color: colors.text,
     fontSize: 13,
     fontWeight: '700',
+  },
+  customerHomeCategoryChipDisabledText: {
+    color: '#9E9E9E',
   },
   customerHomeActiveFilterChip: {
     alignSelf: 'flex-start',
@@ -5891,6 +6547,13 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 13,
     lineHeight: 19,
+  },
+  customerCategoryComingSoonText: {
+    color: '#8B5A12',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   customerBrowseStatsRow: {
     flexDirection: 'row',
@@ -6029,6 +6692,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#E6F0FA',
     borderColor: '#B8D1EA',
   },
+  customerBrowseChipDisabled: {
+    backgroundColor: '#F5F5F5',
+    borderColor: '#D8D8D8',
+    opacity: 0.55,
+  },
   customerBrowseChipText: {
     color: colors.text,
     fontSize: 12,
@@ -6036,6 +6704,9 @@ const styles = StyleSheet.create({
   },
   customerBrowseChipTextActive: {
     color: colors.primary,
+  },
+  customerBrowseChipDisabledText: {
+    color: '#9E9E9E',
   },
   customerExploreStickyHeader: {
     marginHorizontal: -18,
@@ -6137,6 +6808,215 @@ const styles = StyleSheet.create({
     color: '#A33E31',
     fontSize: 12,
     fontWeight: '700',
+  },
+  customerProviderDetailCard: {
+    borderRadius: 20,
+    padding: 16,
+    backgroundColor: '#FBFEFB',
+    borderWidth: 1,
+    borderColor: '#D8E8DC',
+    gap: 14,
+    marginBottom: 14,
+  },
+  customerProviderDetailHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  customerProviderDetailTitle: {
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  customerProviderDetailSubtitle: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  customerProviderDetailDescription: {
+    color: '#4D6256',
+    lineHeight: 21,
+  },
+  customerProviderSection: {
+    gap: 10,
+  },
+  customerProviderSectionTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  customerProviderServiceStack: {
+    gap: 10,
+  },
+  customerProviderServiceCard: {
+    borderRadius: 16,
+    padding: 12,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#DCE7DF',
+  },
+  customerProviderServiceCardActive: {
+    borderColor: colors.primary,
+    backgroundColor: '#F2FAF4',
+  },
+  customerProviderServiceTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  customerProviderServiceMeta: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  customerProviderServicePrice: {
+    color: colors.primary,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  customerProviderSlotWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  customerProviderSlotChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#DCE7DF',
+  },
+  customerProviderSlotChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  customerProviderSlotChipText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  customerProviderSlotChipTextActive: {
+    color: '#FFFFFF',
+  },
+  customerProviderPaymentHint: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  categorySettingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E6EFE8',
+  },
+  categorySettingTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  categorySettingMeta: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  providerModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(8, 20, 13, 0.42)',
+    justifyContent: 'flex-end',
+  },
+  providerModalSheet: {
+    maxHeight: '88%',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    backgroundColor: '#F8FCF8',
+    overflow: 'hidden',
+  },
+  providerModalContent: {
+    padding: 18,
+    gap: 16,
+    paddingBottom: 28,
+  },
+  providerModalHero: {
+    minHeight: 240,
+    borderRadius: 24,
+    overflow: 'hidden',
+    backgroundColor: '#E5EFE6',
+  },
+  providerModalHeroImage: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+  },
+  providerModalHeroOverlay: {
+    flex: 1,
+    padding: 18,
+    justifyContent: 'space-between',
+  },
+  providerModalHeroTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  },
+  providerModalBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.24)',
+  },
+  providerModalBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  providerModalCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  providerModalHeroBody: {
+    gap: 6,
+  },
+  providerModalTitle: {
+    color: '#FFFFFF',
+    fontSize: 28,
+    lineHeight: 34,
+    fontWeight: '900',
+  },
+  providerModalSubtitle: {
+    color: 'rgba(255,255,255,0.84)',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  providerSlotDateGroupStack: {
+    gap: 10,
+  },
+  providerSlotDateGroupCard: {
+    borderRadius: 18,
+    padding: 12,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#DCE7DF',
+    gap: 10,
+  },
+  providerSlotDateHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  providerSlotDateHeaderText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '800',
   },
   customerCanvasDark: {
     backgroundColor: '#111922',
@@ -6403,7 +7283,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     minHeight: 52,
     justifyContent: 'center',
-    shadowColor: '#145DA0',
+    shadowColor: colors.primary,
     shadowOpacity: 0.16,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
@@ -7210,6 +8090,229 @@ const styles = StyleSheet.create({
   marketplaceCardDark: {
     backgroundColor: '#1B2430',
     borderColor: '#2D3A48',
+  },
+  companyDiscoveryCard: {
+    backgroundColor: '#FFFCF8',
+    borderRadius: 22,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#DCE8DF',
+    gap: 10,
+    minWidth: 246,
+    flexGrow: 1,
+    shadowColor: '#1F5A36',
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
+  },
+  companyDiscoveryCardCompact: {
+    minWidth: 208,
+    padding: 10,
+    borderRadius: 18,
+    gap: 8,
+  },
+  companyDiscoveryCardActive: {
+    borderColor: '#9FD2AF',
+    shadowColor: '#0F7B45',
+    shadowOpacity: 0.2,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
+  },
+  companyDiscoveryCardPressed: {
+    transform: [{ scale: 0.992 }],
+  },
+  companyDiscoveryCover: {
+    minHeight: 164,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#D9ECDD',
+  },
+  companyDiscoveryCoverCompact: {
+    minHeight: 128,
+    borderRadius: 14,
+  },
+  companyDiscoveryCoverImage: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  companyDiscoveryFallbackBadge: {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0F7B45',
+    position: 'absolute',
+    top: 14,
+    left: 14,
+    zIndex: 2,
+  },
+  companyDiscoveryFallbackBadgeCompact: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    top: 10,
+    left: 10,
+  },
+  companyDiscoveryFallbackBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 26,
+    fontWeight: '800',
+  },
+  companyDiscoveryFallbackBadgeTextCompact: {
+    fontSize: 22,
+  },
+  companyDiscoveryCoverOverlay: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    justifyContent: 'space-between',
+  },
+  companyDiscoveryCoverOverlayCompact: {
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+  },
+  companyDiscoveryCoverTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  companyDiscoveryCategoryPill: {
+    maxWidth: '72%',
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFFD9',
+  },
+  companyDiscoveryCategoryPillCompact: {
+    maxWidth: '70%',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  companyDiscoveryCategoryPillText: {
+    color: '#12492A',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.35,
+    textTransform: 'uppercase',
+  },
+  companyDiscoveryCategoryPillTextCompact: {
+    fontSize: 9,
+    letterSpacing: 0.25,
+  },
+  companyDiscoveryStatePill: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  companyDiscoveryStatePillActive: {
+    backgroundColor: '#0F7B45',
+  },
+  companyDiscoveryStatePillPaused: {
+    backgroundColor: '#8A3A2B',
+  },
+  companyDiscoveryStatePillText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.25,
+    textTransform: 'uppercase',
+  },
+  companyDiscoverySupportText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  companyDiscoverySupportTextCompact: {
+    fontSize: 11,
+  },
+  companyDiscoveryBody: {
+    gap: 4,
+    paddingHorizontal: 2,
+  },
+  companyDiscoveryBodyCompact: {
+    gap: 3,
+    paddingHorizontal: 1,
+  },
+  companyDiscoveryTitle: {
+    fontSize: 19,
+    lineHeight: 24,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  companyDiscoveryTitleCompact: {
+    fontSize: 16,
+    lineHeight: 20,
+  },
+  companyDiscoveryDescription: {
+    color: '#4A5E52',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '500',
+  },
+  companyDiscoveryDescriptionCompact: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  companyDiscoveryMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingTop: 3,
+  },
+  companyDiscoveryMetaChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#ECF5EE',
+    borderWidth: 1,
+    borderColor: '#D2E5D8',
+  },
+  companyDiscoveryMetaChipText: {
+    color: '#2D5D3F',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  companyDiscoveryFooterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  companyDiscoveryFooterRowCompact: {
+    gap: 6,
+  },
+  companyDiscoveryCategoryMetaPill: {
+    flex: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: '#EEF5EF',
+    borderWidth: 1,
+    borderColor: '#D1E4D5',
+  },
+  companyDiscoveryCategoryMetaText: {
+    color: '#2E5B3F',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  companyDiscoveryCtaPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: colors.primary,
+  },
+  companyDiscoveryCtaText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.25,
+    textTransform: 'uppercase',
   },
   marketplaceVisual: {
     minHeight: 120,

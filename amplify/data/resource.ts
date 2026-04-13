@@ -41,10 +41,12 @@ const schema = a.schema({
       name: a.string().required(),
       slug: a.string().required(),
       description: a.string(),
+      category: a.string(),
       supportEmail: a.string().required(),
       supportPhone: a.string(),
       accentColor: a.string(),
       logoText: a.string(),
+      profileImageUrl: a.string(),
       ownerEmail: a.string().required(),
       isActive: a.boolean(),
       createdAtLabel: a.string(),
@@ -69,6 +71,16 @@ const schema = a.schema({
     })
     .authorization((allow) => [
       allow.group('admin'),
+    ]),
+
+  AppCategorySetting: a
+    .model({
+      category: a.string().required(),
+      isComingSoon: a.boolean().required(),
+    })
+    .authorization((allow) => [
+      allow.group('admin'),
+      allow.guest().to(['read']),
     ]),
 
   sendCompanyInvitationEmail: a
@@ -208,6 +220,7 @@ const schema = a.schema({
       companyName: a.string().required(),
       itemId: a.id().required(),
       itemTitle: a.string().required(),
+      slotId: a.id(),
       kind: a.string().required(),
       scheduleDate: a.string().required(),
       scheduleTime: a.string().required(),
@@ -228,6 +241,21 @@ const schema = a.schema({
       allow.group('admin'),
       allow.group('company').to(['read', 'update']),
       allow.owner(),
+      allow.guest().to(['read']),
+    ]),
+
+  AvailabilitySlot: a
+    .model({
+      companyId: a.id().required(),
+      companyName: a.string().required(),
+      dateLabel: a.string().required(),
+      timeLabel: a.string().required(),
+      status: a.string().required(),
+      note: a.string(),
+    })
+    .authorization((allow) => [
+      allow.group('admin').to(['read']),
+      allow.group('company'),
       allow.guest().to(['read']),
     ]),
 

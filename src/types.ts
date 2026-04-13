@@ -29,6 +29,8 @@ export type AuditEntityType =
 
 export type AuditStatus = 'success' | 'warning' | 'error' | 'info';
 
+export type AvailabilitySlotStatus = 'available' | 'blocked' | 'booked';
+
 export interface AuthUser {
   userId: string;
   email: string;
@@ -80,10 +82,12 @@ export interface Company {
   name: string;
   slug: string;
   description: string;
+  category: string;
   supportEmail: string;
   supportPhone: string;
   accentColor: string;
   logoText: string;
+  profileImageUrl: string;
   ownerEmail: string;
   isActive: boolean;
   createdAtLabel: string;
@@ -203,6 +207,7 @@ export interface Booking {
   companyName: string;
   itemId: string;
   itemTitle: string;
+  slotId?: string;
   kind: ItemKind;
   scheduleDate: string;
   scheduleTime: string;
@@ -220,9 +225,26 @@ export interface Booking {
   timeline: BookingTimelineItem[];
 }
 
+export interface AvailabilitySlot {
+  id: string;
+  companyId: string;
+  companyName: string;
+  dateLabel: string;
+  timeLabel: string;
+  status: AvailabilitySlotStatus;
+  note: string;
+}
+
+export interface AppCategorySetting {
+  id: string;
+  category: string;
+  isComingSoon: boolean;
+}
+
 export interface BookingDraft {
   itemId: string;
   companyId: string;
+  slotId?: string;
   scheduleDate: string;
   scheduleTime: string;
   addressId: string;
@@ -230,13 +252,23 @@ export interface BookingDraft {
   paymentMethod: PaymentMethod;
 }
 
+export interface AvailabilitySlotDraft {
+  id?: string;
+  dateLabel: string;
+  timeLabel: string;
+  status: AvailabilitySlotStatus;
+  note: string;
+}
+
 export interface CompanyDraft {
   name: string;
   description: string;
+  category: string;
   supportEmail: string;
   supportPhone: string;
   accentColor: string;
   logoText: string;
+  profileImageUrl: string;
 }
 
 export interface InvitationDraft {
