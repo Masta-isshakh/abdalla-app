@@ -6,6 +6,8 @@ export type BookingStatus = 'pending' | 'approved' | 'scheduled' | 'enRoute' | '
 
 export type ItemKind = 'service' | 'product';
 
+export type CatalogApprovalStatus = 'draft' | 'pending' | 'approved' | 'rejected';
+
 export type LoyaltyScope = 'admin' | 'company';
 
 export type NotificationAudience = 'admin' | 'company' | 'customer';
@@ -118,6 +120,9 @@ export interface CatalogItem {
   price: number;
   durationLabel: string;
   isPublished: boolean;
+  approvalStatus: CatalogApprovalStatus;
+  approvedAtLabel?: string;
+  approvedByEmail?: string;
   featured: boolean;
   tags: string[];
   loyaltyPoints: number;

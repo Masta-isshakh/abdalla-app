@@ -26,6 +26,7 @@ import {
   Booking,
   BookingDraft,
   BookingStatus,
+  CatalogApprovalStatus,
   CatalogItem,
   CatalogItemDraft,
   Company,
@@ -194,6 +195,7 @@ interface AppContextValue {
   resendCompanyInvitation: (invitationId: string) => Promise<void>;
   revokeInvitation: (invitationId: string) => Promise<void>;
   saveCatalogItem: (companyId: string, draft: CatalogItemDraft) => Promise<void>;
+  reviewCatalogItem: (itemId: string, decision: 'approved' | 'rejected') => Promise<void>;
   deleteCatalogItem: (itemId: string) => Promise<void>;
   saveOfferPromotion: (companyId: string, draft: OfferPromotionDraft) => Promise<void>;
   deleteOfferPromotion: (promotionId: string) => Promise<void>;
@@ -297,7 +299,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           })));
           setAppCategorySettings((parsed as PersistedState & { appCategorySettings?: AppCategorySetting[] }).appCategorySettings ?? []);
           setInvitations(parsed.invitations ?? []);
-          setCatalogItems(parsed.catalogItems ?? []);
+          setCatalogItems(
+            (parsed.catalogItems ?? []).map((entry) => ({
+              ...entry,
+              approvalStatus: entry.approvalStatus ?? (entry.isPublished ? 'approved' : 'draft'),
+            })),
+          );
           setOfferPromotions(parsed.offerPromotions ?? []);
           setNotifications(parsed.notifications ?? []);
           setAuditEvents(parsed.auditEvents ?? []);
@@ -389,7 +396,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [companies, currentUserRecord]);
 
   const marketplaceItems = useMemo(
-    () => catalogItems.filter((item) => item.isPublished && companies.find((entry) => entry.id === item.companyId)?.isActive),
+    () => catalogItems.filter((item) => item.isPublished && item.approvalStatus === 'approved' && companies.find((entry) => entry.id === item.companyId)?.isActive),
     [catalogItems, companies],
   );
 
@@ -688,7 +695,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setInvitations(remoteInvitations.map((entry: any) => ({ id: entry.id, companyId: entry.companyId, companyName: entry.companyName, email: entry.email, invitedByEmail: entry.invitedByEmail, status: entry.status, message: entry.message ?? '', emailDeliveryStatus: entry.emailDeliveryStatus ?? 'pending', emailDeliveryError: entry.emailDeliveryError ?? undefined, emailSentAtLabel: entry.emailSentAtLabel ?? undefined })));
       }
       if (remoteItems.length) {
-        setCatalogItems(remoteItems.map((entry: any) => ({ id: entry.id, companyId: entry.companyId, companyName: entry.companyName, kind: entry.kind, title: entry.title, summary: entry.summary, description: entry.description ?? '', category: entry.category, price: Number(entry.price ?? 0), durationLabel: entry.durationLabel ?? '', isPublished: !!entry.isPublished, featured: !!entry.featured, tags: parseList(entry.tags), loyaltyPoints: Number(entry.loyaltyPoints ?? 0), imageUrl: entry.imageUrl ?? '', imageHint: entry.imageHint ?? '' })));
+        setCatalogItems(
+          remoteItems.map((entry: any) => {
+            const approvalStatus: CatalogApprovalStatus =
+              entry.approvalStatus === 'approved' || entry.approvalStatus === 'pending' || entry.approvalStatus === 'rejected'
+                ? entry.approvalStatus
+                : entry.isPublished
+                  ? 'approved'
+                  : 'draft';
+
+            return {
+              id: entry.id,
+              companyId: entry.companyId,
+              companyName: entry.companyName,
+              kind: entry.kind,
+              title: entry.title,
+              summary: entry.summary,
+              description: entry.description ?? '',
+              category: entry.category,
+              price: Number(entry.price ?? 0),
+              durationLabel: entry.durationLabel ?? '',
+              isPublished: !!entry.isPublished,
+              approvalStatus,
+              approvedAtLabel: entry.approvedAtLabel ?? undefined,
+              approvedByEmail: entry.approvedByEmail ?? undefined,
+              featured: !!entry.featured,
+              tags: parseList(entry.tags),
+              loyaltyPoints: Number(entry.loyaltyPoints ?? 0),
+              imageUrl: entry.imageUrl ?? '',
+              imageHint: entry.imageHint ?? '',
+            };
+          }),
+        );
       }
       if (remotePromotions.length) {
         setOfferPromotions(remotePromotions.map((entry: any) => ({ id: entry.id, companyId: entry.companyId, companyName: entry.companyName, catalogItemId: entry.catalogItemId, catalogItemTitle: entry.catalogItemTitle, title: entry.title, headline: entry.headline ?? '', badgeText: entry.badgeText ?? '', discountLabel: entry.discountLabel ?? '', startsAtLabel: entry.startsAtLabel ?? '', endsAtLabel: entry.endsAtLabel ?? '', isActive: !!entry.isActive, sortOrder: Number(entry.sortOrder ?? 0) })));
@@ -992,14 +1030,160 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!company) {
       throw new Error('No active company workspace was found for this catalog item.');
     }
-    const item: CatalogItem = { id: draft.id ?? `item-${Date.now()}`, companyId, companyName: company.name, kind: draft.kind, title: draft.title, summary: draft.summary, description: draft.description, category: draft.category, price: draft.price, durationLabel: draft.durationLabel, isPublished: draft.isPublished, featured: draft.featured, tags: draft.tags, loyaltyPoints: draft.loyaltyPoints, imageUrl: draft.imageUrl, imageHint: draft.imageHint };
-    setCatalogItems((current) => draft.id ? current.map((entry) => (entry.id === draft.id ? item : entry)) : [item, ...current]);
-    if (draft.id) {
-      await safeUpdate('CatalogItem', { ...item, tags: JSON.stringify(item.tags) });
-    } else {
-      await safeCreate('CatalogItem', { ...item, tags: JSON.stringify(item.tags) });
+
+    const existingItem = draft.id ? catalogItems.find((entry) => entry.id === draft.id) : undefined;
+    const actorIsAdmin = activeRole === 'admin';
+
+    let approvalStatus: CatalogApprovalStatus = 'draft';
+    let approvedAtLabel: string | undefined;
+    let approvedByEmail: string | undefined;
+
+    if (draft.isPublished) {
+      if (actorIsAdmin) {
+        approvalStatus = 'approved';
+        approvedAtLabel = nowLabel();
+        approvedByEmail = authUser?.email ?? 'admin@jahzeen.app';
+      } else {
+        approvalStatus = 'pending';
+      }
     }
-    await createAuditEvent({ entityType: 'catalogItem', entityId: item.id, companyId, action: draft.id ? 'updateCatalogItem' : 'createCatalogItem', status: item.isPublished ? 'success' : 'info', summary: `${item.title} was ${draft.id ? 'updated' : 'saved'}${item.isPublished ? ' and published' : ' as a draft'}.`, metadata: [item.kind, item.category, `${item.price}`] });
+
+    if (!draft.isPublished) {
+      approvalStatus = 'draft';
+    }
+
+    if (existingItem && existingItem.approvalStatus === 'approved' && approvalStatus === 'approved') {
+      approvedAtLabel = existingItem.approvedAtLabel;
+      approvedByEmail = existingItem.approvedByEmail;
+    }
+
+    const item: CatalogItem = {
+      id: draft.id ?? `item-${Date.now()}`,
+      companyId,
+      companyName: company.name,
+      kind: draft.kind,
+      title: draft.title,
+      summary: draft.summary,
+      description: draft.description,
+      category: draft.category,
+      price: draft.price,
+      durationLabel: draft.durationLabel,
+      isPublished: draft.isPublished,
+      approvalStatus,
+      approvedAtLabel,
+      approvedByEmail,
+      featured: draft.featured,
+      tags: draft.tags,
+      loyaltyPoints: draft.loyaltyPoints,
+      imageUrl: draft.imageUrl,
+      imageHint: draft.imageHint,
+    };
+
+    setCatalogItems((current) => (draft.id ? current.map((entry) => (entry.id === draft.id ? item : entry)) : [item, ...current]));
+
+    const payload = {
+      ...item,
+      tags: JSON.stringify(item.tags),
+    };
+
+    if (draft.id) {
+      await safeUpdate('CatalogItem', payload);
+    } else {
+      await safeCreate('CatalogItem', payload);
+    }
+
+    if (approvalStatus === 'pending') {
+      await createNotification({
+        recipientRole: 'admin',
+        title: `Approval required: ${item.title}`,
+        body: `${company.name} submitted a ${item.kind} for publishing approval.`,
+        kind: 'system',
+        destinationTab: 'publishing',
+      });
+    }
+
+    const statusSummary =
+      approvalStatus === 'approved'
+        ? ' and approved for publishing.'
+        : approvalStatus === 'pending'
+          ? ' and submitted for admin approval.'
+          : approvalStatus === 'rejected'
+            ? ' but rejected from publishing.'
+            : ' as a draft.';
+
+    await createAuditEvent({
+      entityType: 'catalogItem',
+      entityId: item.id,
+      companyId,
+      action: draft.id ? 'updateCatalogItem' : 'createCatalogItem',
+      status: approvalStatus === 'approved' ? 'success' : approvalStatus === 'pending' ? 'warning' : 'info',
+      summary: `${item.title} was ${draft.id ? 'updated' : 'saved'}${statusSummary}`,
+      metadata: [item.kind, item.category, `${item.price}`, approvalStatus],
+    });
+  }
+
+  async function reviewCatalogItem(itemId: string, decision: 'approved' | 'rejected') {
+    const existing = catalogItems.find((entry) => entry.id === itemId);
+    if (!existing) {
+      throw new Error('Catalog item not found.');
+    }
+
+    const nextStatus: CatalogApprovalStatus = decision;
+    const approvedByEmail = decision === 'approved' ? authUser?.email ?? 'admin@jahzeen.app' : undefined;
+    const approvedAtLabel = decision === 'approved' ? nowLabel() : undefined;
+
+    const nextItem: CatalogItem = {
+      ...existing,
+      approvalStatus: nextStatus,
+      isPublished: decision === 'approved',
+      approvedAtLabel,
+      approvedByEmail,
+    };
+
+    setCatalogItems((current) => current.map((entry) => (entry.id === itemId ? nextItem : entry)));
+
+    await safeUpdate('CatalogItem', {
+      ...nextItem,
+      tags: JSON.stringify(nextItem.tags),
+    });
+
+    await Promise.all([
+      createNotification({
+        recipientRole: 'company',
+        companyId: existing.companyId,
+        title: `${existing.title} ${decision === 'approved' ? 'approved' : 'rejected'}`,
+        body:
+          decision === 'approved'
+            ? 'Your listing is now live for customers.'
+            : 'Your listing was rejected. Update it and submit again.',
+        kind: 'system',
+        destinationTab: 'catalog',
+      }),
+      ...(decision === 'approved'
+        ? [
+            createNotification({
+              recipientRole: 'customer',
+              title: `${existing.title} is now live`,
+              body: `${existing.companyName} published a new ${existing.kind}.`,
+              kind: 'system',
+              destinationTab: 'explore',
+            }),
+          ]
+        : []),
+    ]);
+
+    await createAuditEvent({
+      entityType: 'catalogItem',
+      entityId: existing.id,
+      companyId: existing.companyId,
+      action: decision === 'approved' ? 'approveCatalogItem' : 'rejectCatalogItem',
+      status: decision === 'approved' ? 'success' : 'warning',
+      summary:
+        decision === 'approved'
+          ? `${existing.title} was approved and is now live.`
+          : `${existing.title} was rejected and stays hidden from customers.`,
+      metadata: [existing.kind, existing.category, decision],
+    });
   }
 
   async function deleteCatalogItem(itemId: string) {
@@ -1203,7 +1387,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, signInChallenge, activeRole, profile, addresses, users, companies, appCategorySettings, invitations, catalogItems, offerPromotions, notifications, auditEvents, bookings, availabilitySlots, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, signInWithEmail, completeNewPassword, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, deleteCatalogItem, saveOfferPromotion, deleteOfferPromotion, markNotificationRead, saveLoyaltyProgram, saveCategorySetting, saveAvailabilitySlot, deleteAvailabilitySlot, placeBooking, changeBookingStatus, submitRating }}>
+    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, signInChallenge, activeRole, profile, addresses, users, companies, appCategorySettings, invitations, catalogItems, offerPromotions, notifications, auditEvents, bookings, availabilitySlots, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, signInWithEmail, completeNewPassword, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, reviewCatalogItem, deleteCatalogItem, saveOfferPromotion, deleteOfferPromotion, markNotificationRead, saveLoyaltyProgram, saveCategorySetting, saveAvailabilitySlot, deleteAvailabilitySlot, placeBooking, changeBookingStatus, submitRating }}>
       {children}
     </AppContext.Provider>
   );

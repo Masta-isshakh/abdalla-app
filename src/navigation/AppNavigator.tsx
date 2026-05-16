@@ -195,6 +195,7 @@ function WorkspaceScreen() {
     revokeInvitation,
     saveAddress,
     saveCatalogItem,
+    reviewCatalogItem,
     saveLoyaltyProgram,
     saveCategorySetting,
     saveAvailabilitySlot,
@@ -1424,6 +1425,7 @@ function WorkspaceScreen() {
             inviteSubmitting={inviteSubmitting}
             onInvite={handleInvitationSend}
             onSaveCategorySetting={handleCategoryLaunchChange}
+            onReviewCatalogItem={reviewCatalogItem}
             onResendInvitation={handleInvitationResend}
             onRevokeInvitation={handleInvitationRevoke}
             onOpenNotification={handleNotificationOpen}
@@ -1538,6 +1540,7 @@ type AdminWorkspaceProps = {
   inviteSubmitting: boolean;
   onInvite: () => void;
   onSaveCategorySetting: (category: string, isComingSoon: boolean) => void;
+  onReviewCatalogItem: (itemId: string, decision: 'approved' | 'rejected') => Promise<void>;
   onResendInvitation: (invitation: CompanyInvitation) => void;
   onRevokeInvitation: (invitation: CompanyInvitation) => void;
   onOpenNotification: (notification: AppNotification) => void;
@@ -1576,6 +1579,7 @@ function AdminWorkspace({
   inviteSubmitting,
   onInvite,
   onSaveCategorySetting,
+  onReviewCatalogItem,
   onResendInvitation,
   onRevokeInvitation,
   onOpenNotification,
@@ -1585,7 +1589,7 @@ function AdminWorkspace({
   const [adminTrendWindow, setAdminTrendWindow] = useState<7 | 30 | 90>(30);
   const [adminTrendFocus, setAdminTrendFocus] = useState<'activity' | 'bookings' | 'revenue'>('activity');
   const [companyStatusFilter, setCompanyStatusFilter] = useState<'all' | 'active' | 'paused' | 'attention'>('all');
-  const [publishingFilter, setPublishingFilter] = useState<'all' | 'service' | 'product' | 'attention'>('all');
+  const [publishingFilter, setPublishingFilter] = useState<'all' | 'service' | 'product' | 'pending' | 'approved' | 'attention'>('all');
   const [bookingFilter, setBookingFilter] = useState<'all' | 'pending' | 'active' | 'completed' | 'attention'>('all');
   const [companySort, setCompanySort] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'risk', direction: 'desc' });
   const [invitationSort, setInvitationSort] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'delivery', direction: 'desc' });
@@ -1598,7 +1602,8 @@ function AdminWorkspace({
   const pausedCompanies = companies.filter((entry) => !entry.isActive);
   const recentBookings = bookings.slice(0, 4);
   const livePromotions = offerPromotions.filter((promotion) => promotion.isActive).length;
-  const publishedCatalogCount = catalogItems.filter((item) => item.isPublished).length;
+  const publishedCatalogCount = catalogItems.filter((item) => item.approvalStatus === 'approved').length;
+  const pendingCatalogApprovals = catalogItems.filter((item) => item.approvalStatus === 'pending').length;
   const grossMerchandiseValue = bookings.reduce((total, booking) => total + booking.total, 0);
   const completedBookings = bookings.filter((booking) => booking.status === 'completed').length;
   const averageAdminRating = averageScore(ratings);
@@ -1631,6 +1636,8 @@ function AdminWorkspace({
     const catalogRisk = getCatalogRisk(item, company?.isActive ?? true);
     if (publishingFilter === 'service') return item.kind === 'service';
     if (publishingFilter === 'product') return item.kind === 'product';
+    if (publishingFilter === 'pending') return item.approvalStatus === 'pending';
+    if (publishingFilter === 'approved') return item.approvalStatus === 'approved';
     if (publishingFilter === 'attention') return catalogRisk.tone === 'warning' || catalogRisk.tone === 'error';
     return true;
   });
@@ -1710,6 +1717,7 @@ function AdminWorkspace({
 
             <View style={styles.workspaceShowcaseBadgeRow}>
               <ShowcaseBadge label="Pending invites" value={String(pendingInvitations.length)} />
+              <ShowcaseBadge label="Pending approvals" value={String(pendingCatalogApprovals)} />
               <ShowcaseBadge label="Paused companies" value={String(pausedCompanies.length)} />
               <ShowcaseBadge label="Unread alerts" value={String(unreadNotifications.length)} />
               <ShowcaseBadge label="Live promotions" value={String(livePromotions)} />
@@ -1742,7 +1750,8 @@ function AdminWorkspace({
               <MetricCard key={metric.label} label={metric.label} value={metric.value} />
             ))}
             <MetricCard label="Catalog live" value={String(publishedCatalogCount)} />
-            <MetricCard label="Action needed" value={String(pendingInvitations.length + pausedCompanies.length)} />
+            <MetricCard label="Awaiting approval" value={String(pendingCatalogApprovals)} />
+            <MetricCard label="Action needed" value={String(pendingInvitations.length + pausedCompanies.length + pendingCatalogApprovals)} />
             <MetricCard label="GMV" value={formatMetricValue(grossMerchandiseValue)} />
             <MetricCard label="Completion" value={formatPercentValue(completedBookings, bookings.length)} />
             <MetricCard label="Avg rating" value={averageAdminRating ? averageAdminRating.toFixed(1) : '0.0'} />
@@ -1960,9 +1969,11 @@ function AdminWorkspace({
       {tab === 'publishing' ? (
         <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
           <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
-            <SectionCard title="Published by companies" subtitle="Admins can inspect all products and services companies have pushed live to customers.">
+            <SectionCard title="Publishing approvals" subtitle="Company submissions stay hidden from customers until an admin approves them.">
               <View style={styles.filterChipRow}>
                 <ChoiceChip label="All" selected={publishingFilter === 'all'} onPress={() => setPublishingFilter('all')} />
+                <ChoiceChip label="Pending" selected={publishingFilter === 'pending'} onPress={() => setPublishingFilter('pending')} />
+                <ChoiceChip label="Approved" selected={publishingFilter === 'approved'} onPress={() => setPublishingFilter('approved')} />
                 <ChoiceChip label="Service" selected={publishingFilter === 'service'} onPress={() => setPublishingFilter('service')} />
                 <ChoiceChip label="Product" selected={publishingFilter === 'product'} onPress={() => setPublishingFilter('product')} />
                 <ChoiceChip label="Attention" selected={publishingFilter === 'attention'} onPress={() => setPublishingFilter('attention')} />
@@ -1975,8 +1986,10 @@ function AdminWorkspace({
                     <OperationalStatusRow title={`${item.title} risk`} detail={risk.detail} statusLabel={risk.label} tone={risk.tone} />
                     <CatalogCard
                       item={item}
-                      actionLabel="Open company"
-                      onAction={() => onSelectCompany(item.companyId)}
+                      actionLabel={item.approvalStatus === 'pending' ? 'Approve' : 'Open company'}
+                      onAction={item.approvalStatus === 'pending' ? () => onReviewCatalogItem(item.id, 'approved') : () => onSelectCompany(item.companyId)}
+                      secondaryActionLabel={item.approvalStatus === 'pending' ? 'Reject' : undefined}
+                      onSecondaryAction={item.approvalStatus === 'pending' ? () => onReviewCatalogItem(item.id, 'rejected') : undefined}
                     />
                   </View>
                 );
@@ -2325,7 +2338,7 @@ function CompanyWorkspace({
   const ultraWide = useWindowDimensions().width >= 1360;
   const [companyTrendWindow, setCompanyTrendWindow] = useState<7 | 30 | 90>(30);
   const [companyTrendFocus, setCompanyTrendFocus] = useState<'activity' | 'bookings' | 'publishing'>('activity');
-  const [catalogFilter, setCatalogFilter] = useState<'all' | 'published' | 'draft' | 'attention'>('all');
+  const [catalogFilter, setCatalogFilter] = useState<'all' | 'approved' | 'pending' | 'draft' | 'attention'>('all');
   const [offerFilter, setOfferFilter] = useState<'all' | 'active' | 'paused' | 'attention'>('all');
   const [companyBookingFilter, setCompanyBookingFilter] = useState<'all' | 'pending' | 'active' | 'completed' | 'attention'>('all');
   const [companyCatalogSort, setCompanyCatalogSort] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'risk', direction: 'desc' });
@@ -2334,8 +2347,9 @@ function CompanyWorkspace({
   const unreadNotifications = notifications.filter((entry) => !entry.isRead);
   const pendingBookings = companyBookings.filter((entry) => entry.status === 'pending');
   const activePromotions = companyPromotions.filter((entry) => entry.isActive);
-  const publishedItems = companyItems.filter((entry) => entry.isPublished).length;
-  const draftItems = companyItems.length - publishedItems;
+  const approvedItems = companyItems.filter((entry) => entry.approvalStatus === 'approved').length;
+  const pendingItems = companyItems.filter((entry) => entry.approvalStatus === 'pending').length;
+  const draftItems = companyItems.filter((entry) => entry.approvalStatus === 'draft').length;
   const currentAccent = currentCompany?.accentColor?.trim() || colors.primary;
   const companyRevenue = companyBookings.reduce((total, booking) => total + booking.total, 0);
   const completedBookings = companyBookings.filter((booking) => booking.status === 'completed').length;
@@ -2364,8 +2378,8 @@ function CompanyWorkspace({
       id: 'catalog-risk',
       title: 'Catalog gaps',
       detail: `${companyItems.filter((item) => !item.imageUrl).length} listings have no image and ${draftItems} remain in draft.`,
-      statusLabel: companyItems.length ? `${formatPercentValue(publishedItems, companyItems.length)} live` : 'No listings yet',
-      tone: companyItems.filter((item) => !item.imageUrl).length || draftItems > publishedItems ? 'warning' as const : 'info' as const,
+      statusLabel: companyItems.length ? `${formatPercentValue(approvedItems, companyItems.length)} live` : 'No listings yet',
+      tone: companyItems.filter((item) => !item.imageUrl).length || (draftItems + pendingItems) > approvedItems ? 'warning' as const : 'info' as const,
     },
     {
       id: 'offer-risk',
@@ -2376,12 +2390,16 @@ function CompanyWorkspace({
     },
   ];
   const filteredCompanyItems = useMemo(() => {
-    if (catalogFilter === 'published') {
-      return companyItems.filter((entry) => entry.isPublished);
+    if (catalogFilter === 'approved') {
+      return companyItems.filter((entry) => entry.approvalStatus === 'approved');
+    }
+
+    if (catalogFilter === 'pending') {
+      return companyItems.filter((entry) => entry.approvalStatus === 'pending');
     }
 
     if (catalogFilter === 'draft') {
-      return companyItems.filter((entry) => !entry.isPublished);
+      return companyItems.filter((entry) => entry.approvalStatus === 'draft' || !entry.isPublished);
     }
 
     if (catalogFilter === 'attention') {
@@ -2412,7 +2430,7 @@ function CompanyWorkspace({
     title: (item) => item.title,
     kind: (item) => item.kind,
     price: (item) => item.price,
-    status: (item) => (item.isPublished ? 1 : 0),
+    status: (item) => (item.approvalStatus === 'approved' ? 3 : item.approvalStatus === 'pending' ? 2 : item.approvalStatus === 'rejected' ? 1 : 0),
     risk: (item) => severityWeight(getCatalogRisk(item, true).tone),
   });
   const sortedCompanyPromotions = sortRows(filteredPromotions, companyOfferSort, {
@@ -2465,7 +2483,7 @@ function CompanyWorkspace({
 
             <View style={styles.workspaceShowcaseBadgeRow}>
               <ShowcaseBadge label="Pending bookings" value={String(pendingBookings.length)} />
-              <ShowcaseBadge label="Published" value={String(publishedItems)} />
+              <ShowcaseBadge label="Approved live" value={String(approvedItems)} />
               <ShowcaseBadge label="Unread alerts" value={String(unreadNotifications.length)} />
               <ShowcaseBadge label="Loyalty" value={currentProgram?.isActive ? 'Live' : 'Paused'} />
             </View>
@@ -2494,7 +2512,7 @@ function CompanyWorkspace({
 
           <View style={[styles.metricGrid, wide && styles.metricGridWide]}>
             <MetricCard label="Catalog items" value={String(companyItems.length)} />
-            <MetricCard label="Published" value={String(publishedItems)} />
+            <MetricCard label="Approved live" value={String(approvedItems)} />
             <MetricCard label="Bookings" value={String(companyBookings.length)} />
             <MetricCard label="Ratings" value={String(ratings.filter((entry) => entry.companyId === currentCompany?.id).length)} />
             <MetricCard label="Live offers" value={String(activePromotions.length)} />
@@ -2510,7 +2528,7 @@ function CompanyWorkspace({
                 <View style={styles.statusRail}>
                   <OperationalStatusRow title="Revenue lane" detail={`${formatMetricValue(companyRevenue)} from ${companyBookings.length} bookings`} statusLabel={companyBookings.length ? `${Math.round(companyRevenue / companyBookings.length)} avg order` : 'No orders yet'} tone={companyRevenue > 0 ? 'success' : 'info'} />
                   <OperationalStatusRow title="Fulfilment lane" detail={`${pendingBookings.length} pending bookings, ${completedBookings} completed, ${unreadNotifications.length} unread alerts`} statusLabel={`${formatPercentValue(completedBookings, companyBookings.length)} delivered`} tone={pendingBookings.length > 2 ? 'warning' : 'success'} />
-                  <OperationalStatusRow title="Publishing lane" detail={`${publishedItems} published items, ${draftItems} drafts, ${activePromotions.length} live offers`} statusLabel={currentProgram?.isActive ? 'Loyalty live' : 'Loyalty paused'} tone={draftItems > publishedItems && companyItems.length > 0 ? 'warning' : 'info'} />
+                  <OperationalStatusRow title="Publishing lane" detail={`${approvedItems} approved items, ${pendingItems} pending approval, ${draftItems} drafts, ${activePromotions.length} live offers`} statusLabel={currentProgram?.isActive ? 'Loyalty live' : 'Loyalty paused'} tone={(draftItems + pendingItems) > approvedItems && companyItems.length > 0 ? 'warning' : 'info'} />
                 </View>
                 <View style={styles.rowGap}>
                   <SecondaryButton label="Catalog" onPress={() => onTabChange('catalog')} />
@@ -2547,7 +2565,7 @@ function CompanyWorkspace({
             <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
               <SectionCard title="Operational standards" subtitle="These status checks make the workspace feel closer to a production SaaS console than a simple CRUD screen.">
                 <OperationalStatusRow title="Response queue" detail={`${pendingBookings.length} bookings are still waiting for first action from the company team.`} statusLabel={pendingBookings.length ? 'Needs attention' : 'Under control'} tone={pendingBookings.length > 2 ? 'warning' : 'success'} />
-                <OperationalStatusRow title="Catalog readiness" detail={`${publishedItems} items are live and ${draftItems} remain in draft.`} statusLabel={companyItems.length ? formatPercentValue(publishedItems, companyItems.length) : '0% live'} tone={publishedItems === 0 && companyItems.length > 0 ? 'warning' : 'info'} />
+                <OperationalStatusRow title="Catalog readiness" detail={`${approvedItems} items are live, ${pendingItems} are waiting approval, and ${draftItems} remain in draft.`} statusLabel={companyItems.length ? formatPercentValue(approvedItems, companyItems.length) : '0% live'} tone={approvedItems === 0 && companyItems.length > 0 ? 'warning' : 'info'} />
                 <OperationalStatusRow title="Customer trust" detail={`${companyRatings.length} reviews collected and ${activePromotions.length} active offers supporting acquisition.`} statusLabel={averageCompanyRating ? `${averageCompanyRating.toFixed(1)} / 5 rating` : 'No ratings yet'} tone={averageCompanyRating >= 4 ? 'success' : averageCompanyRating >= 3 ? 'info' : 'warning'} />
                 <OperationalStatusRow title="Loyalty readiness" detail={currentProgram ? `${currentProgram.title} rewards customers with ${currentProgram.rewardText || 'configured benefits'}.` : 'No loyalty program is configured for this company yet.'} statusLabel={currentProgram?.isActive ? 'Program active' : 'Program paused'} tone={currentProgram?.isActive ? 'success' : 'warning'} />
                 {companyRisks.map((risk) => (
@@ -2587,7 +2605,7 @@ function CompanyWorkspace({
               <SectionCard title="Catalog studio" subtitle="Build listings with a clearer publishing flow, stronger visibility states, and a more premium editing surface.">
                 <View style={styles.overviewBadgeRow}>
                   <CompactBadge label="Items" value={String(companyItems.length)} />
-                  <CompactBadge label="Published" value={String(publishedItems)} />
+                  <CompactBadge label="Approved" value={String(approvedItems)} />
                   <CompactBadge label="Draft focus" value={selectedCatalogItem ? 'Editing' : 'New'} />
                 </View>
               </SectionCard>
@@ -2626,10 +2644,10 @@ function CompanyWorkspace({
                 <View style={styles.toggleRow}>
                   <ChoiceChip label="Service" selected={catalogForm.kind === 'service'} onPress={() => onCatalogFormChange((current) => ({ ...current, kind: 'service' }))} />
                   <ChoiceChip label="Product" selected={catalogForm.kind === 'product'} onPress={() => onCatalogFormChange((current) => ({ ...current, kind: 'product' }))} />
-                  <ChoiceChip label="Published" selected={catalogForm.isPublished} onPress={() => onCatalogFormChange((current) => ({ ...current, isPublished: !current.isPublished }))} />
+                  <ChoiceChip label="Submit for approval" selected={catalogForm.isPublished} onPress={() => onCatalogFormChange((current) => ({ ...current, isPublished: !current.isPublished }))} />
                 </View>
-                <SecondaryButton label={selectedCatalogItem ? 'Save item changes' : 'Publish catalog item'} tone="contrast" onPress={onSaveCatalog} loading={catalogSubmitting} disabled={catalogSubmitting} />
-                <Text style={styles.catalogSubmitHint}>{catalogForm.isPublished ? 'Published items appear immediately in the customer marketplace for active companies.' : 'Draft items stay private until you switch them to published.'}</Text>
+                <SecondaryButton label={selectedCatalogItem ? 'Save item changes' : 'Submit item'} tone="contrast" onPress={onSaveCatalog} loading={catalogSubmitting} disabled={catalogSubmitting} />
+                <Text style={styles.catalogSubmitHint}>{catalogForm.isPublished ? 'Submitted items stay hidden until admin approval.' : 'Draft items stay private until you submit them for approval.'}</Text>
                 {selectedCatalogItem ? (
                   <View style={styles.rowGap}>
                     <SecondaryButton label="Cancel editing" onPress={onResetCatalog} />
@@ -2643,7 +2661,8 @@ function CompanyWorkspace({
               <SectionCard title="Current catalog" subtitle="Only this company's items appear in this operational view.">
                 <View style={styles.catalogFilterRow}>
                   <CatalogFilterChip label="All" count={companyItems.length} selected={catalogFilter === 'all'} onPress={() => setCatalogFilter('all')} />
-                  <CatalogFilterChip label="Published" count={publishedItems} selected={catalogFilter === 'published'} onPress={() => setCatalogFilter('published')} />
+                  <CatalogFilterChip label="Approved" count={approvedItems} selected={catalogFilter === 'approved'} onPress={() => setCatalogFilter('approved')} />
+                  <CatalogFilterChip label="Pending" count={pendingItems} selected={catalogFilter === 'pending'} onPress={() => setCatalogFilter('pending')} />
                   <CatalogFilterChip label="Draft" count={draftItems} selected={catalogFilter === 'draft'} onPress={() => setCatalogFilter('draft')} />
                   <CatalogFilterChip label="Attention" count={companyItems.filter((item) => {
                     const risk = getCatalogRisk(item, true);
@@ -2657,7 +2676,7 @@ function CompanyWorkspace({
                       { key: 'title', label: 'Listing', sortable: true, render: (item) => item.title },
                       { key: 'kind', label: 'Kind', sortable: true, render: (item) => item.kind === 'service' ? 'Service' : 'Product' },
                       { key: 'price', label: 'Price', sortable: true, render: (item) => `QAR ${item.price.toFixed(0)}` },
-                      { key: 'status', label: 'State', sortable: true, render: (item) => <TableStatusPill label={item.isPublished ? 'Published' : 'Draft'} tone={item.isPublished ? 'success' : 'info'} /> },
+                      { key: 'status', label: 'State', sortable: true, render: (item) => <TableStatusPill label={getCatalogApprovalLabel(item)} tone={getCatalogApprovalTone(item)} /> },
                       { key: 'risk', label: 'Risk', sortable: true, render: (item) => {
                         const risk = getCatalogRisk(item, true);
                         return <TableStatusPill label={risk.label} tone={risk.tone} />;
@@ -2689,7 +2708,7 @@ function CompanyWorkspace({
                       />
                     </View>
                   );
-                }) : <EmptyState title="No items in this filter" body={catalogFilter === 'draft' ? 'Every current listing is already published.' : catalogFilter === 'published' ? 'Publish a listing to make it visible here.' : catalogFilter === 'attention' ? 'No catalog risks are currently flagged.' : 'The marketplace remains empty until this company publishes something here.'} />}
+                }) : <EmptyState title="No items in this filter" body={catalogFilter === 'draft' ? 'Every current listing is already submitted or approved.' : catalogFilter === 'approved' ? 'No approved listings yet.' : catalogFilter === 'pending' ? 'No items are waiting for admin review.' : catalogFilter === 'attention' ? 'No catalog risks are currently flagged.' : 'The marketplace remains empty until this company submits something here.'} />}
               </SectionCard>
             </View>
           </View>
@@ -2698,7 +2717,7 @@ function CompanyWorkspace({
             <SectionCard title="Catalog studio" subtitle="Build listings with a clearer publishing flow, stronger visibility states, and a more premium editing surface.">
               <View style={styles.overviewBadgeRow}>
                 <CompactBadge label="Items" value={String(companyItems.length)} />
-                <CompactBadge label="Published" value={String(publishedItems)} />
+                <CompactBadge label="Approved" value={String(approvedItems)} />
                 <CompactBadge label="Draft focus" value={selectedCatalogItem ? 'Editing' : 'New'} />
               </View>
             </SectionCard>
@@ -2737,10 +2756,10 @@ function CompanyWorkspace({
               <View style={styles.toggleRow}>
                 <ChoiceChip label="Service" selected={catalogForm.kind === 'service'} onPress={() => onCatalogFormChange((current) => ({ ...current, kind: 'service' }))} />
                 <ChoiceChip label="Product" selected={catalogForm.kind === 'product'} onPress={() => onCatalogFormChange((current) => ({ ...current, kind: 'product' }))} />
-                <ChoiceChip label="Published" selected={catalogForm.isPublished} onPress={() => onCatalogFormChange((current) => ({ ...current, isPublished: !current.isPublished }))} />
+                <ChoiceChip label="Submit for approval" selected={catalogForm.isPublished} onPress={() => onCatalogFormChange((current) => ({ ...current, isPublished: !current.isPublished }))} />
               </View>
-              <SecondaryButton label={selectedCatalogItem ? 'Save item changes' : 'Publish catalog item'} tone="contrast" onPress={onSaveCatalog} loading={catalogSubmitting} disabled={catalogSubmitting} />
-              <Text style={styles.catalogSubmitHint}>{catalogForm.isPublished ? 'Published items appear immediately in the customer marketplace for active companies.' : 'Draft items stay private until you switch them to published.'}</Text>
+              <SecondaryButton label={selectedCatalogItem ? 'Save item changes' : 'Submit item'} tone="contrast" onPress={onSaveCatalog} loading={catalogSubmitting} disabled={catalogSubmitting} />
+              <Text style={styles.catalogSubmitHint}>{catalogForm.isPublished ? 'Submitted items stay hidden until admin approval.' : 'Draft items stay private until you submit them for approval.'}</Text>
               {selectedCatalogItem ? (
                 <View style={styles.rowGap}>
                   <SecondaryButton label="Cancel editing" onPress={onResetCatalog} />
@@ -2752,7 +2771,8 @@ function CompanyWorkspace({
             <SectionCard title="Current catalog" subtitle="Only this company's items appear in this operational view.">
               <View style={styles.catalogFilterRow}>
                 <CatalogFilterChip label="All" count={companyItems.length} selected={catalogFilter === 'all'} onPress={() => setCatalogFilter('all')} />
-                <CatalogFilterChip label="Published" count={publishedItems} selected={catalogFilter === 'published'} onPress={() => setCatalogFilter('published')} />
+                <CatalogFilterChip label="Approved" count={approvedItems} selected={catalogFilter === 'approved'} onPress={() => setCatalogFilter('approved')} />
+                <CatalogFilterChip label="Pending" count={pendingItems} selected={catalogFilter === 'pending'} onPress={() => setCatalogFilter('pending')} />
                 <CatalogFilterChip label="Draft" count={draftItems} selected={catalogFilter === 'draft'} onPress={() => setCatalogFilter('draft')} />
                 <CatalogFilterChip label="Attention" count={companyItems.filter((item) => {
                   const risk = getCatalogRisk(item, true);
@@ -2773,7 +2793,7 @@ function CompanyWorkspace({
                     />
                   </View>
                 );
-              }) : <EmptyState title="No items in this filter" body={catalogFilter === 'draft' ? 'Every current listing is already published.' : catalogFilter === 'published' ? 'Publish a listing to make it visible here.' : catalogFilter === 'attention' ? 'No catalog risks are currently flagged.' : 'The marketplace remains empty until this company publishes something here.'} />}
+              }) : <EmptyState title="No items in this filter" body={catalogFilter === 'draft' ? 'Every current listing is already submitted or approved.' : catalogFilter === 'approved' ? 'No approved listings yet.' : catalogFilter === 'pending' ? 'No items are waiting for admin review.' : catalogFilter === 'attention' ? 'No catalog risks are currently flagged.' : 'The marketplace remains empty until this company submits something here.'} />}
             </SectionCard>
           </View>
         )
@@ -2786,7 +2806,7 @@ function CompanyWorkspace({
               <SectionCard title={selectedPromotion ? 'Edit promotion' : 'Create promotion'} subtitle="Promotions are separate records linked to published catalog items, so offers do not depend on catalog flags anymore.">
                 <Text style={styles.fieldLabel}>Linked item</Text>
                 <View style={styles.toggleRow}>
-                  {companyItems.filter((item) => item.isPublished).map((item) => (
+                  {companyItems.filter((item) => item.approvalStatus === 'approved').map((item) => (
                     <ChoiceChip key={item.id} label={item.title} selected={offerForm.catalogItemId === item.id} onPress={() => onOfferFormChange((current) => ({ ...current, catalogItemId: item.id }))} />
                   ))}
                 </View>
@@ -2881,7 +2901,7 @@ function CompanyWorkspace({
             <SectionCard title={selectedPromotion ? 'Edit promotion' : 'Create promotion'} subtitle="Promotions are separate records linked to published catalog items, so offers do not depend on catalog flags anymore.">
               <Text style={styles.fieldLabel}>Linked item</Text>
               <View style={styles.toggleRow}>
-                {companyItems.filter((item) => item.isPublished).map((item) => (
+                {companyItems.filter((item) => item.approvalStatus === 'approved').map((item) => (
                   <ChoiceChip key={item.id} label={item.title} selected={offerForm.catalogItemId === item.id} onPress={() => onOfferFormChange((current) => ({ ...current, catalogItemId: item.id }))} />
                 ))}
               </View>
@@ -4387,6 +4407,20 @@ function summarizeTrendPoints(points: Array<{ label: string; value: number }>) {
   return { average, peak, latest };
 }
 
+function getCatalogApprovalLabel(item: CatalogItem) {
+  if (item.approvalStatus === 'approved') return 'Approved live';
+  if (item.approvalStatus === 'pending') return 'Pending approval';
+  if (item.approvalStatus === 'rejected') return 'Rejected';
+  return 'Draft';
+}
+
+function getCatalogApprovalTone(item: CatalogItem): 'success' | 'warning' | 'error' | 'info' {
+  if (item.approvalStatus === 'approved') return 'success';
+  if (item.approvalStatus === 'pending') return 'warning';
+  if (item.approvalStatus === 'rejected') return 'error';
+  return 'info';
+}
+
 function getCatalogRisk(item: CatalogItem, companyIsActive: boolean) {
   if (!companyIsActive) {
     return { tone: 'error' as const, label: 'Company paused', detail: 'This listing belongs to a paused company, so storefront visibility is at risk.' };
@@ -4394,10 +4428,16 @@ function getCatalogRisk(item: CatalogItem, companyIsActive: boolean) {
   if (!item.imageUrl) {
     return { tone: 'warning' as const, label: 'Image missing', detail: 'This listing is missing a storefront image and will underperform visually.' };
   }
-  if (!item.isPublished) {
+  if (item.approvalStatus === 'pending') {
+    return { tone: 'warning' as const, label: 'Awaiting approval', detail: 'This listing is waiting for admin approval before it can appear to customers.' };
+  }
+  if (item.approvalStatus === 'rejected') {
+    return { tone: 'error' as const, label: 'Rejected', detail: 'This listing was rejected. Update it and resubmit for approval.' };
+  }
+  if (!item.isPublished || item.approvalStatus === 'draft') {
     return { tone: 'info' as const, label: 'Draft', detail: 'This listing is still private and needs publishing before customers can discover it.' };
   }
-  return { tone: 'success' as const, label: 'Ready', detail: 'This listing is visually complete and live in the marketplace.' };
+  return { tone: 'success' as const, label: 'Approved live', detail: 'This listing is approved and visible in the marketplace.' };
 }
 
 function getPromotionRisk(promotion: OfferPromotion) {
@@ -4452,7 +4492,7 @@ function buildCompanyOperationalSnapshot(
   const companyBookings = bookings.filter((entry) => entry.companyId === company.id);
   const pendingBookings = companyBookings.filter((entry) => entry.status === 'pending').length;
   const stalePendingBookings = companyBookings.filter((entry) => getBookingRisk(entry).label === 'Stale pending').length;
-  const publishedItems = catalogItems.filter((entry) => entry.companyId === company.id && entry.isPublished).length;
+  const publishedItems = catalogItems.filter((entry) => entry.companyId === company.id && entry.approvalStatus === 'approved').length;
   const activePromotions = offerPromotions.filter((entry) => entry.companyId === company.id && entry.isActive).length;
   const expiringPromotions = offerPromotions.filter((entry) => entry.companyId === company.id).filter((entry) => getPromotionRisk(entry).label === 'Ending soon' || getPromotionRisk(entry).label === 'Expired live offer').length;
   const unreadAlerts = notifications.filter((entry) => entry.companyId === company.id && !entry.isRead).length;
@@ -5603,7 +5643,7 @@ function CatalogCard({ item, actionLabel, onAction, secondaryActionLabel, onSeco
     <View style={styles.infoCard}>
       <View style={styles.infoBodyGrow}>
         <Text style={styles.infoTitle}>{item.title}</Text>
-        <Text style={styles.infoSubtitle}>{item.companyName} · {item.category} · QAR {item.price.toFixed(0)} · {item.isPublished ? 'Published' : 'Draft'}</Text>
+        <Text style={styles.infoSubtitle}>{item.companyName} · {item.category} · QAR {item.price.toFixed(0)} · {getCatalogApprovalLabel(item)}</Text>
         <Text style={styles.helperText}>{item.summary}</Text>
       </View>
       <View style={styles.inlineActionGroup}>
@@ -5619,11 +5659,21 @@ function CatalogCard({ item, actionLabel, onAction, secondaryActionLabel, onSeco
 }
 
 function CompanyCatalogCard({ item, index, onAction, onSecondaryAction }: { item: CatalogItem; index: number; onAction?: () => void; onSecondaryAction?: () => void }) {
-  const stateLabel = item.isPublished ? 'Live in marketplace' : 'Draft in studio';
-  const stateHint = item.isPublished
+  const stateLabel = getCatalogApprovalLabel(item);
+  const stateHint = item.approvalStatus === 'approved'
     ? 'Customers can discover and book this listing right now.'
-    : 'Complete the details and publish when the listing is ready.';
-  const gradientColors: [string, string, string] = item.isPublished ? ['#D9EEFF', '#EEF8FF', '#FFFFFF'] : ['#FFF0DD', '#FFF7ED', '#FFFFFF'];
+    : item.approvalStatus === 'pending'
+      ? 'Waiting for admin approval before customer visibility.'
+      : item.approvalStatus === 'rejected'
+        ? 'Update details and submit again for another review.'
+        : 'Complete the details and submit when the listing is ready.';
+  const gradientColors: [string, string, string] = item.approvalStatus === 'approved'
+    ? ['#D9EEFF', '#EEF8FF', '#FFFFFF']
+    : item.approvalStatus === 'pending'
+      ? ['#FFF4DD', '#FFF8ED', '#FFFFFF']
+      : item.approvalStatus === 'rejected'
+        ? ['#FFE2DD', '#FFF1ED', '#FFFFFF']
+        : ['#E9EFEA', '#F6FAF7', '#FFFFFF'];
   const entrance = useRef(new Animated.Value(0)).current;
   const monogram = (item.companyName || item.title || 'J').trim().charAt(0).toUpperCase();
   const illustrationIcon = item.kind === 'service' ? 'sparkles-outline' : 'cube-outline';
