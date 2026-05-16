@@ -988,7 +988,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     await Promise.all([
-      createNotification({ recipientRole: 'admin', title: `Invitation sent to ${invitation.email}`, body: `${invitation.companyName} is waiting for company owner activation.`, kind: 'invitation', destinationTab: 'settings' }),
+      createNotification({ recipientRole: 'admin', title: `Invitation sent to ${invitation.email}`, body: `${invitation.companyName} is waiting for company owner activation.`, kind: 'invitation', destinationTab: 'companies' }),
       createNotification({ recipientRole: 'company', recipientEmail: invitation.email, companyId: invitation.companyId, title: `You were invited to ${invitation.companyName}`, body: 'Use the email invitation from Cognito to sign in with your temporary password and create a new one.', kind: 'invitation', destinationTab: 'overview' }),
     ]);
   }
@@ -1012,7 +1012,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       emailDeliveryError: undefined,
     });
     await dispatchInvitationEmail({ ...invitation, emailDeliveryStatus: 'pending', emailDeliveryError: undefined });
-    await createNotification({ recipientRole: 'admin', title: `Invitation resent to ${invitation.email}`, body: `${invitation.companyName} invitation delivery was retried.`, kind: 'invitation', destinationTab: 'settings' });
+    await createNotification({ recipientRole: 'admin', title: `Invitation resent to ${invitation.email}`, body: `${invitation.companyName} invitation delivery was retried.`, kind: 'invitation', destinationTab: 'companies' });
     await createAuditEvent({ entityType: 'invitation', entityId: invitationId, companyId: invitation.companyId, action: 'resendInvitation', status: 'success', summary: `Invitation delivery retried for ${invitation.email}.`, metadata: [invitation.companyName] });
   }
 
@@ -1021,7 +1021,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setInvitations((current) => current.map((entry) => (entry.id === invitationId ? { ...entry, status: 'revoked' } : entry)));
     await safeUpdate('CompanyInvitation', { id: invitationId, status: 'revoked' });
     if (invitation) {
-      await createNotification({ recipientRole: 'admin', title: `Invitation revoked for ${invitation.email}`, body: `${invitation.companyName} invitation has been revoked.`, kind: 'invitation', destinationTab: 'settings' });
+      await createNotification({ recipientRole: 'admin', title: `Invitation revoked for ${invitation.email}`, body: `${invitation.companyName} invitation has been revoked.`, kind: 'invitation', destinationTab: 'companies' });
       await createAuditEvent({ entityType: 'invitation', entityId: invitationId, companyId: invitation.companyId, action: 'revokeInvitation', status: 'warning', summary: `Invitation revoked for ${invitation.email}.`, metadata: [invitation.companyName] });
     }
   }

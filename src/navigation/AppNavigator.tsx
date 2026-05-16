@@ -10,6 +10,7 @@ import {
   Alert,
   Animated,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -141,6 +142,7 @@ const HOME_CAROUSEL_IMAGES = [
   'https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=1400&q=80',
   'https://images.unsplash.com/photo-1449844908441-8829872d2607?auto=format&fit=crop&w=1400&q=80',
 ];
+const APP_LOGO_IMAGE = require('../../assets/icon.png');
 
 export function AppNavigator() {
   return (
@@ -213,8 +215,8 @@ function WorkspaceScreen() {
     markNotificationRead,
   } = useAppState();
 
-  const [adminTab, setAdminTab] = useState<'overview' | 'companies' | 'publishing' | 'bookings' | 'settings'>('overview');
-  const [companyTab, setCompanyTab] = useState<'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty'>('overview');
+  const [adminTab, setAdminTab] = useState<'overview' | 'companies' | 'publishing' | 'inbox' | 'bookings' | 'settings'>('overview');
+  const [companyTab, setCompanyTab] = useState<'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty' | 'requests'>('overview');
   const [customerTab, setCustomerTab] = useState<'home' | 'browse' | 'explore' | 'orders' | 'profile' | 'notifications'>('home');
   const [customerDarkMode, setCustomerDarkMode] = useState(false);
   const [customerSortMode, setCustomerSortMode] = useState<CustomerSortMode>('popular');
@@ -878,9 +880,9 @@ function WorkspaceScreen() {
       setCompanyBanner({
         tone: 'success',
         text: selectedCatalogItem
-          ? 'Catalog item updated. Customers can now see the latest version.'
+          ? 'Catalog item updated and re-submitted for admin approval.'
           : catalogForm.isPublished
-            ? 'Catalog item published and visible to customers.'
+            ? 'Catalog item submitted for admin approval. It will go live after approval.'
             : 'Catalog item saved as a draft.',
       });
       resetCatalogDrafts();
@@ -1071,15 +1073,15 @@ function WorkspaceScreen() {
     }
 
     if (activeRole === 'admin') {
-      setAdminTab((['overview', 'companies', 'publishing', 'bookings', 'settings'] as const).includes(notification.destinationTab as any)
-        ? (notification.destinationTab as 'overview' | 'companies' | 'publishing' | 'bookings' | 'settings')
+      setAdminTab((['overview', 'companies', 'publishing', 'inbox', 'bookings', 'settings'] as const).includes(notification.destinationTab as any)
+        ? (notification.destinationTab as 'overview' | 'companies' | 'publishing' | 'inbox' | 'bookings' | 'settings')
         : 'overview');
       return;
     }
 
     if (activeRole === 'company') {
-      setCompanyTab((['overview', 'catalog', 'offers', 'schedule', 'bookings', 'loyalty'] as const).includes(notification.destinationTab as any)
-        ? (notification.destinationTab as 'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty')
+      setCompanyTab((['overview', 'catalog', 'offers', 'schedule', 'bookings', 'loyalty', 'requests'] as const).includes(notification.destinationTab as any)
+        ? (notification.destinationTab as 'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty' | 'requests')
         : 'overview');
       return;
     }
@@ -1220,7 +1222,8 @@ function WorkspaceScreen() {
             </Pressable>
 
             <Pressable style={styles.customerHeaderCenteredBrand} onPress={() => setCustomerTab('home')}>
-              <Text style={[styles.customerHeaderCenteredTitle, customerDarkMode && styles.customerHeaderCenteredTitleDark]}>Abdalla</Text>
+              <Image source={APP_LOGO_IMAGE} style={styles.customerHeaderBrandLogo} resizeMode="cover" />
+              <Text style={[styles.customerHeaderCenteredTitle, customerDarkMode && styles.customerHeaderCenteredTitleDark]}>Jahzeen</Text>
             </Pressable>
 
             <View style={styles.customerHeaderActions}>
@@ -1426,6 +1429,7 @@ function WorkspaceScreen() {
             onInvite={handleInvitationSend}
             onSaveCategorySetting={handleCategoryLaunchChange}
             onReviewCatalogItem={reviewCatalogItem}
+            onReviewOfferPromotion={reviewOfferPromotion}
             onResendInvitation={handleInvitationResend}
             onRevokeInvitation={handleInvitationRevoke}
             onOpenNotification={handleNotificationOpen}
@@ -1492,8 +1496,8 @@ function WorkspaceScreen() {
 
 type AdminWorkspaceProps = {
   wide: boolean;
-  tab: 'overview' | 'companies' | 'publishing' | 'bookings' | 'settings';
-  onTabChange: (tab: 'overview' | 'companies' | 'publishing' | 'bookings' | 'settings') => void;
+  tab: 'overview' | 'companies' | 'publishing' | 'inbox' | 'bookings' | 'settings';
+  onTabChange: (tab: 'overview' | 'companies' | 'publishing' | 'inbox' | 'bookings' | 'settings') => void;
   metrics: Array<{ label: string; value: string }>;
   bookings: Booking[];
   catalogItems: CatalogItem[];
@@ -1541,6 +1545,7 @@ type AdminWorkspaceProps = {
   onInvite: () => void;
   onSaveCategorySetting: (category: string, isComingSoon: boolean) => void;
   onReviewCatalogItem: (itemId: string, decision: 'approved' | 'rejected') => Promise<void>;
+  onReviewOfferPromotion: (promotionId: string, decision: 'approved' | 'rejected') => Promise<void>;
   onResendInvitation: (invitation: CompanyInvitation) => void;
   onRevokeInvitation: (invitation: CompanyInvitation) => void;
   onOpenNotification: (notification: AppNotification) => void;
@@ -1580,6 +1585,7 @@ function AdminWorkspace({
   onInvite,
   onSaveCategorySetting,
   onReviewCatalogItem,
+  onReviewOfferPromotion,
   onResendInvitation,
   onRevokeInvitation,
   onOpenNotification,
@@ -1676,6 +1682,10 @@ function AdminWorkspace({
     status: (promotion) => (promotion.isActive ? 1 : 0),
   });
   const adminTrendDetails = getTrendInsight(adminTrendFocus, adminActivityTrend, adminBookingTrend, adminRevenueTrend, adminTrendWindow);
+  const pendingCatalogRequests = catalogItems.filter((item) => item.approvalStatus === 'pending');
+  const pendingServiceRequests = pendingCatalogRequests.filter((item) => item.kind === 'service');
+  const pendingProductRequests = pendingCatalogRequests.filter((item) => item.kind === 'product');
+  const pendingOfferRequests = offerPromotions.filter((promotion) => promotion.approvalStatus === 'pending');
   const categorySettingMap = useMemo(() => new Map(categorySettings.map((entry) => [entry.category, entry.isComingSoon])), [categorySettings]);
   const launchCategories = useMemo(
     () => APP_CATEGORY_OPTIONS.map((category) => ({
@@ -1686,6 +1696,21 @@ function AdminWorkspace({
     [categorySettingMap, companies],
   );
 
+  async function handleBulkCatalogReview(decision: 'approved' | 'rejected', kind?: 'service' | 'product') {
+    const targets = pendingCatalogRequests.filter((item) => !kind || item.kind === kind);
+    if (!targets.length) {
+      return;
+    }
+    await Promise.all(targets.map((item) => onReviewCatalogItem(item.id, decision)));
+  }
+
+  async function handleBulkOfferReview(decision: 'approved' | 'rejected') {
+    if (!pendingOfferRequests.length) {
+      return;
+    }
+    await Promise.all(pendingOfferRequests.map((promotion) => onReviewOfferPromotion(promotion.id, decision)));
+  }
+
   return (
     <>
       <SegmentControl
@@ -1693,11 +1718,12 @@ function AdminWorkspace({
           { key: 'overview', label: 'Overview' },
           { key: 'companies', label: 'Companies' },
           { key: 'publishing', label: 'Publishing' },
+          { key: 'inbox', label: 'Inbox' },
           { key: 'bookings', label: 'Bookings' },
           { key: 'settings', label: 'Settings' },
         ]}
         selectedKey={tab}
-        onChange={(value) => onTabChange(value as 'overview' | 'companies' | 'publishing' | 'bookings' | 'settings')}
+        onChange={(value) => onTabChange(value as 'overview' | 'companies' | 'publishing' | 'inbox' | 'bookings' | 'settings')}
       />
       {banner ? <StatusBanner tone={banner.tone} text={banner.text} /> : null}
 
@@ -1738,8 +1764,8 @@ function AdminWorkspace({
               />
               <WorkspaceActionTile
                 eyebrow="Control"
-                title="Invites and access"
-                body="Send owner invitations and resolve account readiness from settings."
+                title="Platform settings"
+                body="Manage launch categories and admin access while invitations stay centralized in Companies."
                 onPress={() => onTabChange('settings')}
               />
             </View>
@@ -1830,6 +1856,29 @@ function AdminWorkspace({
               </View>
             </SectionCard>
 
+            <SectionCard title="Invite company owner" subtitle="Centralized invite management lives in Companies tab only.">
+              <View style={styles.rowGap}>
+                <FormField label="Company name" value={inviteForm.companyName} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, companyName: value }))} error={inviteErrors.companyName} />
+                <FormField label="Invite email" value={inviteForm.email} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, email: value }))} error={inviteErrors.email} />
+              </View>
+              <FormField label="Message" value={inviteForm.message} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, message: value }))} multiline />
+              <Text style={styles.helperText}>This is the only place to invite company users. Invitations are no longer shown in Settings.</Text>
+              <PrimaryButton label="Send invitation" onPress={onInvite} loading={inviteSubmitting} disabled={inviteSubmitting} />
+            </SectionCard>
+
+            <SectionCard title="Pending invitations" subtitle="Track invite delivery and activation without leaving the Companies tab.">
+              {pendingInvitations.length ? pendingInvitations.map((invitation) => (
+                <InfoRow
+                  key={invitation.id}
+                  title={`${invitation.companyName} · ${invitation.email}`}
+                  subtitle={`Delivery: ${invitation.emailDeliveryStatus}${invitation.emailSentAtLabel ? ` · ${invitation.emailSentAtLabel}` : ''}${invitation.emailDeliveryError ? ` · ${invitation.emailDeliveryError}` : ''}`}
+                  actionLabel="Resend"
+                  onAction={() => onResendInvitation(invitation)}
+                  secondaryActionLabel="Revoke"
+                  onSecondaryAction={() => onRevokeInvitation(invitation)}
+                />
+              )) : <EmptyState title="No pending invitations" body="Every invitation is either accepted, revoked, or ready to be sent." />}
+            </SectionCard>
             <SectionCard title={selectedCompany ? 'Edit company profile' : 'Create company profile'} subtitle="When admins create a company, they must assign a category and upload the company profile image used in customer listings.">
               <View style={styles.rowGap}>
                 <FormField label="Company name" value={form.name} onChangeText={(value) => onFormChange((current) => ({ ...current, name: value }))} error={formErrors.name} />
@@ -2033,6 +2082,64 @@ function AdminWorkspace({
         </View>
       ) : null}
 
+      {tab === 'inbox' ? (
+        <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
+          <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
+            <SectionCard title="Approval inbox" subtitle="Grouped request queues with bulk approvals so admins can process publishing fast.">
+              <View style={styles.overviewBadgeRow}>
+                <CompactBadge label="All pending" value={String(pendingCatalogRequests.length + pendingOfferRequests.length)} />
+                <CompactBadge label="Services" value={String(pendingServiceRequests.length)} />
+                <CompactBadge label="Products" value={String(pendingProductRequests.length)} />
+                <CompactBadge label="Offers" value={String(pendingOfferRequests.length)} />
+              </View>
+            </SectionCard>
+
+            <SectionCard title="Products/Services requests" subtitle="All pending catalog submissions grouped by item type.">
+              <View style={styles.rowGap}>
+                <SecondaryButton label="Approve all services" tone="contrast" onPress={() => handleBulkCatalogReview('approved', 'service')} />
+                <SecondaryButton label="Reject all services" tone="danger" onPress={() => handleBulkCatalogReview('rejected', 'service')} />
+              </View>
+              <View style={styles.rowGap}>
+                <SecondaryButton label="Approve all products" tone="contrast" onPress={() => handleBulkCatalogReview('approved', 'product')} />
+                <SecondaryButton label="Reject all products" tone="danger" onPress={() => handleBulkCatalogReview('rejected', 'product')} />
+              </View>
+
+              {pendingCatalogRequests.length ? pendingCatalogRequests.map((item) => (
+                <CatalogCard
+                  key={`inbox-catalog-${item.id}`}
+                  item={item}
+                  actionLabel="Approve"
+                  onAction={() => onReviewCatalogItem(item.id, 'approved')}
+                  secondaryActionLabel="Reject"
+                  onSecondaryAction={() => onReviewCatalogItem(item.id, 'rejected')}
+                />
+              )) : <EmptyState title="No catalog requests" body="All catalog submissions are already reviewed." />}
+            </SectionCard>
+          </View>
+
+          <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
+            <SectionCard title="Offers requests" subtitle="Promotions stay hidden until approved. Process individually or in bulk.">
+              <View style={styles.rowGap}>
+                <SecondaryButton label="Approve all offers" tone="contrast" onPress={() => handleBulkOfferReview('approved')} />
+                <SecondaryButton label="Reject all offers" tone="danger" onPress={() => handleBulkOfferReview('rejected')} />
+              </View>
+
+              {pendingOfferRequests.length ? pendingOfferRequests.map((promotion) => (
+                <InfoRow
+                  key={`inbox-offer-${promotion.id}`}
+                  title={`${promotion.title} · ${promotion.catalogItemTitle}`}
+                  subtitle={`${promotion.companyName}${promotion.discountLabel ? ` · ${promotion.discountLabel}` : ''}`}
+                  actionLabel="Approve"
+                  onAction={() => onReviewOfferPromotion(promotion.id, 'approved')}
+                  secondaryActionLabel="Reject"
+                  onSecondaryAction={() => onReviewOfferPromotion(promotion.id, 'rejected')}
+                />
+              )) : <EmptyState title="No offer requests" body="All promotion requests are already reviewed." />}
+            </SectionCard>
+          </View>
+        </View>
+      ) : null}
+
       {tab === 'bookings' ? (
         <SectionCard title="All company bookings" subtitle="Admins can track the full marketplace booking flow across every partner company.">
           <View style={styles.filterChipRow}>
@@ -2082,40 +2189,15 @@ function AdminWorkspace({
       {tab === 'settings' ? (
         <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
           <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
-            <SectionCard title="Access command" subtitle="Keep owner invitations, activation status, and partner account follow-up in one place.">
+            <SectionCard title="Workspace settings" subtitle="Settings now focus on platform controls. Company invitations are managed from the Companies tab.">
               <View style={styles.overviewBadgeRow}>
-                <CompactBadge label="Pending" value={String(pendingInvitations.length)} />
                 <CompactBadge label="Company users" value={String(companyUsers.length)} />
                 <CompactBadge label="Admins" value={String(adminUsers.length)} />
               </View>
             </SectionCard>
 
-            <SectionCard title="Invite company owner" subtitle="Admins can invite and manage partner access directly from settings.">
-              <View style={styles.rowGap}>
-                <FormField label="Company name" value={inviteForm.companyName} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, companyName: value }))} error={inviteErrors.companyName} />
-                <FormField label="Invite email" value={inviteForm.email} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, email: value }))} error={inviteErrors.email} />
-              </View>
-              <FormField label="Message" value={inviteForm.message} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, message: value }))} multiline />
-              <Text style={styles.helperText}>Sending the invitation creates the company auth user, assigns the `company` role, and emails the username plus a temporary password.</Text>
-              <PrimaryButton label="Send invitation" onPress={onInvite} loading={inviteSubmitting} disabled={inviteSubmitting} />
-            </SectionCard>
-
-            <SectionCard title="Company user management" subtitle="Invite company owners, monitor pending activations, and manage every partner account from one admin page.">
-              {companyUsers.length ? companyUsers.map((user) => <InfoRow key={user.id} title={user.fullName} subtitle={`${user.email}${user.companyName ? ` · ${user.companyName}` : ''}`} />) : <EmptyState title="No company users yet" body="Send a company invitation first, then accepted company accounts will appear here." />}
-            </SectionCard>
-
-            <SectionCard title="Pending company invitations" subtitle="These accounts are not active company users until the invitation is accepted and the user confirms sign-up.">
-              {pendingInvitations.length ? pendingInvitations.map((invitation) => (
-                <InfoRow
-                  key={invitation.id}
-                  title={`${invitation.companyName} · ${invitation.email}`}
-                  subtitle={`Delivery: ${invitation.emailDeliveryStatus}${invitation.emailSentAtLabel ? ` · ${invitation.emailSentAtLabel}` : ''}${invitation.emailDeliveryError ? ` · ${invitation.emailDeliveryError}` : ''}`}
-                  actionLabel="Resend"
-                  onAction={() => onResendInvitation(invitation)}
-                  secondaryActionLabel="Revoke"
-                  onSecondaryAction={() => onRevokeInvitation(invitation)}
-                />
-              )) : <EmptyState title="No pending invitations" body="Every saved invitation is either accepted, revoked, or waiting for the next send." />}
+            <SectionCard title="Company user management" subtitle="Monitor accepted company owner accounts and linked partner workspace access.">
+              {companyUsers.length ? companyUsers.map((user) => <InfoRow key={user.id} title={user.fullName} subtitle={`${user.email}${user.companyName ? ` · ${user.companyName}` : ''}`} />) : <EmptyState title="No company users yet" body="Accepted company owner accounts will appear here." />}
             </SectionCard>
           </View>
 
@@ -2150,8 +2232,8 @@ function AdminWorkspace({
 
 type CompanyWorkspaceProps = {
   wide: boolean;
-  tab: 'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty';
-  onTabChange: (tab: 'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty') => void;
+  tab: 'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty' | 'requests';
+  onTabChange: (tab: 'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty' | 'requests') => void;
   currentCompany: Company | null;
   companySettingsForm: {
     name: string;
@@ -2449,6 +2531,33 @@ function CompanyWorkspace({
     status: (booking) => booking.status,
     risk: (booking) => severityWeight(getBookingRisk(booking).tone),
   });
+  const companyRequestTimeline = useMemo(() => {
+    const catalogEntries = companyItems.map((item) => ({
+      id: `catalog-${item.id}`,
+      type: item.kind === 'service' ? 'Service request' : 'Product request',
+      title: item.title,
+      status: item.approvalStatus,
+      published: item.isPublished,
+      submittedAt: labelFromId(item.id),
+      reviewedAt: item.approvedAtLabel,
+      reviewer: item.approvedByEmail,
+      detail: `${item.category} · QAR ${item.price.toFixed(0)}`,
+    }));
+
+    const offerEntries = companyPromotions.map((promotion) => ({
+      id: `offer-${promotion.id}`,
+      type: 'Offer request',
+      title: promotion.title,
+      status: promotion.approvalStatus,
+      published: promotion.isActive,
+      submittedAt: labelFromId(promotion.id),
+      reviewedAt: promotion.approvedAtLabel,
+      reviewer: promotion.approvedByEmail,
+      detail: `${promotion.catalogItemTitle}${promotion.discountLabel ? ` · ${promotion.discountLabel}` : ''}`,
+    }));
+
+    return [...catalogEntries, ...offerEntries].sort((left, right) => timestampFromId(right.id) - timestampFromId(left.id));
+  }, [companyItems, companyPromotions]);
   const companyTrendDetails = getTrendInsight(companyTrendFocus, companyActivityTrend, companyBookingTrend, companyPublishingTrend, companyTrendWindow);
 
   return (
@@ -2461,9 +2570,10 @@ function CompanyWorkspace({
           { key: 'schedule', label: 'Schedule' },
           { key: 'bookings', label: 'Bookings' },
           { key: 'loyalty', label: 'Loyalty' },
+          { key: 'requests', label: 'Requests' },
         ]}
         selectedKey={tab}
-        onChange={(value) => onTabChange(value as 'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty')}
+        onChange={(value) => onTabChange(value as 'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty' | 'requests')}
       />
       {banner ? <StatusBanner tone={banner.tone} text={banner.text} /> : null}
 
@@ -3075,6 +3185,37 @@ function CompanyWorkspace({
           <PrimaryButton label="Save company loyalty" onPress={onSaveLoyalty} />
         </SectionCard>
       ) : null}
+
+      {tab === 'requests' ? (
+        <SectionCard title="Request timeline" subtitle="Track every catalog and offer submission from request creation to admin decision.">
+          <View style={styles.overviewBadgeRow}>
+            <CompactBadge label="Total" value={String(companyRequestTimeline.length)} />
+            <CompactBadge label="Pending" value={String(companyRequestTimeline.filter((entry) => entry.status === 'pending').length)} />
+            <CompactBadge label="Approved" value={String(companyRequestTimeline.filter((entry) => entry.status === 'approved').length)} />
+            <CompactBadge label="Rejected" value={String(companyRequestTimeline.filter((entry) => entry.status === 'rejected').length)} />
+          </View>
+
+          {companyRequestTimeline.length ? companyRequestTimeline.map((entry) => (
+            <View key={entry.id} style={styles.auditRow}>
+              <View style={styles.auditHeaderRow}>
+                <Text style={styles.infoTitle}>{entry.title}</Text>
+                <TableStatusPill
+                  label={entry.status === 'approved' ? 'Approved' : entry.status === 'pending' ? 'Pending' : entry.status === 'rejected' ? 'Rejected' : 'Draft'}
+                  tone={entry.status === 'approved' ? 'success' : entry.status === 'pending' ? 'warning' : entry.status === 'rejected' ? 'error' : 'info'}
+                />
+              </View>
+              <Text style={styles.infoSubtitle}>{entry.type} · {entry.detail}</Text>
+              <Text style={styles.helperText}>Submitted: {entry.submittedAt}</Text>
+              <Text style={styles.helperText}>
+                {entry.status === 'pending'
+                  ? 'Awaiting admin decision'
+                  : `Reviewed: ${entry.reviewedAt ?? 'Unknown'}${entry.reviewer ? ` · by ${entry.reviewer}` : ''}`}
+              </Text>
+              <Text style={styles.helperText}>{entry.published ? 'Visible to customers' : 'Hidden from customers'}</Text>
+            </View>
+          )) : <EmptyState title="No requests yet" body="Create a catalog item or offer to start the approval timeline." />}
+        </SectionCard>
+      ) : null}
     </>
   );
 }
@@ -3221,6 +3362,7 @@ function CustomerWorkspace({
   const customerWidth = useWindowDimensions().width;
   const homeCarouselRef = useRef<ScrollView | null>(null);
   const homeCarouselIndexRef = useRef(0);
+  const homeCarouselScrollX = useRef(new Animated.Value(0)).current;
   const carouselDotValues = useRef(HOME_CAROUSEL_IMAGES.map((_, index) => new Animated.Value(index === 0 ? 1 : 0))).current;
   const [activeBrowseGroupKey, setActiveBrowseGroupKey] = useState<string>(CATEGORY_GROUPS[0]?.key ?? 'home-services');
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
@@ -3386,6 +3528,8 @@ function CustomerWorkspace({
   ].filter(Boolean).join(' · ');
   const carouselCardWidth = Math.max(Math.min(customerWidth - 74, wide ? 620 : 540), 270);
   const carouselItemWidth = carouselCardWidth + 12;
+  const carouselDotDuration = Platform.OS === 'ios' ? 280 : 360;
+  const carouselAutoAdvanceMs = Platform.OS === 'ios' ? 3400 : 4200;
 
   useEffect(() => {
     if (!normalizedSelectedCategory) {
@@ -3424,11 +3568,11 @@ function CustomerWorkspace({
     carouselDotValues.forEach((value, index) => {
       Animated.timing(value, {
         toValue: index === homeCarouselPage ? 1 : 0,
-        duration: 220,
+        duration: carouselDotDuration,
         useNativeDriver: false,
       }).start();
     });
-  }, [carouselDotValues, homeCarouselPage]);
+  }, [carouselDotDuration, carouselDotValues, homeCarouselPage]);
 
   useEffect(() => {
     if (tab !== 'home' || carouselEntries.length < 2) {
@@ -3440,10 +3584,10 @@ function CustomerWorkspace({
       homeCarouselRef.current?.scrollTo({ x: nextIndex * carouselItemWidth, animated: true });
       homeCarouselIndexRef.current = nextIndex;
       setHomeCarouselPage(nextIndex);
-    }, 2000);
+    }, carouselAutoAdvanceMs);
 
     return () => clearInterval(intervalId);
-  }, [tab, carouselEntries.length, carouselItemWidth]);
+  }, [tab, carouselAutoAdvanceMs, carouselEntries.length, carouselItemWidth]);
   const customerTheme = {
     canvas: darkMode ? styles.customerCanvasDark : undefined,
     card: darkMode ? styles.customerSectionDark : undefined,
@@ -3467,21 +3611,51 @@ function CustomerWorkspace({
       {tab === 'home' ? (
         <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.customerHomeScreen}>
-          <View style={styles.customerHomeCarouselHeader}>
-            <View style={styles.customerHomeSplashHero}>
-              <Text style={styles.customerHomeSplashEyebrow}>Welcome to Abdalla</Text>
-              <Text style={styles.customerHomeSplashTitle}>Premium home & business services at your fingertips</Text>
-              <Text style={styles.customerHomeSplashSubtitle}>Discover trusted providers · Book instantly · Get it done</Text>
+                    <LinearGradient colors={['#0B6A3B', '#0F7B45', '#17A45B', '#0A4F2D']} style={styles.customerHomeCarouselHeader}>
+            <View style={styles.customerHomeLogoRow}>
+              <Image source={APP_LOGO_IMAGE} style={styles.customerHomeBrandLogo} resizeMode="cover" />
+              <Text style={styles.customerHomeBrandName}>Jahzeen</Text>
             </View>
-          </View>
+            <View style={styles.customerHomeSplashHero}>
+              <Text style={styles.customerHomeSplashEyebrow}>Trusted Services in One Place</Text>
+              <Text style={styles.customerHomeSplashTitle}>Premium Home Services. Instant Booking. Trusted Providers.</Text>
+              <Text style={styles.customerHomeSplashSubtitle}>Beautiful marketplace experience inspired by your references, adapted to your brand palette.</Text>
+            </View>
+            <View style={styles.customerHomeLocationRow}>
+              <Text style={styles.customerHomeLocationLabel}>Location</Text>
+              <Text style={styles.customerHomeLocationValue} numberOfLines={1}>Commercial Street Avenue, Building 18</Text>
+            </View>
+            <View style={styles.customerHomeQuickRow}>
+              {APP_CATEGORY_OPTIONS.slice(0, 3).map((category) => (
+                <Pressable
+                  key={`hero-${category}`}
+                  style={styles.customerHomeQuickCard}
+                  onPress={() => {
+                    onSelectCustomerCategory(category);
+                    onTabChange('explore');
+                  }}
+                >
+                  <View style={styles.customerHomeQuickIconWrap}>
+                    <Ionicons name={iconForCategory(category)} size={18} color={colors.primary} />
+                  </View>
+                  <Text style={styles.customerHomeQuickLabel} numberOfLines={1}>{category}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </LinearGradient>
           {carouselEntries.length ? (
-            <ScrollView
+            <Animated.ScrollView
               ref={homeCarouselRef}
               horizontal
               showsHorizontalScrollIndicator={false}
               pagingEnabled
               snapToInterval={carouselItemWidth}
               decelerationRate="fast"
+              onScroll={Animated.event(
+                [{ nativeEvent: { contentOffset: { x: homeCarouselScrollX } } }],
+                { useNativeDriver: true },
+              )}
+              scrollEventThrottle={16}
               onMomentumScrollEnd={(event) => {
                 const offsetX = event.nativeEvent.contentOffset.x;
                 const computedIndex = Math.round(offsetX / carouselItemWidth);
@@ -3496,13 +3670,16 @@ function CustomerWorkspace({
                   imageUrl={entry.imageUrl}
                   title={entry.title}
                   subtitle={entry.subtitle}
+                  index={index}
+                  scrollX={homeCarouselScrollX}
+                  itemWidth={carouselItemWidth}
                   width={carouselCardWidth}
                   onPress={() => {
                     onTabChange('explore');
                   }}
                 />
               ))}
-            </ScrollView>
+            </Animated.ScrollView>
           ) : (
             <EmptyState title="Marketplace is empty" body="Once companies publish live listings, the home carousel will lead customers into the storefront." cardStyle={styles.customerHomeEmptyCard} titleStyle={styles.customerHomeSectionTitle} bodyStyle={styles.customerHomeSectionSubtitle} />
           )}
@@ -4156,6 +4333,18 @@ function CustomerWorkspace({
 
 type OperationalTone = 'success' | 'info' | 'warning' | 'error';
 
+function iconForCategory(category: string): keyof typeof Ionicons.glyphMap {
+  const normalized = category.toLowerCase();
+  if (normalized.includes('ac')) return 'snow-outline';
+  if (normalized.includes('car')) return 'car-sport-outline';
+  if (normalized.includes('wash')) return 'water-outline';
+  if (normalized.includes('clean')) return 'sparkles-outline';
+  if (normalized.includes('pest')) return 'bug-outline';
+  if (normalized.includes('water')) return 'water-outline';
+  if (normalized.includes('moving')) return 'cube-outline';
+  return 'grid-outline';
+}
+
 function formatMetricValue(value: number) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value);
 }
@@ -4220,6 +4409,28 @@ function parseFlexibleDate(label: string) {
   }
 
   return null;
+}
+
+function timestampFromId(id: string) {
+  const match = id.match(/(\d{10,})$/);
+  if (!match) {
+    return 0;
+  }
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function labelFromId(id: string) {
+  const stamp = timestampFromId(id);
+  if (!stamp) {
+    return 'Recently submitted';
+  }
+  return new Date(stamp).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 function daysBetween(target: Date, base = new Date()) {
@@ -4738,59 +4949,98 @@ function CustomerHomeBannerCard({
   imageUrl,
   title,
   subtitle,
+  index,
+  scrollX,
+  itemWidth,
   width,
   onPress,
 }: {
   imageUrl: string;
   title: string;
   subtitle: string;
+  index: number;
+  scrollX: Animated.Value;
+  itemWidth: number;
   width: number;
   onPress: () => void;
 }) {
+  const pressScale = useRef(new Animated.Value(1)).current;
+  const inputRange = [(index - 1) * itemWidth, index * itemWidth, (index + 1) * itemWidth];
+  const cardScale = scrollX.interpolate({ inputRange, outputRange: [0.96, 1, 0.96], extrapolate: 'clamp' });
+  const imageShiftX = scrollX.interpolate({ inputRange, outputRange: [-18, 0, 18], extrapolate: 'clamp' });
+  const cardOpacity = scrollX.interpolate({ inputRange, outputRange: [0.82, 1, 0.82], extrapolate: 'clamp' });
+
+  const animatePress = (toValue: number) => {
+    Animated.spring(pressScale, {
+      toValue,
+      useNativeDriver: true,
+      friction: 7,
+      tension: 150,
+    }).start();
+  };
 
   return (
-    <Pressable style={[styles.customerHomeBannerCard, { width }]} onPress={onPress}>
-      <Image source={{ uri: imageUrl }} style={styles.customerHomeBannerImage} resizeMode="cover" />
-      <LinearGradient colors={['transparent', 'rgba(0,0,0,0.16)', 'rgba(0,0,0,0.82)']} style={styles.customerHomeBannerOverlay}>
-        <View style={styles.customerHomeBannerTopRow}>
-          <View style={styles.customerHomeBannerSponsorPill}>
-            <Text style={styles.customerHomeBannerSponsorText}>Featured</Text>
+    <Pressable
+      style={[styles.customerHomeBannerCard, { width }]}
+      onPress={onPress}
+      onPressIn={() => animatePress(0.975)}
+      onPressOut={() => animatePress(1)}
+    >
+      <Animated.View style={{ flex: 1, opacity: cardOpacity, transform: [{ scale: Animated.multiply(cardScale, pressScale) }] }}>
+        <Animated.Image source={{ uri: imageUrl }} style={[styles.customerHomeBannerImage, { transform: [{ translateX: imageShiftX }] }]} resizeMode="cover" />
+        <LinearGradient colors={['transparent', 'rgba(0,0,0,0.16)', 'rgba(0,0,0,0.82)']} style={styles.customerHomeBannerOverlay}>
+          <View style={styles.customerHomeBannerTopRow}>
+            <View style={styles.customerHomeBannerSponsorPill}>
+              <Text style={styles.customerHomeBannerSponsorText}>Featured</Text>
+            </View>
+            <Text style={styles.customerHomeBannerCompany}>Abdalla Picks</Text>
           </View>
-          <Text style={styles.customerHomeBannerCompany}>Abdalla Picks</Text>
-        </View>
-        <View style={styles.customerHomeBannerBody}>
-          <Text style={styles.customerHomeBannerTitle} numberOfLines={2}>{title}</Text>
-          <Text style={styles.customerHomeBannerMeta} numberOfLines={2}>{subtitle}</Text>
-          <View style={styles.customerHomeBannerFooter}>
-            <Text style={styles.customerHomeBannerPrice}>Explore</Text>
-            <View style={styles.customerHomeBannerCta}>
-              <Text style={styles.customerHomeBannerCtaText}>open</Text>
+          <View style={styles.customerHomeBannerBody}>
+            <Text style={styles.customerHomeBannerTitle} numberOfLines={2}>{title}</Text>
+            <Text style={styles.customerHomeBannerMeta} numberOfLines={2}>{subtitle}</Text>
+            <View style={styles.customerHomeBannerFooter}>
+              <Text style={styles.customerHomeBannerPrice}>Explore</Text>
+              <View style={styles.customerHomeBannerCta}>
+                <Text style={styles.customerHomeBannerCtaText}>open</Text>
+              </View>
             </View>
           </View>
-        </View>
-      </LinearGradient>
+        </LinearGradient>
+      </Animated.View>
     </Pressable>
   );
 }
 
 function CustomerHomeLotCard({ item, promotion, onPress }: { item: CatalogItem; promotion?: OfferPromotion; onPress: () => void }) {
   const countdown = promotion?.endsAtLabel ? getCountdownInfo(promotion.endsAtLabel).label : item.durationLabel || item.category;
+  const pressScale = useRef(new Animated.Value(1)).current;
+
+  const animatePress = (toValue: number) => {
+    Animated.spring(pressScale, {
+      toValue,
+      useNativeDriver: true,
+      friction: 7,
+      tension: 150,
+    }).start();
+  };
 
   return (
-    <Pressable style={styles.customerHomeLotCard} onPress={onPress}>
-      <View style={styles.customerHomeLotImageWrap}>
-        {item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.customerHomeLotImage} resizeMode="cover" /> : null}
-      </View>
-      <Text style={styles.customerHomeLotTitle} numberOfLines={2}>{item.title}</Text>
-      <View style={styles.customerHomeLotMetaRow}>
-        <Ionicons name="time-outline" size={14} color={colors.accent} />
-        <Text style={styles.customerHomeLotMetaText}>{countdown}</Text>
-      </View>
-      <View style={styles.customerHomeLotMetaRow}>
-        <Ionicons name="business-outline" size={14} color="#8E98A3" />
-        <Text style={styles.customerHomeLotMetaText}>{item.companyName}</Text>
-      </View>
-      <Text style={styles.customerHomeLotPrice}>QAR {item.price.toFixed(0)}</Text>
+    <Pressable style={styles.customerHomeLotCard} onPress={onPress} onPressIn={() => animatePress(0.98)} onPressOut={() => animatePress(1)}>
+      <Animated.View style={{ transform: [{ scale: pressScale }] }}>
+        <View style={styles.customerHomeLotImageWrap}>
+          {item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.customerHomeLotImage} resizeMode="cover" /> : null}
+        </View>
+        <Text style={styles.customerHomeLotTitle} numberOfLines={2}>{item.title}</Text>
+        <View style={styles.customerHomeLotMetaRow}>
+          <Ionicons name="time-outline" size={14} color={colors.accent} />
+          <Text style={styles.customerHomeLotMetaText}>{countdown}</Text>
+        </View>
+        <View style={styles.customerHomeLotMetaRow}>
+          <Ionicons name="business-outline" size={14} color="#8E98A3" />
+          <Text style={styles.customerHomeLotMetaText}>{item.companyName}</Text>
+        </View>
+        <Text style={styles.customerHomeLotPrice}>QAR {item.price.toFixed(0)}</Text>
+      </Animated.View>
     </Pressable>
   );
 }
@@ -5508,60 +5758,73 @@ function CustomerCompanyCard({ company, onPress, variant = 'featured' }: { compa
   const companyMonogram = company.name.trim().charAt(0).toUpperCase() || 'A';
   const isCompact = variant === 'compact';
   const responseMinutes = 10 + ((company.id.length + company.name.length) % 21);
+  const pressScale = useRef(new Animated.Value(1)).current;
+
+  const animatePress = (toValue: number) => {
+    Animated.spring(pressScale, {
+      toValue,
+      useNativeDriver: true,
+      friction: 7,
+      tension: 150,
+    }).start();
+  };
 
   return (
     <Pressable
-      style={({ pressed }) => [
+      style={[
         styles.companyDiscoveryCard,
         isCompact && styles.companyDiscoveryCardCompact,
         company.isActive && styles.companyDiscoveryCardActive,
-        pressed && styles.companyDiscoveryCardPressed,
       ]}
       onPress={onPress}
+      onPressIn={() => animatePress(0.985)}
+      onPressOut={() => animatePress(1)}
     >
-      <View style={[styles.companyDiscoveryCover, isCompact && styles.companyDiscoveryCoverCompact]}>
-        {company.profileImageUrl ? <Image source={{ uri: company.profileImageUrl }} style={styles.companyDiscoveryCoverImage} resizeMode="cover" /> : null}
-        {!company.profileImageUrl ? (
-          <View style={[styles.companyDiscoveryFallbackBadge, isCompact && styles.companyDiscoveryFallbackBadgeCompact]}>
-            <Text style={[styles.companyDiscoveryFallbackBadgeText, isCompact && styles.companyDiscoveryFallbackBadgeTextCompact]}>{companyMonogram}</Text>
-          </View>
-        ) : null}
-        <LinearGradient colors={['rgba(7, 29, 17, 0.03)', 'rgba(7, 29, 17, 0.88)']} style={[styles.companyDiscoveryCoverOverlay, isCompact && styles.companyDiscoveryCoverOverlayCompact]}>
-          <View style={styles.companyDiscoveryCoverTopRow}>
-            <View style={[styles.companyDiscoveryCategoryPill, isCompact && styles.companyDiscoveryCategoryPillCompact]}>
-              <Text style={[styles.companyDiscoveryCategoryPillText, isCompact && styles.companyDiscoveryCategoryPillTextCompact]}>{company.category || 'Company'}</Text>
+      <Animated.View style={{ transform: [{ scale: pressScale }] }}>
+        <View style={[styles.companyDiscoveryCover, isCompact && styles.companyDiscoveryCoverCompact]}>
+          {company.profileImageUrl ? <Image source={{ uri: company.profileImageUrl }} style={styles.companyDiscoveryCoverImage} resizeMode="cover" /> : null}
+          {!company.profileImageUrl ? (
+            <View style={[styles.companyDiscoveryFallbackBadge, isCompact && styles.companyDiscoveryFallbackBadgeCompact]}>
+              <Text style={[styles.companyDiscoveryFallbackBadgeText, isCompact && styles.companyDiscoveryFallbackBadgeTextCompact]}>{companyMonogram}</Text>
             </View>
-            <View style={[styles.companyDiscoveryStatePill, company.isActive ? styles.companyDiscoveryStatePillActive : styles.companyDiscoveryStatePillPaused]}>
-              <Text style={styles.companyDiscoveryStatePillText}>{company.isActive ? 'Active' : 'Paused'}</Text>
+          ) : null}
+          <LinearGradient colors={['rgba(7, 29, 17, 0.03)', 'rgba(7, 29, 17, 0.88)']} style={[styles.companyDiscoveryCoverOverlay, isCompact && styles.companyDiscoveryCoverOverlayCompact]}>
+            <View style={styles.companyDiscoveryCoverTopRow}>
+              <View style={[styles.companyDiscoveryCategoryPill, isCompact && styles.companyDiscoveryCategoryPillCompact]}>
+                <Text style={[styles.companyDiscoveryCategoryPillText, isCompact && styles.companyDiscoveryCategoryPillTextCompact]}>{company.category || 'Company'}</Text>
+              </View>
+              <View style={[styles.companyDiscoveryStatePill, company.isActive ? styles.companyDiscoveryStatePillActive : styles.companyDiscoveryStatePillPaused]}>
+                <Text style={styles.companyDiscoveryStatePillText}>{company.isActive ? 'Active' : 'Paused'}</Text>
+              </View>
+            </View>
+            <Text style={[styles.companyDiscoverySupportText, isCompact && styles.companyDiscoverySupportTextCompact]} numberOfLines={1}>{company.supportPhone || company.supportEmail}</Text>
+          </LinearGradient>
+        </View>
+
+        <View style={[styles.companyDiscoveryBody, isCompact && styles.companyDiscoveryBodyCompact]}>
+          <Text style={[styles.companyDiscoveryTitle, isCompact && styles.companyDiscoveryTitleCompact]} numberOfLines={1}>{company.name}</Text>
+          <Text style={[styles.companyDiscoveryDescription, isCompact && styles.companyDiscoveryDescriptionCompact]} numberOfLines={2}>{company.description}</Text>
+          <View style={styles.companyDiscoveryMetaRow}>
+            <View style={styles.companyDiscoveryMetaChip}>
+              <Ionicons name="location-outline" size={12} color="#2D5D3F" />
+              <Text style={styles.companyDiscoveryMetaChipText}>Qatar</Text>
+            </View>
+            <View style={styles.companyDiscoveryMetaChip}>
+              <Ionicons name="time-outline" size={12} color="#2D5D3F" />
+              <Text style={styles.companyDiscoveryMetaChipText}>~{responseMinutes} min</Text>
             </View>
           </View>
-          <Text style={[styles.companyDiscoverySupportText, isCompact && styles.companyDiscoverySupportTextCompact]} numberOfLines={1}>{company.supportPhone || company.supportEmail}</Text>
-        </LinearGradient>
-      </View>
+        </View>
 
-      <View style={[styles.companyDiscoveryBody, isCompact && styles.companyDiscoveryBodyCompact]}>
-        <Text style={[styles.companyDiscoveryTitle, isCompact && styles.companyDiscoveryTitleCompact]} numberOfLines={1}>{company.name}</Text>
-        <Text style={[styles.companyDiscoveryDescription, isCompact && styles.companyDiscoveryDescriptionCompact]} numberOfLines={2}>{company.description}</Text>
-        <View style={styles.companyDiscoveryMetaRow}>
-          <View style={styles.companyDiscoveryMetaChip}>
-            <Ionicons name="location-outline" size={12} color="#2D5D3F" />
-            <Text style={styles.companyDiscoveryMetaChipText}>Qatar</Text>
+        <View style={[styles.companyDiscoveryFooterRow, isCompact && styles.companyDiscoveryFooterRowCompact]}>
+          <View style={styles.companyDiscoveryCategoryMetaPill}>
+            <Text style={styles.companyDiscoveryCategoryMetaText}>{company.category}</Text>
           </View>
-          <View style={styles.companyDiscoveryMetaChip}>
-            <Ionicons name="time-outline" size={12} color="#2D5D3F" />
-            <Text style={styles.companyDiscoveryMetaChipText}>~{responseMinutes} min</Text>
+          <View style={styles.companyDiscoveryCtaPill}>
+            <Text style={styles.companyDiscoveryCtaText}>Open</Text>
           </View>
         </View>
-      </View>
-
-      <View style={[styles.companyDiscoveryFooterRow, isCompact && styles.companyDiscoveryFooterRowCompact]}>
-        <View style={styles.companyDiscoveryCategoryMetaPill}>
-          <Text style={styles.companyDiscoveryCategoryMetaText}>{company.category}</Text>
-        </View>
-        <View style={styles.companyDiscoveryCtaPill}>
-          <Text style={styles.companyDiscoveryCtaText}>Open</Text>
-        </View>
-      </View>
+      </Animated.View>
     </Pressable>
   );
 }
@@ -5893,14 +6156,21 @@ const styles = StyleSheet.create({
   },
   customerHeaderCenteredBrand: {
     flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
+  },
+  customerHeaderBrandLogo: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
   },
   customerHeaderCenteredTitle: {
     color: colors.text,
-    fontSize: 26,
-    fontWeight: '300',
-    letterSpacing: 0.6,
+    fontSize: Platform.OS === 'ios' ? 21 : 20,
+    fontWeight: '800',
+    letterSpacing: Platform.OS === 'ios' ? 0.35 : 0.2,
   },
   customerHeaderCenteredTitleDark: {
     color: '#F7F8FA',
@@ -5943,9 +6213,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   customerHeaderIconButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: Platform.OS === 'ios' ? 44 : 42,
+    height: Platform.OS === 'ios' ? 44 : 42,
+    borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FFFFFFBF',
@@ -6238,36 +6508,113 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   customerHomeScreen: {
-    gap: 18,
+    gap: 22,
   },
   customerHomeCarouselHeader: {
-    paddingHorizontal: 16,
-    paddingVertical: 24,
-    borderRadius: 24,
-    backgroundColor: 'linear-gradient(135deg, #0F7B45 0%, #0D5F38 100%)',
-    gap: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 28,
+    borderRadius: 28,
+    overflow: 'hidden',
+    gap: 14,
+    borderWidth: 1,
+    borderColor: '#FFFFFF22',
+    shadowColor: '#0A4F2D',
+    shadowOpacity: Platform.OS === 'ios' ? 0.22 : 0.14,
+    shadowRadius: Platform.OS === 'ios' ? 18 : 12,
+    shadowOffset: { width: 0, height: Platform.OS === 'ios' ? 10 : 8 },
+    elevation: Platform.OS === 'ios' ? 0 : 5,
   },
   customerHomeSplashHero: {
-    gap: 8,
+    gap: 10,
   },
   customerHomeSplashEyebrow: {
     color: '#C8F5D9',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
     textTransform: 'uppercase',
-    letterSpacing: 0.8,
+    letterSpacing: 1.1,
   },
   customerHomeSplashTitle: {
     color: '#FFFFFF',
-    fontSize: 24,
+    fontSize: Platform.OS === 'ios' ? 31 : 29,
+    fontWeight: '900',
+    lineHeight: Platform.OS === 'ios' ? 40 : 37,
+    letterSpacing: Platform.OS === 'ios' ? 0.25 : 0.1,
+  },
+  customerHomeLogoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  customerHomeBrandLogo: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#FFFFFF66',
+  },
+  customerHomeBrandName: {
+    color: '#FFFFFF',
+    fontSize: 18,
     fontWeight: '800',
-    lineHeight: 32,
+    letterSpacing: 0.3,
+  },
+  customerHomeLocationRow: {
+    marginTop: 4,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF1F',
+    borderWidth: 1,
+    borderColor: '#FFFFFF2E',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 2,
+  },
+  customerHomeLocationLabel: {
+    color: '#D8F5E6',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  customerHomeLocationValue: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  customerHomeQuickRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 6,
+  },
+  customerHomeQuickCard: {
+    flex: 1,
+    minHeight: 82,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#DDEEE3',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    justifyContent: 'space-between',
+  },
+  customerHomeQuickIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 10,
+    backgroundColor: '#E9F6EF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  customerHomeQuickLabel: {
+    color: '#123927',
+    fontSize: 11,
+    fontWeight: '700',
   },
   customerHomeSplashSubtitle: {
     color: '#E8F5ED',
-    fontSize: 14,
-    fontWeight: '600',
-    lineHeight: 20,
+    fontSize: Platform.OS === 'ios' ? 15 : 14,
+    fontWeight: '700',
+    lineHeight: Platform.OS === 'ios' ? 22 : 21,
   },
   customerHomeCarouselEyebrow: {
     color: '#7A8791',
@@ -6280,7 +6627,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   customerHomeCarouselRow: {
-    gap: 12,
+    gap: 14,
     paddingRight: 18,
   },
   customerCarouselDotsRow: {
@@ -6295,12 +6642,17 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   customerHomeBannerCard: {
-    height: 178,
-    borderRadius: 22,
+    height: 194,
+    borderRadius: 24,
     overflow: 'hidden',
-    backgroundColor: '#E8DED0',
+    backgroundColor: '#DDEBDF',
     borderWidth: 1,
-    borderColor: '#D8C9AF',
+    borderColor: '#C8E0CE',
+    shadowColor: '#0F6C3D',
+    shadowOpacity: Platform.OS === 'ios' ? 0.16 : 0.1,
+    shadowRadius: Platform.OS === 'ios' ? 14 : 10,
+    shadowOffset: { width: 0, height: Platform.OS === 'ios' ? 8 : 6 },
+    elevation: Platform.OS === 'ios' ? 0 : 4,
   },
   customerHomeBannerImage: {
     ...StyleSheet.absoluteFillObject,
@@ -6341,9 +6693,9 @@ const styles = StyleSheet.create({
   },
   customerHomeBannerTitle: {
     color: '#FFFFFF',
-    fontSize: 24,
-    lineHeight: 28,
-    fontWeight: '800',
+    fontSize: Platform.OS === 'ios' ? 28 : 26,
+    lineHeight: Platform.OS === 'ios' ? 34 : 31,
+    fontWeight: '900',
   },
   customerHomeBannerMeta: {
     color: '#D6DBE2',
@@ -6439,8 +6791,9 @@ const styles = StyleSheet.create({
   },
   customerHomeSectionTitle: {
     color: colors.text,
-    fontSize: 26,
-    fontWeight: '300',
+    fontSize: Platform.OS === 'ios' ? 30 : 28,
+    fontWeight: '800',
+    letterSpacing: Platform.OS === 'ios' ? 0.15 : 0,
   },
   customerHomeSectionSubtitle: {
     color: colors.muted,
@@ -6509,8 +6862,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   customerHomeSectionBlock: {
-    gap: 14,
-    paddingTop: 10,
+    gap: 16,
+    paddingTop: 6,
   },
   customerHomeCategoryRow: {
     flexDirection: 'row',
@@ -8159,10 +8512,10 @@ const styles = StyleSheet.create({
     minWidth: 240,
     flexGrow: 1,
     shadowColor: '#B08C51',
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
+    shadowOpacity: Platform.OS === 'ios' ? 0.11 : 0.08,
+    shadowRadius: Platform.OS === 'ios' ? 18 : 12,
+    shadowOffset: { width: 0, height: Platform.OS === 'ios' ? 9 : 7 },
+    elevation: Platform.OS === 'ios' ? 0 : 3,
   },
   marketplaceCardDark: {
     backgroundColor: '#1B2430',
@@ -8178,10 +8531,10 @@ const styles = StyleSheet.create({
     minWidth: 246,
     flexGrow: 1,
     shadowColor: '#1F5A36',
-    shadowOpacity: 0.1,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
+    shadowOpacity: Platform.OS === 'ios' ? 0.14 : 0.09,
+    shadowRadius: Platform.OS === 'ios' ? 18 : 12,
+    shadowOffset: { width: 0, height: Platform.OS === 'ios' ? 10 : 7 },
+    elevation: Platform.OS === 'ios' ? 0 : 4,
   },
   companyDiscoveryCardCompact: {
     minWidth: 208,
