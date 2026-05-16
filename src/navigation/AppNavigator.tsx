@@ -3468,7 +3468,11 @@ function CustomerWorkspace({
         <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.customerHomeScreen}>
           <View style={styles.customerHomeCarouselHeader}>
-            <Text style={styles.customerHomeCarouselEyebrow}>Discover the marketplace</Text>
+            <View style={styles.customerHomeSplashHero}>
+              <Text style={styles.customerHomeSplashEyebrow}>Welcome to Abdalla</Text>
+              <Text style={styles.customerHomeSplashTitle}>Premium home & business services at your fingertips</Text>
+              <Text style={styles.customerHomeSplashSubtitle}>Discover trusted providers · Book instantly · Get it done</Text>
+            </View>
           </View>
           {carouselEntries.length ? (
             <ScrollView
@@ -6237,10 +6241,33 @@ const styles = StyleSheet.create({
     gap: 18,
   },
   customerHomeCarouselHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 24,
+    borderRadius: 24,
+    backgroundColor: 'linear-gradient(135deg, #0F7B45 0%, #0D5F38 100%)',
     gap: 12,
+  },
+  customerHomeSplashHero: {
+    gap: 8,
+  },
+  customerHomeSplashEyebrow: {
+    color: '#C8F5D9',
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  customerHomeSplashTitle: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: '800',
+    lineHeight: 32,
+  },
+  customerHomeSplashSubtitle: {
+    color: '#E8F5ED',
+    fontSize: 14,
+    fontWeight: '600',
+    lineHeight: 20,
   },
   customerHomeCarouselEyebrow: {
     color: '#7A8791',

@@ -143,6 +143,9 @@ export interface OfferPromotion {
   startsAtLabel: string;
   endsAtLabel: string;
   isActive: boolean;
+  approvalStatus: CatalogApprovalStatus;
+  approvedAtLabel?: string;
+  approvedByEmail?: string;
   sortOrder: number;
 }
 

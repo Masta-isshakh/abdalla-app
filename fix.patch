@@ -1,0 +1,6 @@
+const statusSummary =
+  approvalStatus === 'approved'
+    ? ' and approved for publishing.'
+    : approvalStatus === 'pending'
+      ? ' and submitted for admin approval.'
+      : ' as a draft.';

@@ -138,6 +138,9 @@ const schema = a.schema({
       startsAtLabel: a.string(),
       endsAtLabel: a.string(),
       isActive: a.boolean(),
+      approvalStatus: a.string(),
+      approvedAtLabel: a.string(),
+      approvedByEmail: a.string(),
       sortOrder: a.integer(),
     })
     .authorization((allow) => [

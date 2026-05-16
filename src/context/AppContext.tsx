@@ -198,6 +198,7 @@ interface AppContextValue {
   reviewCatalogItem: (itemId: string, decision: 'approved' | 'rejected') => Promise<void>;
   deleteCatalogItem: (itemId: string) => Promise<void>;
   saveOfferPromotion: (companyId: string, draft: OfferPromotionDraft) => Promise<void>;
+  reviewOfferPromotion: (promotionId: string, decision: 'approved' | 'rejected') => Promise<void>;
   deleteOfferPromotion: (promotionId: string) => Promise<void>;
   markNotificationRead: (notificationId: string) => Promise<void>;
   saveLoyaltyProgram: (scope: 'admin' | 'company', companyId: string | undefined, draft: LoyaltyProgramDraft) => Promise<void>;
@@ -1107,9 +1108,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ? ' and approved for publishing.'
         : approvalStatus === 'pending'
           ? ' and submitted for admin approval.'
-          : approvalStatus === 'rejected'
-            ? ' but rejected from publishing.'
-            : ' as a draft.';
+          : ' as a draft.';
 
     await createAuditEvent({
       entityType: 'catalogItem',
@@ -1202,6 +1201,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       throw new Error('Select a valid company item for this promotion.');
     }
 
+    const existingPromotion = draft.id ? offerPromotions.find((entry) => entry.id === draft.id) : undefined;
+    const actorIsAdmin = activeRole === 'admin';
+
+    let approvalStatus: CatalogApprovalStatus = 'draft';
+    let approvedAtLabel: string | undefined;
+    let approvedByEmail: string | undefined;
+
+    // New promotions submitted by non-admins need approval
+    if (!draft.id) {
+      approvalStatus = actorIsAdmin ? 'approved' : 'pending';
+      if (actorIsAdmin) {
+        approvedAtLabel = nowLabel();
+        approvedByEmail = authUser?.email ?? 'admin@jahzeen.app';
+      }
+    } else {
+      // Updates preserve existing approval state
+      approvalStatus = existingPromotion?.approvalStatus ?? 'draft';
+      approvedAtLabel = existingPromotion?.approvedAtLabel;
+      approvedByEmail = existingPromotion?.approvedByEmail;
+    }
+
     const nextPromotion: OfferPromotion = {
       id: draft.id ?? `promotion-${Date.now()}`,
       companyId,
@@ -1214,7 +1234,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       discountLabel: draft.discountLabel,
       startsAtLabel: draft.startsAtLabel,
       endsAtLabel: draft.endsAtLabel,
-      isActive: draft.isActive,
+      isActive: draft.isActive && approvalStatus === 'approved',
+      approvalStatus,
+      approvedAtLabel,
+      approvedByEmail,
       sortOrder: draft.sortOrder,
     };
 
@@ -1226,9 +1249,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       await safeCreate('OfferPromotion', { ...nextPromotion });
     }
 
+    // Send admin notification only if new promotion is pending approval
+    if (!draft.id && approvalStatus === 'pending') {
+      await createNotification({
+        recipientRole: 'admin',
+        title: `Approval needed: "${nextPromotion.title}"`,
+        body: `${company.name} submitted a promotion for publishing approval.`,
+        kind: 'promotion',
+        destinationTab: 'publishing',
+      });
+    }
+
     await Promise.all([
-      createNotification({ recipientRole: 'company', companyId, title: `${nextPromotion.title} is ${nextPromotion.isActive ? 'live' : 'saved'}`, body: `Promotion linked to ${nextPromotion.catalogItemTitle}.`, kind: 'promotion', destinationTab: 'offers' }),
-      ...(nextPromotion.isActive
+      createNotification({ recipientRole: 'company', companyId, title: `${nextPromotion.title} is ${approvalStatus === 'pending' ? 'submitted for approval' : nextPromotion.isActive ? 'live' : 'saved'}`, body: `Promotion linked to ${nextPromotion.catalogItemTitle}.`, kind: 'promotion', destinationTab: 'offers' }),
+      ...(approvalStatus === 'approved' && nextPromotion.isActive && !draft.id
         ? [createNotification({ recipientRole: 'customer', title: `${nextPromotion.title} is now live`, body: nextPromotion.headline, kind: 'promotion', destinationTab: 'explore' })]
         : []),
     ]);
@@ -1239,6 +1273,67 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setOfferPromotions((current) => current.filter((entry) => entry.id !== promotionId));
     await safeDelete('OfferPromotion', promotionId);
     await createAuditEvent({ entityType: 'promotion', entityId: promotionId, action: 'deletePromotion', status: 'warning', summary: 'Promotion was removed from the marketplace plan.' });
+  }
+
+  async function reviewOfferPromotion(promotionId: string, decision: 'approved' | 'rejected') {
+    const existing = offerPromotions.find((entry) => entry.id === promotionId);
+    if (!existing) {
+      throw new Error('Promotion not found.');
+    }
+
+    const nextStatus: CatalogApprovalStatus = decision;
+    const approvedByEmail = decision === 'approved' ? authUser?.email ?? 'admin@jahzeen.app' : undefined;
+    const approvedAtLabel = decision === 'approved' ? nowLabel() : undefined;
+
+    const nextPromotion: OfferPromotion = {
+      ...existing,
+      approvalStatus: nextStatus,
+      isActive: decision === 'approved',
+      approvedAtLabel,
+      approvedByEmail,
+    };
+
+    setOfferPromotions((current) => current.map((entry) => (entry.id === promotionId ? nextPromotion : entry)));
+
+    await safeUpdate('OfferPromotion', { ...nextPromotion });
+
+    await Promise.all([
+      createNotification({
+        recipientRole: 'company',
+        companyId: existing.companyId,
+        title: `Promotion "${existing.title}" ${decision === 'approved' ? 'approved' : 'rejected'}`,
+        body:
+          decision === 'approved'
+            ? `Your promotion is now live and customers can see it.`
+            : `Your promotion was rejected. Review and update the details to resubmit.`,
+        kind: 'promotion',
+        destinationTab: 'offers',
+      }),
+      ...(decision === 'approved'
+        ? [
+            createNotification({
+              recipientRole: 'customer',
+              title: `${existing.title} is live`,
+              body: `${existing.companyName} is running a new promotion on ${existing.catalogItemTitle}.`,
+              kind: 'promotion',
+              destinationTab: 'explore',
+            }),
+          ]
+        : []),
+    ]);
+
+    await createAuditEvent({
+      entityType: 'promotion',
+      entityId: existing.id,
+      companyId: existing.companyId,
+      action: decision === 'approved' ? 'approvePromotion' : 'rejectPromotion',
+      status: decision === 'approved' ? 'success' : 'warning',
+      summary:
+        decision === 'approved'
+          ? `"${existing.title}" was approved and is now live.`
+          : `"${existing.title}" was rejected and stays hidden from customers.`,
+      metadata: [existing.catalogItemTitle, decision],
+    });
   }
 
   async function markNotificationRead(notificationId: string) {
@@ -1387,7 +1482,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, signInChallenge, activeRole, profile, addresses, users, companies, appCategorySettings, invitations, catalogItems, offerPromotions, notifications, auditEvents, bookings, availabilitySlots, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, signInWithEmail, completeNewPassword, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, reviewCatalogItem, deleteCatalogItem, saveOfferPromotion, deleteOfferPromotion, markNotificationRead, saveLoyaltyProgram, saveCategorySetting, saveAvailabilitySlot, deleteAvailabilitySlot, placeBooking, changeBookingStatus, submitRating }}>
+    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, signInChallenge, activeRole, profile, addresses, users, companies, appCategorySettings, invitations, catalogItems, offerPromotions, notifications, auditEvents, bookings, availabilitySlots, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, signInWithEmail, completeNewPassword, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, reviewCatalogItem, deleteCatalogItem, saveOfferPromotion, reviewOfferPromotion, deleteOfferPromotion, markNotificationRead, saveLoyaltyProgram, saveCategorySetting, saveAvailabilitySlot, deleteAvailabilitySlot, placeBooking, changeBookingStatus, submitRating }}>
       {children}
     </AppContext.Provider>
   );
