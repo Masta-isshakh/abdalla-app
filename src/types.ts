@@ -8,7 +8,7 @@ export type ItemKind = 'service' | 'product';
 
 export type CatalogApprovalStatus = 'draft' | 'pending' | 'approved' | 'rejected';
 
-export type LoyaltyScope = 'admin' | 'company';
+export type LoyaltyScope = 'admin' | 'company';             
 
 export type NotificationAudience = 'admin' | 'company' | 'customer';
 
