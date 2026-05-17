@@ -1200,26 +1200,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!company || !item) {
       throw new Error('Select a valid company item for this promotion.');
     }
+    if (!(item.approvalStatus === 'approved' && item.isPublished)) {
+      throw new Error('Promotions can only be linked to approved and published catalog items.');
+    }
 
-    const existingPromotion = draft.id ? offerPromotions.find((entry) => entry.id === draft.id) : undefined;
     const actorIsAdmin = activeRole === 'admin';
 
     let approvalStatus: CatalogApprovalStatus = 'draft';
     let approvedAtLabel: string | undefined;
     let approvedByEmail: string | undefined;
 
-    // New promotions submitted by non-admins need approval
-    if (!draft.id) {
-      approvalStatus = actorIsAdmin ? 'approved' : 'pending';
-      if (actorIsAdmin) {
-        approvedAtLabel = nowLabel();
-        approvedByEmail = authUser?.email ?? 'admin@jahzeen.app';
-      }
+    if (actorIsAdmin) {
+      approvalStatus = 'approved';
+      approvedAtLabel = nowLabel();
+      approvedByEmail = authUser?.email ?? 'admin@jahzeen.app';
     } else {
-      // Updates preserve existing approval state
-      approvalStatus = existingPromotion?.approvalStatus ?? 'draft';
-      approvedAtLabel = existingPromotion?.approvedAtLabel;
-      approvedByEmail = existingPromotion?.approvedByEmail;
+      // Any company-side save (new or edit) must be approved by admin before going live.
+      approvalStatus = 'pending';
+      approvedAtLabel = undefined;
+      approvedByEmail = undefined;
     }
 
     const nextPromotion: OfferPromotion = {
@@ -1249,12 +1248,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       await safeCreate('OfferPromotion', { ...nextPromotion });
     }
 
-    // Send admin notification only if new promotion is pending approval
-    if (!draft.id && approvalStatus === 'pending') {
+    // Send admin notification when a promotion requires approval.
+    if (approvalStatus === 'pending') {
       await createNotification({
         recipientRole: 'admin',
         title: `Approval needed: "${nextPromotion.title}"`,
-        body: `${company.name} submitted a promotion for publishing approval.`,
+        body: `${company.name} ${draft.id ? 'updated' : 'submitted'} a promotion for publishing approval.`,
         kind: 'promotion',
         destinationTab: 'publishing',
       });

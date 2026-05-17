@@ -20,7 +20,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 
 import { readableBookingStatus, useAppState } from '../context/AppContext';
 import {
@@ -102,7 +102,7 @@ type CompanyFormState = {
   logoText: string;
   profileImageUrl: string;
 };
-const CATEGORY_GROUPS: Array<{ key: string; title: string; icon: keyof typeof Ionicons.glyphMap; categories: string[] }> = [
+const CATEGORY_GROUPS: Array<{ key: string; title: string; icon: keyof typeof MaterialCommunityIcons.glyphMap; categories: string[] }> = [
   {
     key: 'home-services',
     title: 'Home Services',
@@ -119,19 +119,19 @@ const CATEGORY_GROUPS: Array<{ key: string; title: string; icon: keyof typeof Io
   {
     key: 'car-services',
     title: 'Car Services',
-    icon: 'car-sport-outline',
+    icon: 'car-sports',
     categories: ['Car Wash', 'Car Service', 'Car Winch'],
   },
   {
     key: 'ac-services',
     title: 'AC Services',
-    icon: 'snow-outline',
+    icon: 'air-conditioner',
     categories: ['AC Cleaning', 'New AC'],
   },
   {
     key: 'utilities',
     title: 'Utilities',
-    icon: 'water-outline',
+    icon: 'water',
     categories: ['Water Delivery'],
   },
 ];
@@ -198,6 +198,7 @@ function WorkspaceScreen() {
     saveAddress,
     saveCatalogItem,
     reviewCatalogItem,
+    reviewOfferPromotion,
     saveLoyaltyProgram,
     saveCategorySetting,
     saveAvailabilitySlot,
@@ -298,6 +299,7 @@ function WorkspaceScreen() {
   });
   const [scheduleForm, setScheduleForm] = useState({
     id: '',
+    catalogItemId: '',
     dateLabel: 'Tomorrow',
     timeLabel: '10:00 AM',
     status: 'available' as AvailabilitySlot['status'],
@@ -471,6 +473,19 @@ function WorkspaceScreen() {
     () => catalogItems.filter((entry) => entry.companyId === currentCompany?.id),
     [catalogItems, currentCompany?.id],
   );
+  const approvedCompanyItems = useMemo(
+    () => companyItems.filter((entry) => entry.approvalStatus === 'approved' && entry.isPublished),
+    [companyItems],
+  );
+
+  useEffect(() => {
+    setScheduleForm((current) => {
+      if (current.id || current.catalogItemId || !approvedCompanyItems.length) {
+        return current;
+      }
+      return { ...current, catalogItemId: approvedCompanyItems[0].id };
+    });
+  }, [approvedCompanyItems]);
   const companyPromotions = useMemo(
     () => offerPromotions.filter((entry) => entry.companyId === currentCompany?.id).sort((left, right) => left.sortOrder - right.sortOrder),
     [currentCompany?.id, offerPromotions],
@@ -586,7 +601,7 @@ function WorkspaceScreen() {
     }
 
     setOfferForm({
-      catalogItemId: companyItems[0]?.id ?? '',
+      catalogItemId: approvedCompanyItems[0]?.id ?? '',
       title: '',
       headline: '',
       badgeText: '',
@@ -596,7 +611,7 @@ function WorkspaceScreen() {
       isActive: true,
       sortOrder: '0',
     });
-  }, [companyItems, selectedPromotion]);
+  }, [approvedCompanyItems, selectedPromotion]);
 
   const adminMetrics = useMemo(
     () => [
@@ -609,11 +624,11 @@ function WorkspaceScreen() {
   );
 
   const customerTabs = [
-    { key: 'home', label: 'Home', icon: 'home-outline' },
-    { key: 'browse', label: 'Browse', icon: 'grid-outline' },
-    { key: 'explore', label: 'Explore', icon: 'search-outline' },
-    { key: 'orders', label: 'Orders', icon: 'receipt-outline' },
-    { key: 'profile', label: 'Profile', icon: 'person-outline' },
+    { key: 'home', label: 'Home', icon: 'home', activeIcon: 'home' },
+    { key: 'browse', label: 'Browse', icon: 'apps-box', activeIcon: 'apps-box' },
+    { key: 'explore', label: 'Explore', icon: 'compass', activeIcon: 'compass' },
+    { key: 'orders', label: 'Orders', icon: 'clipboard-list', activeIcon: 'clipboard-list' },
+    { key: 'profile', label: 'Profile', icon: 'account', activeIcon: 'account' },
   ];
 
   const adminNotifications = useMemo(
@@ -673,7 +688,7 @@ function WorkspaceScreen() {
       durationLabel: '',
       kind: 'service',
       tags: '',
-      isPublished: true,
+      isPublished: false,
       featured: false,
       loyaltyPoints: '10',
       imageUrl: '',
@@ -879,10 +894,12 @@ function WorkspaceScreen() {
       });
       setCompanyBanner({
         tone: 'success',
-        text: selectedCatalogItem
-          ? 'Catalog item updated and re-submitted for admin approval.'
-          : catalogForm.isPublished
-            ? 'Catalog item submitted for admin approval. It will go live after approval.'
+        text: catalogForm.isPublished
+          ? selectedCatalogItem
+            ? 'Catalog item updated and submitted for admin approval.'
+            : 'Catalog item submitted for admin approval. It will go live after approval.'
+          : selectedCatalogItem
+            ? 'Catalog item updated as a draft.'
             : 'Catalog item saved as a draft.',
       });
       resetCatalogDrafts();
@@ -946,7 +963,12 @@ function WorkspaceScreen() {
       });
       setSelectedPromotionId(null);
       setOfferFormErrors({});
-      setCompanyBanner({ tone: 'success', text: selectedPromotion ? 'Promotion updated.' : 'Promotion saved.' });
+      setCompanyBanner({
+        tone: 'success',
+        text: selectedPromotion
+          ? 'Promotion updated. It stays pending until admin approval.'
+          : 'Promotion submitted for admin approval. It will go live after approval.',
+      });
     } catch (error) {
       setCompanyBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to save promotion.' });
     }
@@ -969,10 +991,25 @@ function WorkspaceScreen() {
       return;
     }
 
+    if (!scheduleForm.catalogItemId) {
+      setCompanyBanner({ tone: 'error', text: 'Select a published service or product before saving a schedule slot.' });
+      return;
+    }
+
     if (!scheduleForm.dateLabel.trim() || !scheduleForm.timeLabel.trim()) {
       setCompanyBanner({ tone: 'error', text: 'Add both date and time for the schedule slot.' });
       return;
     }
+
+    const linkedItem = approvedCompanyItems.find((entry) => entry.id === scheduleForm.catalogItemId);
+    if (!linkedItem) {
+      setCompanyBanner({ tone: 'error', text: 'The selected item is not published. Choose an approved item.' });
+      return;
+    }
+
+    const linkedNotePrefix = `Item: ${linkedItem.title}`;
+    const rawNote = scheduleForm.note.trim().replace(/^Item:\s.*?(\s\|\s)?/, '').trim();
+    const linkedNote = rawNote ? `${linkedNotePrefix} | ${rawNote}` : linkedNotePrefix;
 
     try {
       await saveAvailabilitySlot(currentCompany.id, {
@@ -980,9 +1017,9 @@ function WorkspaceScreen() {
         dateLabel: scheduleForm.dateLabel.trim(),
         timeLabel: scheduleForm.timeLabel.trim(),
         status: scheduleForm.status,
-        note: scheduleForm.note.trim(),
+        note: linkedNote,
       });
-      setScheduleForm({ id: '', dateLabel: 'Tomorrow', timeLabel: '10:00 AM', status: 'available', note: '' });
+      setScheduleForm({ id: '', catalogItemId: approvedCompanyItems[0]?.id ?? '', dateLabel: 'Tomorrow', timeLabel: '10:00 AM', status: 'available', note: '' });
       setCompanyBanner({ tone: 'success', text: 'Schedule slot saved.' });
     } catch (error) {
       setCompanyBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to save schedule slot.' });
@@ -993,7 +1030,7 @@ function WorkspaceScreen() {
     try {
       await deleteAvailabilitySlot(slotId);
       if (scheduleForm.id === slotId) {
-        setScheduleForm({ id: '', dateLabel: 'Tomorrow', timeLabel: '10:00 AM', status: 'available', note: '' });
+        setScheduleForm({ id: '', catalogItemId: approvedCompanyItems[0]?.id ?? '', dateLabel: 'Tomorrow', timeLabel: '10:00 AM', status: 'available', note: '' });
       }
       setCompanyBanner({ tone: 'info', text: 'Schedule slot removed.' });
     } catch (error) {
@@ -1216,31 +1253,15 @@ function WorkspaceScreen() {
     return (
       <SafeAreaView edges={['top', 'bottom']} style={[styles.safeArea, customerDarkMode && styles.customerShellSafeAreaDark]}>
         <View style={[styles.customerShell, customerDarkMode && styles.customerShellDark]}>
-          <View style={[styles.customerHeaderPlain, customerTab === 'home' && styles.customerHeaderPlainHome]}>
-            <Pressable style={[styles.customerHeaderIconButton, customerDarkMode && styles.customerHeaderIconButtonDark]} onPress={() => setCustomerCategoryMenuOpen(true)}>
-              <Ionicons name="menu-outline" size={22} color={customerDarkMode ? '#F5F7FA' : colors.text} />
-            </Pressable>
-
-            <Pressable style={styles.customerHeaderCenteredBrand} onPress={() => setCustomerTab('home')}>
-              <Image source={APP_LOGO_IMAGE} style={styles.customerHeaderBrandLogo} resizeMode="cover" />
-              <Text style={[styles.customerHeaderCenteredTitle, customerDarkMode && styles.customerHeaderCenteredTitleDark]}>Jahzeen</Text>
-            </Pressable>
-
-            <View style={styles.customerHeaderActions}>
-              <Pressable style={[styles.customerHeaderIconButton, customerDarkMode && styles.customerHeaderIconButtonDark]} onPress={() => setCustomerTab('explore')}>
-                <Ionicons name="search-outline" size={20} color={customerDarkMode ? '#F5F7FA' : colors.text} />
-              </Pressable>
-
-              <Pressable style={[styles.customerHeaderIconButton, customerDarkMode && styles.customerHeaderIconButtonDark]} onPress={handleNotificationPress}>
-                <Ionicons name="notifications-outline" size={20} color={customerDarkMode ? '#F5F7FA' : colors.text} />
-                {customerNotificationCount ? (
-                  <View style={styles.customerHeaderIconBadge}>
-                    <Text style={styles.customerHeaderIconBadgeText}>{Math.min(customerNotificationCount, 99)}</Text>
-                  </View>
-                ) : null}
-              </Pressable>
-            </View>
-          </View>
+          <PremiumHeader
+            logoText="Jahzeen"
+            darkMode={customerDarkMode}
+            notificationCount={customerNotificationCount}
+            onSearchPress={() => setCustomerTab('explore')}
+            onNotificationPress={handleNotificationPress}
+            onProfilePress={() => setCustomerTab('profile')}
+            onMenuPress={() => setCustomerCategoryMenuOpen(true)}
+          />
 
           <View style={styles.customerWorkspaceHost}>
             <CustomerWorkspace
@@ -1334,26 +1355,67 @@ function WorkspaceScreen() {
 
           <OperationPopup visible={!!operationPopup} tone={operationPopup?.tone ?? 'success'} text={operationPopup?.text ?? ''} onClose={() => setOperationPopup(null)} />
 
-          <Modal visible={customerCategoryMenuOpen} transparent animationType="slide" onRequestClose={() => setCustomerCategoryMenuOpen(false)}>
-            <View style={styles.customerCategoryDrawerOverlay}>
-              <Pressable style={styles.customerCategoryDrawerBackdrop} onPress={() => setCustomerCategoryMenuOpen(false)} />
-              <View style={styles.customerCategoryDrawer}>
-                <Text style={styles.customerCategoryDrawerTitle}>Categories</Text>
-                <View style={styles.customerCategorySearchWrap}>
+          <Modal visible={customerCategoryMenuOpen} transparent animationType="none" onRequestClose={() => setCustomerCategoryMenuOpen(false)}>
+            <View style={premSidebarStyles.overlay}>
+              <Pressable style={premSidebarStyles.backdrop} onPress={() => setCustomerCategoryMenuOpen(false)} />
+              <View style={[premSidebarStyles.drawer, customerDarkMode && premSidebarStyles.drawerDark]}>
+                {/* Header */}
+                <View style={premSidebarStyles.drawerHeader}>
+                  <View style={premSidebarStyles.drawerLogoMark}>
+                    <MaterialCommunityIcons name="star-four-points" size={16} color="#FFFFFF" />
+                  </View>
+                  <Text style={[premSidebarStyles.drawerBrand, customerDarkMode && premSidebarStyles.drawerBrandDark]}>Jahzeen</Text>
+                  <Pressable style={premSidebarStyles.drawerCloseBtn} onPress={() => setCustomerCategoryMenuOpen(false)}>
+                    <MaterialCommunityIcons name="close" size={18} color={customerDarkMode ? '#9DB8CC' : '#5B7A90'} />
+                  </Pressable>
+                </View>
+
+                {/* Quick Nav */}
+                <View style={premSidebarStyles.navSection}>
+                  {[
+                    { key: 'home', label: 'Home', icon: 'home' as const },
+                    { key: 'browse', label: 'Browse', icon: 'apps-box' as const },
+                    { key: 'explore', label: 'Explore', icon: 'compass' as const },
+                    { key: 'orders', label: 'My Orders', icon: 'clipboard-list' as const },
+                    { key: 'profile', label: 'My Profile', icon: 'account' as const },
+                  ].map((item) => (
+                    <Pressable
+                      key={item.key}
+                      style={[premSidebarStyles.navRow, customerDarkMode && premSidebarStyles.navRowDark]}
+                      onPress={() => {
+                        setCustomerTab(item.key as any);
+                        setCustomerCategoryMenuOpen(false);
+                      }}
+                    >
+                      <View style={[premSidebarStyles.navIcon, customerDarkMode && premSidebarStyles.navIconDark]}>
+                        <MaterialCommunityIcons name={item.icon} size={22} color="#12385E" />
+                      </View>
+                      <Text style={[premSidebarStyles.navLabel, customerDarkMode && premSidebarStyles.navLabelDark]}>{item.label}</Text>
+                      <MaterialCommunityIcons name="chevron-right" size={18} color={customerDarkMode ? '#4A6B85' : '#C8D5DF'} />
+                    </Pressable>
+                  ))}
+                </View>
+
+                <View style={[premSidebarStyles.divider, customerDarkMode && premSidebarStyles.dividerDark]} />
+
+                {/* Categories */}
+                <Text style={[premSidebarStyles.sectionLabel, customerDarkMode && premSidebarStyles.sectionLabelDark]}>Service Categories</Text>
+                <View style={premSidebarStyles.categorySearch}>
+                  <MaterialCommunityIcons name="magnify" size={18} color="#8EA3B8" />
                   <TextInput
                     value={customerCategoryQuery}
                     onChangeText={setCustomerCategoryQuery}
-                    placeholder="Search categories"
-                    placeholderTextColor="#8A8F98"
-                    style={styles.customerCategorySearchInput}
+                    placeholder="Search categories..."
+                    placeholderTextColor="#8EA3B8"
+                    style={[premSidebarStyles.categoryInput, customerDarkMode && premSidebarStyles.categoryInputDark]}
                   />
-                  <Ionicons name="search-outline" size={22} color="#D5D8DE" />
                 </View>
-                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.customerCategoryDrawerList}>
+
+                <ScrollView showsVerticalScrollIndicator={false} style={premSidebarStyles.categoryList}>
                   {visibleCustomerCategories.map((category) => (
                     <Pressable
                       key={category}
-                      style={styles.customerCategoryDrawerRow}
+                      style={[premSidebarStyles.categoryRow, customerDarkMode && premSidebarStyles.categoryRowDark]}
                       onPress={() => {
                         setSelectedCustomerCategory(category);
                         setCustomerSearchQuery('');
@@ -1361,8 +1423,11 @@ function WorkspaceScreen() {
                         setCustomerTab('explore');
                       }}
                     >
-                      <Text style={styles.customerCategoryDrawerRowText}>{category}</Text>
-                      <Ionicons name="chevron-forward-outline" size={20} color="#D7DADF" />
+                      <View style={[premSidebarStyles.categoryIcon, customerDarkMode && premSidebarStyles.categoryIconDark]}>
+                        <MaterialCommunityIcons name={iconForCategory(category)} size={20} color="#12385E" />
+                      </View>
+                      <Text style={[premSidebarStyles.categoryLabel, customerDarkMode && premSidebarStyles.categoryLabelDark]} numberOfLines={1}>{category}</Text>
+                      <MaterialCommunityIcons name="chevron-right" size={14} color={customerDarkMode ? '#4A6B85' : '#C8D5DF'} />
                     </Pressable>
                   ))}
                 </ScrollView>
@@ -1377,7 +1442,7 @@ function WorkspaceScreen() {
   return (
     <SafeAreaView edges={['top']} style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
-        <LinearGradient colors={[colors.hero, '#FFF8EF']} style={styles.heroCard}>
+        <View style={styles.heroCard}>
           <View style={styles.heroTopRow}>
             <View style={styles.heroTextWrap}>
               <Text style={styles.brandName}>Abdalla</Text>
@@ -1393,7 +1458,7 @@ function WorkspaceScreen() {
             Admins control onboarding and partner governance, companies operate their own publishing workspace, and customers can browse publicly and sign in only when they need to transact.
           </Text>
           {!!authMessage && <Text style={styles.messageText}>{authMessage}</Text>}
-        </LinearGradient>
+        </View>
 
         {activeRole === 'admin' ? (
           <AdminWorkspace
@@ -1856,30 +1921,7 @@ function AdminWorkspace({
               </View>
             </SectionCard>
 
-            <SectionCard title="Invite company owner" subtitle="Centralized invite management lives in Companies tab only.">
-              <View style={styles.rowGap}>
-                <FormField label="Company name" value={inviteForm.companyName} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, companyName: value }))} error={inviteErrors.companyName} />
-                <FormField label="Invite email" value={inviteForm.email} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, email: value }))} error={inviteErrors.email} />
-              </View>
-              <FormField label="Message" value={inviteForm.message} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, message: value }))} multiline />
-              <Text style={styles.helperText}>This is the only place to invite company users. Invitations are no longer shown in Settings.</Text>
-              <PrimaryButton label="Send invitation" onPress={onInvite} loading={inviteSubmitting} disabled={inviteSubmitting} />
-            </SectionCard>
-
-            <SectionCard title="Pending invitations" subtitle="Track invite delivery and activation without leaving the Companies tab.">
-              {pendingInvitations.length ? pendingInvitations.map((invitation) => (
-                <InfoRow
-                  key={invitation.id}
-                  title={`${invitation.companyName} · ${invitation.email}`}
-                  subtitle={`Delivery: ${invitation.emailDeliveryStatus}${invitation.emailSentAtLabel ? ` · ${invitation.emailSentAtLabel}` : ''}${invitation.emailDeliveryError ? ` · ${invitation.emailDeliveryError}` : ''}`}
-                  actionLabel="Resend"
-                  onAction={() => onResendInvitation(invitation)}
-                  secondaryActionLabel="Revoke"
-                  onSecondaryAction={() => onRevokeInvitation(invitation)}
-                />
-              )) : <EmptyState title="No pending invitations" body="Every invitation is either accepted, revoked, or ready to be sent." />}
-            </SectionCard>
-            <SectionCard title={selectedCompany ? 'Edit company profile' : 'Create company profile'} subtitle="When admins create a company, they must assign a category and upload the company profile image used in customer listings.">
+            <SectionCard title={selectedCompany ? 'Edit company profile' : 'Create company profile'} subtitle="Create the company first, upload its profile image, and keep the owner details in one workflow.">
               <View style={styles.rowGap}>
                 <FormField label="Company name" value={form.name} onChangeText={(value) => onFormChange((current) => ({ ...current, name: value }))} error={formErrors.name} />
                 <SelectField label="Company category" value={form.category} options={APP_CATEGORY_OPTIONS} placeholder="Choose a category" error={formErrors.category} onSelect={(value) => onFormChange((current) => ({ ...current, category: value }))} />
@@ -1898,7 +1940,7 @@ function AdminWorkspace({
                   <Image source={{ uri: form.profileImageUrl }} style={styles.catalogUploadPreviewImage} resizeMode="cover" />
                 ) : (
                   <View style={styles.catalogUploadPlaceholder}>
-                    <Ionicons name="image-outline" size={30} color={colors.primary} />
+                    <MaterialCommunityIcons name="image-outline" size={34} color="#12385E" />
                     <Text style={styles.catalogUploadPlaceholderTitle}>Upload company profile image</Text>
                     <Text style={styles.catalogUploadPlaceholderBody}>This image is shown on the customer home and explore screens as the company cover.</Text>
                   </View>
@@ -1913,6 +1955,30 @@ function AdminWorkspace({
                 <PrimaryButton label={selectedCompany ? 'Save company profile' : 'Create company'} onPress={onSaveCompany} />
                 <SecondaryButton label="Reset form" onPress={onResetCompany} />
               </View>
+            </SectionCard>
+
+            <SectionCard title="Invite company owner" subtitle="After the profile is ready, send the owner invite from this centralized tab.">
+              <View style={styles.rowGap}>
+                <FormField label="Company name" value={inviteForm.companyName} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, companyName: value }))} error={inviteErrors.companyName} />
+                <FormField label="Owner email" value={inviteForm.email} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, email: value }))} error={inviteErrors.email} />
+              </View>
+              <FormField label="Invite note" value={inviteForm.message} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, message: value }))} multiline />
+              <Text style={styles.helperText}>Use the same company name as the profile above. Invitations are managed only here, not in Settings.</Text>
+              <PrimaryButton label="Send invitation" onPress={onInvite} loading={inviteSubmitting} disabled={inviteSubmitting} />
+            </SectionCard>
+
+            <SectionCard title="Pending invitations" subtitle="Track invite delivery and activation without leaving the Companies tab.">
+              {pendingInvitations.length ? pendingInvitations.map((invitation) => (
+                <InfoRow
+                  key={invitation.id}
+                  title={`${invitation.companyName} · ${invitation.email}`}
+                  subtitle={`Delivery: ${invitation.emailDeliveryStatus}${invitation.emailSentAtLabel ? ` · ${invitation.emailSentAtLabel}` : ''}${invitation.emailDeliveryError ? ` · ${invitation.emailDeliveryError}` : ''}`}
+                  actionLabel="Resend"
+                  onAction={() => onResendInvitation(invitation)}
+                  secondaryActionLabel="Revoke"
+                  onSecondaryAction={() => onRevokeInvitation(invitation)}
+                />
+              )) : <EmptyState title="No pending invitations" body="Every invitation is either accepted, revoked, or ready to be sent." />}
             </SectionCard>
 
             <SectionCard title="Management rules" subtitle="Use this page to create company profiles and manage activation status with clear operational guardrails.">
@@ -2335,6 +2401,7 @@ type CompanyWorkspaceProps = {
   companyAvailabilitySlots: AvailabilitySlot[];
   scheduleForm: {
     id: string;
+    catalogItemId: string;
     dateLabel: string;
     timeLabel: string;
     status: AvailabilitySlot['status'];
@@ -2342,6 +2409,7 @@ type CompanyWorkspaceProps = {
   };
   onScheduleFormChange: React.Dispatch<React.SetStateAction<{
     id: string;
+    catalogItemId: string;
     dateLabel: string;
     timeLabel: string;
     status: AvailabilitySlot['status'];
@@ -2418,6 +2486,10 @@ function CompanyWorkspace({
   currentProgram,
 }: CompanyWorkspaceProps) {
   const ultraWide = useWindowDimensions().width >= 1360;
+  const publishedCatalogItems = useMemo(
+    () => companyItems.filter((item) => item.approvalStatus === 'approved' && item.isPublished),
+    [companyItems],
+  );
   const [companyTrendWindow, setCompanyTrendWindow] = useState<7 | 30 | 90>(30);
   const [companyTrendFocus, setCompanyTrendFocus] = useState<'activity' | 'bookings' | 'publishing'>('activity');
   const [catalogFilter, setCatalogFilter] = useState<'all' | 'approved' | 'pending' | 'draft' | 'attention'>('all');
@@ -2740,7 +2812,7 @@ function CompanyWorkspace({
                     <Image source={{ uri: catalogForm.imageUrl }} style={styles.catalogUploadPreviewImage} resizeMode="cover" />
                   ) : (
                     <View style={styles.catalogUploadPlaceholder}>
-                      <Ionicons name="image-outline" size={30} color={colors.primary} />
+                      <MaterialCommunityIcons name="image-outline" size={34} color="#12385E" />
                       <Text style={styles.catalogUploadPlaceholderTitle}>Upload a real storefront image</Text>
                       <Text style={styles.catalogUploadPlaceholderBody}>Use product or service photography so the catalog feels closer to a customer-facing marketplace.</Text>
                     </View>
@@ -2756,6 +2828,8 @@ function CompanyWorkspace({
                   <ChoiceChip label="Product" selected={catalogForm.kind === 'product'} onPress={() => onCatalogFormChange((current) => ({ ...current, kind: 'product' }))} />
                   <ChoiceChip label="Submit for approval" selected={catalogForm.isPublished} onPress={() => onCatalogFormChange((current) => ({ ...current, isPublished: !current.isPublished }))} />
                 </View>
+                {catalogErrors.kind ? <FieldError text={catalogErrors.kind} /> : null}
+                {catalogErrors.imageUrl ? <FieldError text={catalogErrors.imageUrl} /> : null}
                 <SecondaryButton label={selectedCatalogItem ? 'Save item changes' : 'Submit item'} tone="contrast" onPress={onSaveCatalog} loading={catalogSubmitting} disabled={catalogSubmitting} />
                 <Text style={styles.catalogSubmitHint}>{catalogForm.isPublished ? 'Submitted items stay hidden until admin approval.' : 'Draft items stay private until you submit them for approval.'}</Text>
                 {selectedCatalogItem ? (
@@ -2852,7 +2926,7 @@ function CompanyWorkspace({
                   <Image source={{ uri: catalogForm.imageUrl }} style={styles.catalogUploadPreviewImage} resizeMode="cover" />
                 ) : (
                   <View style={styles.catalogUploadPlaceholder}>
-                    <Ionicons name="image-outline" size={30} color={colors.primary} />
+                    <MaterialCommunityIcons name="image-outline" size={34} color="#12385E" />
                     <Text style={styles.catalogUploadPlaceholderTitle}>Upload a real storefront image</Text>
                     <Text style={styles.catalogUploadPlaceholderBody}>Use product or service photography so the catalog feels closer to a customer-facing marketplace.</Text>
                   </View>
@@ -2868,6 +2942,8 @@ function CompanyWorkspace({
                 <ChoiceChip label="Product" selected={catalogForm.kind === 'product'} onPress={() => onCatalogFormChange((current) => ({ ...current, kind: 'product' }))} />
                 <ChoiceChip label="Submit for approval" selected={catalogForm.isPublished} onPress={() => onCatalogFormChange((current) => ({ ...current, isPublished: !current.isPublished }))} />
               </View>
+              {catalogErrors.kind ? <FieldError text={catalogErrors.kind} /> : null}
+              {catalogErrors.imageUrl ? <FieldError text={catalogErrors.imageUrl} /> : null}
               <SecondaryButton label={selectedCatalogItem ? 'Save item changes' : 'Submit item'} tone="contrast" onPress={onSaveCatalog} loading={catalogSubmitting} disabled={catalogSubmitting} />
               <Text style={styles.catalogSubmitHint}>{catalogForm.isPublished ? 'Submitted items stay hidden until admin approval.' : 'Draft items stay private until you submit them for approval.'}</Text>
               {selectedCatalogItem ? (
@@ -2916,10 +2992,11 @@ function CompanyWorkspace({
               <SectionCard title={selectedPromotion ? 'Edit promotion' : 'Create promotion'} subtitle="Promotions are separate records linked to published catalog items, so offers do not depend on catalog flags anymore.">
                 <Text style={styles.fieldLabel}>Linked item</Text>
                 <View style={styles.toggleRow}>
-                  {companyItems.filter((item) => item.approvalStatus === 'approved').map((item) => (
+                  {publishedCatalogItems.map((item) => (
                     <ChoiceChip key={item.id} label={item.title} selected={offerForm.catalogItemId === item.id} onPress={() => onOfferFormChange((current) => ({ ...current, catalogItemId: item.id }))} />
                   ))}
                 </View>
+                {!publishedCatalogItems.length ? <Text style={styles.helperText}>Publish and approve at least one catalog item before creating offers.</Text> : null}
                 {offerErrors.catalogItemId ? <FieldError text={offerErrors.catalogItemId} /> : null}
                 <FormField label="Promotion title" value={offerForm.title} onChangeText={(value) => onOfferFormChange((current) => ({ ...current, title: value }))} error={offerErrors.title} />
                 <FormField label="Headline" value={offerForm.headline} onChangeText={(value) => onOfferFormChange((current) => ({ ...current, headline: value }))} error={offerErrors.headline} multiline />
@@ -3011,10 +3088,11 @@ function CompanyWorkspace({
             <SectionCard title={selectedPromotion ? 'Edit promotion' : 'Create promotion'} subtitle="Promotions are separate records linked to published catalog items, so offers do not depend on catalog flags anymore.">
               <Text style={styles.fieldLabel}>Linked item</Text>
               <View style={styles.toggleRow}>
-                {companyItems.filter((item) => item.approvalStatus === 'approved').map((item) => (
+                {publishedCatalogItems.map((item) => (
                   <ChoiceChip key={item.id} label={item.title} selected={offerForm.catalogItemId === item.id} onPress={() => onOfferFormChange((current) => ({ ...current, catalogItemId: item.id }))} />
                 ))}
               </View>
+              {!publishedCatalogItems.length ? <Text style={styles.helperText}>Publish and approve at least one catalog item before creating offers.</Text> : null}
               {offerErrors.catalogItemId ? <FieldError text={offerErrors.catalogItemId} /> : null}
               <FormField label="Promotion title" value={offerForm.title} onChangeText={(value) => onOfferFormChange((current) => ({ ...current, title: value }))} error={offerErrors.title} />
               <FormField label="Headline" value={offerForm.headline} onChangeText={(value) => onOfferFormChange((current) => ({ ...current, headline: value }))} error={offerErrors.headline} multiline />
@@ -3073,7 +3151,19 @@ function CompanyWorkspace({
       {tab === 'schedule' ? (
         <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
           <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
-            <SectionCard title={scheduleForm.id ? 'Edit schedule slot' : 'Add schedule slot'} subtitle="Providers can add available times, block busy periods, and keep customer booking slots accurate.">
+            <SectionCard title={scheduleForm.id ? 'Edit schedule slot' : 'Add schedule slot'} subtitle="Select a published service or product first, then add available times so booking slots stay tied to live listings.">
+              <Text style={styles.fieldLabel}>Linked published item</Text>
+              <View style={styles.toggleRow}>
+                {publishedCatalogItems.map((item) => (
+                  <ChoiceChip
+                    key={`schedule-item-${item.id}`}
+                    label={item.title}
+                    selected={scheduleForm.catalogItemId === item.id}
+                    onPress={() => onScheduleFormChange((current) => ({ ...current, catalogItemId: item.id }))}
+                  />
+                ))}
+              </View>
+              {!publishedCatalogItems.length ? <Text style={styles.helperText}>Publish and approve at least one catalog item before adding schedule slots.</Text> : null}
               <View style={styles.rowGap}>
                 <FormField label="Date" value={scheduleForm.dateLabel} onChangeText={(value) => onScheduleFormChange((current) => ({ ...current, dateLabel: value }))} />
                 <FormField label="Time" value={scheduleForm.timeLabel} onChangeText={(value) => onScheduleFormChange((current) => ({ ...current, timeLabel: value }))} />
@@ -3086,7 +3176,7 @@ function CompanyWorkspace({
               </View>
               <View style={styles.rowGap}>
                 <PrimaryButton label={scheduleForm.id ? 'Save slot' : 'Add slot'} onPress={onSaveSchedule} />
-                {scheduleForm.id ? <SecondaryButton label="Clear editing" onPress={() => onScheduleFormChange({ id: '', dateLabel: 'Tomorrow', timeLabel: '10:00 AM', status: 'available', note: '' })} /> : null}
+                {scheduleForm.id ? <SecondaryButton label="Clear editing" onPress={() => onScheduleFormChange({ id: '', catalogItemId: publishedCatalogItems[0]?.id ?? '', dateLabel: 'Tomorrow', timeLabel: '10:00 AM', status: 'available', note: '' })} /> : null}
               </View>
             </SectionCard>
           </View>
@@ -3098,7 +3188,7 @@ function CompanyWorkspace({
                   title={`${slot.dateLabel} · ${slot.timeLabel}`}
                   subtitle={`${slot.status.toUpperCase()}${slot.note ? ` · ${slot.note}` : ''}`}
                   actionLabel="Edit"
-                  onAction={() => onScheduleFormChange({ id: slot.id, dateLabel: slot.dateLabel, timeLabel: slot.timeLabel, status: slot.status, note: slot.note })}
+                  onAction={() => onScheduleFormChange({ id: slot.id, catalogItemId: publishedCatalogItems.find((item) => slot.note.includes(item.title))?.id ?? publishedCatalogItems[0]?.id ?? '', dateLabel: slot.dateLabel, timeLabel: slot.timeLabel, status: slot.status, note: slot.note })}
                   secondaryActionLabel="Delete"
                   onSecondaryAction={() => onDeleteSchedule(slot.id)}
                 />
@@ -3611,38 +3701,54 @@ function CustomerWorkspace({
       {tab === 'home' ? (
         <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.customerHomeScreen}>
-                    <LinearGradient colors={['#0B6A3B', '#0F7B45', '#17A45B', '#0A4F2D']} style={styles.customerHomeCarouselHeader}>
-            <View style={styles.customerHomeLogoRow}>
-              <Image source={APP_LOGO_IMAGE} style={styles.customerHomeBrandLogo} resizeMode="cover" />
-              <Text style={styles.customerHomeBrandName}>Jahzeen</Text>
-            </View>
-            <View style={styles.customerHomeSplashHero}>
-              <Text style={styles.customerHomeSplashEyebrow}>Trusted Services in One Place</Text>
-              <Text style={styles.customerHomeSplashTitle}>Premium Home Services. Instant Booking. Trusted Providers.</Text>
-              <Text style={styles.customerHomeSplashSubtitle}>Beautiful marketplace experience inspired by your references, adapted to your brand palette.</Text>
-            </View>
-            <View style={styles.customerHomeLocationRow}>
-              <Text style={styles.customerHomeLocationLabel}>Location</Text>
-              <Text style={styles.customerHomeLocationValue} numberOfLines={1}>Commercial Street Avenue, Building 18</Text>
-            </View>
-            <View style={styles.customerHomeQuickRow}>
-              {APP_CATEGORY_OPTIONS.slice(0, 3).map((category) => (
-                <Pressable
-                  key={`hero-${category}`}
-                  style={styles.customerHomeQuickCard}
-                  onPress={() => {
-                    onSelectCustomerCategory(category);
-                    onTabChange('explore');
-                  }}
-                >
-                  <View style={styles.customerHomeQuickIconWrap}>
-                    <Ionicons name={iconForCategory(category)} size={18} color={colors.primary} />
-                  </View>
-                  <Text style={styles.customerHomeQuickLabel} numberOfLines={1}>{category}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </LinearGradient>
+          <Pressable style={styles.customerHomeCarouselHeader} onPress={() => onTabChange('explore')}>
+            <Image source={{ uri: HOME_CAROUSEL_IMAGES[0] }} style={styles.customerHomeHeroImage} resizeMode="cover" />
+            <LinearGradient colors={['rgba(10, 24, 39, 0.08)', 'rgba(10, 24, 39, 0.82)']} style={styles.customerHomeHeroOverlay}>
+              <View style={styles.customerHomeLogoRow}>
+                <Image source={APP_LOGO_IMAGE} style={styles.customerHomeBrandLogo} resizeMode="cover" />
+                <Text style={styles.customerHomeBrandName}>Jahzeen</Text>
+              </View>
+              <View style={styles.customerHomeSplashHero}>
+                <Text style={styles.customerHomeSplashEyebrow}>Trusted Services in One Place</Text>
+                <Text style={styles.customerHomeSplashTitle}>Premium home services with a beautiful shopping experience.</Text>
+                <Text style={styles.customerHomeSplashSubtitle}>Browse curated services, featured listings, and trusted providers with a cleaner and more polished look.</Text>
+              </View>
+              <View style={styles.customerHomeLocationRow}>
+                <Text style={styles.customerHomeLocationLabel}>Location</Text>
+                <Text style={styles.customerHomeLocationValue} numberOfLines={1}>Commercial Street Avenue, Building 18</Text>
+              </View>
+              <View style={styles.customerHomePromoRow}>
+                <View style={styles.customerHomePromoPill}>
+                  <Text style={styles.customerHomePromoPillLabel}>Featured</Text>
+                  <Text style={styles.customerHomePromoPillValue}>Premium providers</Text>
+                </View>
+                <View style={styles.customerHomePromoPill}>
+                  <Text style={styles.customerHomePromoPillLabel}>Instant</Text>
+                  <Text style={styles.customerHomePromoPillValue}>Easy booking</Text>
+                </View>
+              </View>
+              <View style={styles.customerHomeQuickRow}>
+                {APP_CATEGORY_OPTIONS.slice(0, 3).map((category, index) => {
+                  const heroIconColors = ['#12385E', '#2563EB', '#B45309'];
+                  return (
+                    <Pressable
+                      key={`hero-${category}`}
+                      style={styles.customerHomeQuickCard}
+                      onPress={() => {
+                        onSelectCustomerCategory(category);
+                        onTabChange('explore');
+                      }}
+                    >
+                      <View style={styles.customerHomeQuickIconWrap}>
+                        <MaterialCommunityIcons name={iconForCategory(category)} size={22} color={heroIconColors[index % heroIconColors.length]} />
+                      </View>
+                      <Text style={styles.customerHomeQuickLabel} numberOfLines={1}>{category}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </LinearGradient>
+          </Pressable>
           {carouselEntries.length ? (
             <Animated.ScrollView
               ref={homeCarouselRef}
@@ -3703,7 +3809,7 @@ function CustomerWorkspace({
 
           <View style={styles.customerHomeSearchSection}>
             <View style={styles.customerHomeSearchBar}>
-              <Ionicons name="search-outline" size={20} color={colors.primary} />
+              <MaterialCommunityIcons name="magnify" size={22} color="#12385E" />
               <TextInput
                 value={customerSearchQuery}
                 onChangeText={onCustomerSearchQueryChange}
@@ -3717,7 +3823,7 @@ function CustomerWorkspace({
               />
               {customerSearchQuery ? (
                 <Pressable style={styles.customerHomeSearchClearButton} onPress={() => onCustomerSearchQueryChange('')}>
-                  <Ionicons name="close-outline" size={16} color={colors.muted} />
+                  <MaterialCommunityIcons name="close-circle-outline" size={18} color="#5B7A90" />
                 </Pressable>
               ) : null}
             </View>
@@ -3780,7 +3886,7 @@ function CustomerWorkspace({
                   >
                     <View style={styles.customerCategoryHubTopRow}>
                       <View style={styles.customerCategoryHubIconWrap}>
-                        <Ionicons name={group.icon} size={18} color={colors.primary} />
+                        <MaterialCommunityIcons name={group.icon as any} size={22} color="#12385E" />
                       </View>
                       <Text style={styles.customerCategoryHubCount}>{group.listingsCount} providers</Text>
                     </View>
@@ -3904,7 +4010,7 @@ function CustomerWorkspace({
                 <LinearGradient colors={['rgba(17,24,33,0.08)', 'rgba(17,24,33,0.72)']} style={styles.customerLandingHeroOverlay}>
                   <View style={styles.customerLandingHeroTopRow}>
                     <View style={styles.customerLandingHeroIconWrap}>
-                      <Ionicons name={activeBrowseGroup.icon} size={18} color="#FFFFFF" />
+                      <MaterialCommunityIcons name={activeBrowseGroup.icon as any} size={22} color="#FFFFFF" />
                     </View>
                     <Text style={styles.customerLandingHeroBadge}>{activeBrowseGroup.listingsCount} live providers</Text>
                   </View>
@@ -3990,7 +4096,7 @@ function CustomerWorkspace({
                     <View style={styles.customerBrowseGroupHeader}>
                       <View style={styles.customerBrowseGroupTitleWrap}>
                         <View style={styles.customerBrowseGroupIcon}>
-                          <Ionicons name={group.icon} size={18} color={colors.primary} />
+                          <MaterialCommunityIcons name={group.icon as any} size={22} color="#12385E" />
                         </View>
                         <Text style={styles.customerBrowseGroupTitle}>{group.title}</Text>
                       </View>
@@ -4038,7 +4144,7 @@ function CustomerWorkspace({
         <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false} stickyHeaderIndices={[0]}>
           <View style={styles.customerExploreStickyHeader}>
             <View style={styles.customerExploreStickySearchBar}>
-              <Ionicons name="search-outline" size={18} color={colors.primary} />
+              <MaterialCommunityIcons name="magnify" size={22} color="#12385E" />
               <TextInput
                 value={customerSearchQuery}
                 onChangeText={onCustomerSearchQueryChange}
@@ -4051,7 +4157,7 @@ function CustomerWorkspace({
               />
               {customerSearchQuery ? (
                 <Pressable style={styles.customerExploreSearchClearButton} onPress={() => onCustomerSearchQueryChange('')}>
-                  <Ionicons name="close-outline" size={16} color={colors.muted} />
+                  <MaterialCommunityIcons name="close-circle-outline" size={18} color="#5B7A90" />
                 </Pressable>
               ) : null}
             </View>
@@ -4333,16 +4439,22 @@ function CustomerWorkspace({
 
 type OperationalTone = 'success' | 'info' | 'warning' | 'error';
 
-function iconForCategory(category: string): keyof typeof Ionicons.glyphMap {
+function iconForCategory(category: string): any {
   const normalized = category.toLowerCase();
-  if (normalized.includes('ac')) return 'snow-outline';
-  if (normalized.includes('car')) return 'car-sport-outline';
-  if (normalized.includes('wash')) return 'water-outline';
-  if (normalized.includes('clean')) return 'sparkles-outline';
-  if (normalized.includes('pest')) return 'bug-outline';
-  if (normalized.includes('water')) return 'water-outline';
-  if (normalized.includes('moving')) return 'cube-outline';
-  return 'grid-outline';
+  if (normalized.includes('ac')) return 'air-conditioner';
+  if (normalized.includes('car') && normalized.includes('wash')) return 'car-wash';
+  if (normalized.includes('car') && normalized.includes('service')) return 'car-cog';
+  if (normalized.includes('car') && normalized.includes('winch')) return 'tow-truck';
+  if (normalized.includes('car')) return 'car';
+  if (normalized.includes('wash')) return 'water-opacity';
+  if (normalized.includes('clean')) return 'spray-bottle';
+  if (normalized.includes('pest') || normalized.includes('exterminator')) return 'bug-check-outline';
+  if (normalized.includes('water') && normalized.includes('tank')) return 'water-tank';
+  if (normalized.includes('water')) return 'water-percent';
+  if (normalized.includes('moving') || normalized.includes('furniture') || normalized.includes('house')) return 'truck-cargo-container';
+  if (normalized.includes('sofa') || normalized.includes('furniture')) return 'sofa-single-outline';
+  if (normalized.includes('vacuum')) return 'vacuum-outline';
+  return 'home-outline';
 }
 
 function formatMetricValue(value: number) {
@@ -5032,11 +5144,11 @@ function CustomerHomeLotCard({ item, promotion, onPress }: { item: CatalogItem; 
         </View>
         <Text style={styles.customerHomeLotTitle} numberOfLines={2}>{item.title}</Text>
         <View style={styles.customerHomeLotMetaRow}>
-          <Ionicons name="time-outline" size={14} color={colors.accent} />
+          <MaterialCommunityIcons name="clock-outline" size={16} color="#12385E" />
           <Text style={styles.customerHomeLotMetaText}>{countdown}</Text>
         </View>
         <View style={styles.customerHomeLotMetaRow}>
-          <Ionicons name="business-outline" size={14} color="#8E98A3" />
+          <MaterialCommunityIcons name="office-building-outline" size={14} color="#8E98A3" />
           <Text style={styles.customerHomeLotMetaText}>{item.companyName}</Text>
         </View>
         <Text style={styles.customerHomeLotPrice}>QAR {item.price.toFixed(0)}</Text>
@@ -5067,7 +5179,7 @@ function SelectField({
       <Text style={styles.fieldLabel}>{label}</Text>
       <Pressable style={[styles.selectFieldButton, error && styles.inputError]} onPress={() => setOpen(true)}>
         <Text style={[styles.selectFieldText, !value && styles.selectFieldPlaceholder]}>{value || placeholder || 'Select an option'}</Text>
-        <Ionicons name="chevron-down-outline" size={18} color={colors.muted} />
+        <MaterialCommunityIcons name="chevron-down" size={18} color={colors.muted} />
       </Pressable>
       {error ? <FieldError text={error} /> : null}
 
@@ -5087,7 +5199,7 @@ function SelectField({
                   }}
                 >
                   <Text style={styles.selectFieldOptionText}>{option}</Text>
-                  {value === option ? <Ionicons name="checkmark-outline" size={18} color={colors.primary} /> : null}
+                  {value === option ? <MaterialCommunityIcons name="check" size={20} color="#12385E" /> : null}
                 </Pressable>
               ))}
             </ScrollView>
@@ -5321,6 +5433,8 @@ function validateCatalogDraft(draft: {
   price: string;
   durationLabel: string;
   loyaltyPoints: string;
+  kind: CatalogItem['kind'];
+  imageUrl: string;
 }) {
   const errors: ValidationMap = {};
   if (!draft.title.trim()) errors.title = 'Title is required.';
@@ -5328,7 +5442,9 @@ function validateCatalogDraft(draft: {
   if (!draft.description.trim()) errors.description = 'Description is required.';
   if (!draft.category.trim()) errors.category = 'Category is required.';
   if (draft.category.trim() && !APP_CATEGORY_OPTIONS.includes(draft.category.trim())) errors.category = 'Choose a category from the application list.';
+  if (!['service', 'product'].includes(draft.kind)) errors.kind = 'Select whether this listing is a service or product.';
   if (!draft.durationLabel.trim()) errors.durationLabel = 'Duration is required.';
+  if (!draft.imageUrl.trim()) errors.imageUrl = 'Upload an image before submitting for approval.';
   if (!draft.price.trim() || Number.isNaN(Number(draft.price)) || Number(draft.price) < 0) errors.price = 'Price must be a valid positive number.';
   if (!draft.loyaltyPoints.trim() || Number.isNaN(Number(draft.loyaltyPoints)) || Number(draft.loyaltyPoints) < 0) errors.loyaltyPoints = 'Loyalty points must be zero or more.';
   return errors;
@@ -5474,7 +5590,7 @@ function WorkspaceActionTile({ eyebrow, title, body, onPress }: { eyebrow: strin
       <Text style={styles.workspaceActionBody}>{body}</Text>
       <View style={styles.workspaceActionFooter}>
         <Text style={styles.workspaceActionFooterText}>Open</Text>
-        <Ionicons name="arrow-forward" size={16} color={colors.primary} />
+        <MaterialCommunityIcons name="arrow-right" size={18} color="#12385E" />
       </View>
     </Pressable>
   );
@@ -5552,7 +5668,7 @@ function OperationPopup({ visible, tone, text, onClose }: { visible: boolean; to
       <Pressable style={styles.operationPopupBackdrop} onPress={onClose}>
         <Pressable style={styles.operationPopupCard} onPress={() => undefined}>
           <View style={[styles.operationPopupIconWrap, isSuccess ? styles.operationPopupIconSuccess : styles.operationPopupIconError]}>
-            <Ionicons name={isSuccess ? 'checkmark' : 'close'} size={28} color="#FFFFFF" />
+            <MaterialCommunityIcons name={isSuccess ? "check-circle" : "close-circle"} size={28} color="#FFFFFF" />
           </View>
           <Text style={styles.operationPopupTitle}>{isSuccess ? 'Success' : 'Action failed'}</Text>
           <Text style={styles.operationPopupBody}>{text}</Text>
@@ -5605,7 +5721,7 @@ function ProviderDetailsModal({
                     <Text style={styles.providerModalBadgeText}>{provider.category}</Text>
                   </View>
                   <Pressable style={styles.providerModalCloseButton} onPress={onClose}>
-                    <Ionicons name="close" size={18} color="#FFFFFF" />
+                    <MaterialCommunityIcons name="close" size={18} color="#FFFFFF" />
                   </Pressable>
                 </View>
                 <View style={styles.providerModalHeroBody}>
@@ -5644,7 +5760,7 @@ function ProviderDetailsModal({
                 {slotGroups.length ? slotGroups.map((group) => (
                   <View key={`slot-group-${group.dateLabel}`} style={styles.providerSlotDateGroupCard}>
                     <View style={styles.providerSlotDateHeader}>
-                      <Ionicons name="calendar-outline" size={16} color={colors.primary} />
+                      <MaterialCommunityIcons name="calendar-outline" size={18} color="#12385E" />
                       <Text style={styles.providerSlotDateHeaderText}>{group.dateLabel}</Text>
                     </View>
                     <View style={styles.customerProviderSlotWrap}>
@@ -5806,11 +5922,11 @@ function CustomerCompanyCard({ company, onPress, variant = 'featured' }: { compa
           <Text style={[styles.companyDiscoveryDescription, isCompact && styles.companyDiscoveryDescriptionCompact]} numberOfLines={2}>{company.description}</Text>
           <View style={styles.companyDiscoveryMetaRow}>
             <View style={styles.companyDiscoveryMetaChip}>
-              <Ionicons name="location-outline" size={12} color="#2D5D3F" />
+              <MaterialCommunityIcons name="map-marker-outline" size={12} color="#2D5D3F" />
               <Text style={styles.companyDiscoveryMetaChipText}>Qatar</Text>
             </View>
             <View style={styles.companyDiscoveryMetaChip}>
-              <Ionicons name="time-outline" size={12} color="#2D5D3F" />
+              <MaterialCommunityIcons name="clock-outline" size={12} color="#2D5D3F" />
               <Text style={styles.companyDiscoveryMetaChipText}>~{responseMinutes} min</Text>
             </View>
           </View>
@@ -5860,22 +5976,351 @@ function CustomerOfferCard({ item, darkMode, ctaLabel, onPress }: { item: Catalo
   );
 }
 
-function BottomNavBar({ items, selectedKey, onChange, containerStyle, itemStyle, textStyle, darkMode }: { items: Array<{ key: string; label: string; icon: string }>; selectedKey: string; onChange: (value: string) => void; containerStyle?: object; itemStyle?: object; textStyle?: object; darkMode: boolean }) {
+function BottomNavBar({ items, selectedKey, onChange, containerStyle, itemStyle, textStyle, darkMode }: { items: Array<{ key: string; label: string; icon: string; activeIcon?: string }>; selectedKey: string; onChange: (value: string) => void; containerStyle?: object; itemStyle?: object; textStyle?: object; darkMode: boolean }) {
   return (
-    <View style={[styles.bottomNav, containerStyle]}>
-      {items.map((item) => (
-        <Pressable key={item.key} style={[styles.bottomNavItem, itemStyle, item.key === selectedKey && styles.bottomNavItemActive]} onPress={() => onChange(item.key)}>
-          <Ionicons
-            name={item.icon as keyof typeof Ionicons.glyphMap}
-            size={18}
-            color={item.key === selectedKey ? '#FFFFFF' : darkMode ? '#C8D3DC' : colors.muted}
-          />
-          <Text style={[styles.bottomNavText, textStyle, item.key === selectedKey && styles.bottomNavTextActive]}>{item.label}</Text>
-        </Pressable>
-      ))}
+    <View style={[styles.bottomNav, containerStyle, styles.bottomNavPremium]}>
+      {items.map((item) => {
+        const isActive = item.key === selectedKey;
+        return (
+          <Pressable key={item.key} style={[styles.bottomNavItem, itemStyle, isActive && styles.bottomNavItemActive]} onPress={() => onChange(item.key)}>
+            <View style={[styles.bottomNavIconShell, isActive && styles.bottomNavIconShellActive]}>
+              <MaterialCommunityIcons
+                name={(isActive ? (item.activeIcon || item.icon) : item.icon) as any}
+                size={22}
+                color={isActive ? '#FFFFFF' : darkMode ? '#D0DAE3' : '#3B556E'}
+              />
+            </View>
+            <Text style={[styles.bottomNavText, textStyle, isActive && styles.bottomNavTextActive]}>{item.label}</Text>
+            {isActive ? <View style={styles.bottomNavIconDot} /> : null}
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
+
+function PremiumHeader({
+  logoText,
+  darkMode,
+  notificationCount,
+  onSearchPress,
+  onNotificationPress,
+  onProfilePress,
+  onMenuPress,
+}: {
+  logoText: string;
+  darkMode: boolean;
+  notificationCount: number;
+  onSearchPress: () => void;
+  onNotificationPress: () => void;
+  onProfilePress: () => void;
+  onMenuPress: () => void;
+}) {
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [searchText, setSearchText] = useState('');
+  const bg = darkMode ? '#0F1B27' : '#FFFFFF';
+  const borderColor = darkMode ? '#1E2F40' : '#EAF0F5';
+  const iconColor = darkMode ? '#D0E0EC' : '#12385E';
+  return (
+    <View style={[phStyles.container, { backgroundColor: bg, borderColor }]}>
+      {/* Logo */}
+      <Pressable onPress={onMenuPress} style={phStyles.logoRow}>
+        <View style={phStyles.logoMark}>
+          <MaterialCommunityIcons name="star-four-points" size={18} color="#FFFFFF" />
+        </View>
+        <Text style={[phStyles.logoText, { color: colors.primary }]}>{logoText || 'Abdalla'}</Text>
+      </Pressable>
+      {/* Search Bar */}
+      <Pressable style={[phStyles.searchBar, searchFocused && phStyles.searchBarFocused, darkMode && phStyles.searchBarDark]} onPress={onSearchPress}>
+        <MaterialCommunityIcons name="magnify" size={18} color={searchFocused ? colors.primary : '#8EA3B8'} />
+        <Text style={[phStyles.searchPlaceholder, darkMode && { color: '#6B8099' }]} numberOfLines={1}>Search services...</Text>
+      </Pressable>
+      {/* Action Buttons */}
+      <View style={phStyles.actions}>
+        <Pressable style={[phStyles.iconBtn, darkMode && phStyles.iconBtnDark]} onPress={onNotificationPress}>
+          <MaterialCommunityIcons name="bell-outline" size={20} color={iconColor} />
+          {notificationCount > 0 ? (
+            <View style={phStyles.badge}>
+              <Text style={phStyles.badgeText}>{notificationCount > 9 ? '9+' : notificationCount}</Text>
+            </View>
+          ) : null}
+        </Pressable>
+        <Pressable style={[phStyles.iconBtn, phStyles.profileBtn]} onPress={onProfilePress}>
+          <MaterialCommunityIcons name="account" size={20} color="#FFFFFF" />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+const premSidebarStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(8,20,36,0.55)',
+  },
+  drawer: {
+    width: 300,
+    backgroundColor: '#FFFFFF',
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    paddingTop: 50,
+    paddingBottom: 24,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 20,
+    shadowOffset: { width: 6, height: 0 },
+    elevation: 12,
+  },
+  drawerDark: {
+    backgroundColor: '#0D1A26',
+  },
+  drawerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  drawerLogoMark: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  drawerBrand: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.primary,
+    letterSpacing: 0.3,
+  },
+  drawerBrandDark: {
+    color: '#7EC9A2',
+  },
+  drawerCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: '#F3F7FB',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  navSection: {
+    paddingHorizontal: 14,
+    gap: 4,
+    paddingBottom: 8,
+  },
+  navRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#FAFCFE',
+  },
+  navRowDark: {
+    backgroundColor: '#131F2D',
+  },
+  navIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#E9F6EF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  navIconDark: {
+    backgroundColor: '#0F2A1E',
+  },
+  navLabel: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1A2E42',
+  },
+  navLabelDark: {
+    color: '#C8D8E8',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#EFF4F9',
+    marginHorizontal: 20,
+    marginVertical: 12,
+  },
+  dividerDark: {
+    backgroundColor: '#1A2B3C',
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#7A92A8',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    paddingHorizontal: 20,
+    marginBottom: 8,
+  },
+  sectionLabelDark: {
+    color: '#4A6B85',
+  },
+  categorySearch: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 14,
+    marginBottom: 8,
+    backgroundColor: '#F3F7FB',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  categoryInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#1A2E42',
+  },
+  categoryInputDark: {
+    color: '#C8D8E8',
+  },
+  categoryList: {
+    flex: 1,
+    paddingHorizontal: 14,
+  },
+  categoryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    marginBottom: 2,
+  },
+  categoryRowDark: {
+    backgroundColor: '#131F2D',
+  },
+  categoryIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: '#E9F6EF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  categoryIconDark: {
+    backgroundColor: '#0F2A1E',
+  },
+  categoryLabel: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#1A2E42',
+  },
+  categoryLabelDark: {
+    color: '#C8D8E8',
+  },
+});
+
+const phStyles = StyleSheet.create({
+  container: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 10,
+    borderBottomWidth: 1,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  logoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  logoMark: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  logoText: {
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  searchBar: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F3F7FB',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  searchBarFocused: {
+    borderColor: colors.primary,
+    backgroundColor: '#FFFFFF',
+  },
+  searchBarDark: {
+    backgroundColor: '#1A2839',
+  },
+  searchPlaceholder: {
+    fontSize: 14,
+    color: '#8EA3B8',
+    flex: 1,
+  },
+  actions: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  iconBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: '#F3F7FB',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  iconBtnDark: {
+    backgroundColor: '#1A2839',
+  },
+  profileBtn: {
+    backgroundColor: colors.primary,
+  },
+  badge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#F25F4C',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 3,
+  },
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+});
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
@@ -5996,7 +6441,7 @@ function CompanyCatalogCard({ item, index, onAction, onSecondaryAction }: { item
             )}
             <View style={styles.companyCatalogIllustrationPanel}>
               <View style={[styles.companyCatalogIllustrationOrb, item.isPublished ? styles.companyCatalogIllustrationOrbPublished : styles.companyCatalogIllustrationOrbDraft]}>
-                <Ionicons name={illustrationIcon as keyof typeof Ionicons.glyphMap} size={28} color={item.isPublished ? colors.primary : '#B56A17'} />
+                <MaterialCommunityIcons name={illustrationIcon as any} size={28} color={item.isPublished ? colors.primary : '#B56A17'} />
               </View>
               <View style={styles.companyCatalogIllustrationTextWrap}>
                 <Text style={styles.companyCatalogIllustrationTitle}>{item.companyName || 'Abdalla partner'}</Text>
@@ -6512,23 +6957,35 @@ const styles = StyleSheet.create({
   },
   customerHomeCarouselHeader: {
     paddingHorizontal: 18,
-    paddingVertical: 28,
+    paddingVertical: 18,
     borderRadius: 28,
     overflow: 'hidden',
     gap: 14,
+    minHeight: 320,
+    backgroundColor: '#0B1724',
     borderWidth: 1,
-    borderColor: '#FFFFFF22',
-    shadowColor: '#0A4F2D',
-    shadowOpacity: Platform.OS === 'ios' ? 0.22 : 0.14,
+    borderColor: '#DCE6EE',
+    shadowColor: '#0A1628',
+    shadowOpacity: Platform.OS === 'ios' ? 0.18 : 0.12,
     shadowRadius: Platform.OS === 'ios' ? 18 : 12,
     shadowOffset: { width: 0, height: Platform.OS === 'ios' ? 10 : 8 },
     elevation: Platform.OS === 'ios' ? 0 : 5,
+  },
+  customerHomeHeroImage: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+  },
+  customerHomeHeroOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    gap: 12,
   },
   customerHomeSplashHero: {
     gap: 10,
   },
   customerHomeSplashEyebrow: {
-    color: '#C8F5D9',
+    color: '#D7E7F5',
     fontSize: 11,
     fontWeight: '800',
     textTransform: 'uppercase',
@@ -6562,15 +7019,15 @@ const styles = StyleSheet.create({
   customerHomeLocationRow: {
     marginTop: 4,
     borderRadius: 12,
-    backgroundColor: '#FFFFFF1F',
+    backgroundColor: '#FFFFFF1A',
     borderWidth: 1,
-    borderColor: '#FFFFFF2E',
+    borderColor: '#FFFFFF2A',
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 2,
   },
   customerHomeLocationLabel: {
-    color: '#D8F5E6',
+    color: '#D7E7F5',
     fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
@@ -6592,29 +7049,55 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#DDEEE3',
+    borderColor: '#D9E4EE',
     paddingHorizontal: 12,
     paddingVertical: 10,
     justifyContent: 'space-between',
   },
   customerHomeQuickIconWrap: {
-    width: 28,
-    height: 28,
+    width: 32,
+    height: 32,
     borderRadius: 10,
-    backgroundColor: '#E9F6EF',
+    backgroundColor: '#EDF3F9',
     alignItems: 'center',
     justifyContent: 'center',
   },
   customerHomeQuickLabel: {
-    color: '#123927',
-    fontSize: 11,
+    color: '#183149',
+    fontSize: 12,
     fontWeight: '700',
   },
   customerHomeSplashSubtitle: {
-    color: '#E8F5ED',
+    color: '#E7EEF6',
     fontSize: Platform.OS === 'ios' ? 15 : 14,
     fontWeight: '700',
     lineHeight: Platform.OS === 'ios' ? 22 : 21,
+  },
+  customerHomePromoRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  customerHomePromoPill: {
+    flex: 1,
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF1A',
+    borderWidth: 1,
+    borderColor: '#FFFFFF2A',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 2,
+  },
+  customerHomePromoPillLabel: {
+    color: '#D7E7F5',
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  customerHomePromoPillValue: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
   },
   customerHomeCarouselEyebrow: {
     color: '#7A8791',
@@ -6955,12 +7438,12 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   customerCategoryHubIconWrap: {
-    width: 34,
-    height: 34,
+    width: 40,
+    height: 40,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#E9F1FA',
+    backgroundColor: '#EDF3F9',
   },
   customerCategoryHubCount: {
     color: colors.muted,
@@ -7088,12 +7571,12 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   customerBrowseGroupIcon: {
-    width: 34,
-    height: 34,
+    width: 40,
+    height: 40,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#E9F1FA',
+    backgroundColor: '#EDF3F9',
   },
   customerBrowseGroupTitle: {
     color: colors.text,
@@ -8962,6 +9445,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  bottomNavPremium: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
   bottomNavDark: {
     backgroundColor: '#16202B',
     borderColor: '#273341',
@@ -8973,6 +9464,24 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     gap: 4,
   },
+  bottomNavIconShell: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#F3F6FB',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bottomNavIconShellActive: {
+    backgroundColor: colors.primary,
+  },
+  bottomNavIconDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.primary,
+    marginTop: 4,
+  },
   bottomNavItemDark: {
     backgroundColor: '#1D2A37',
   },
@@ -8982,6 +9491,7 @@ const styles = StyleSheet.create({
   bottomNavText: {
     color: colors.muted,
     fontWeight: '700',
+    fontSize: 12,
   },
   bottomNavTextDark: {
     color: '#C8D3DC',
@@ -9459,3 +9969,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 });
+
+
+
+
