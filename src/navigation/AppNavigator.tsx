@@ -5983,14 +5983,11 @@ function BottomNavBar({ items, selectedKey, onChange, containerStyle, itemStyle,
         const isActive = item.key === selectedKey;
         return (
           <Pressable key={item.key} style={[styles.bottomNavItem, itemStyle, isActive && styles.bottomNavItemActive]} onPress={() => onChange(item.key)}>
-            <View style={[styles.bottomNavIconShell, isActive && styles.bottomNavIconShellActive]}>
-              <MaterialCommunityIcons
-                name={(isActive ? (item.activeIcon || item.icon) : item.icon) as any}
-                size={22}
-                color={isActive ? '#FFFFFF' : darkMode ? '#D0DAE3' : '#3B556E'}
-              />
-            </View>
-            <Text style={[styles.bottomNavText, textStyle, isActive && styles.bottomNavTextActive]}>{item.label}</Text>
+            <MaterialCommunityIcons
+              name={(isActive ? (item.activeIcon || item.icon) : item.icon) as any}
+              size={24}
+              color={isActive ? colors.primary : darkMode ? '#8A9FAE' : '#5A7182'}
+            />
             {isActive ? <View style={styles.bottomNavIconDot} /> : null}
           </Pressable>
         );
@@ -6881,7 +6878,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   customerTabScrollContent: {
-    paddingHorizontal: 18,
+    paddingHorizontal: 0,
     paddingBottom: 140,
     gap: 16,
   },
@@ -6956,20 +6953,23 @@ const styles = StyleSheet.create({
     gap: 22,
   },
   customerHomeCarouselHeader: {
-    paddingHorizontal: 18,
-    paddingVertical: 18,
-    borderRadius: 28,
+    width: '100%',
+    marginLeft: -18,
+    marginRight: -18,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    borderRadius: 0,
     overflow: 'hidden',
     gap: 14,
-    minHeight: 320,
+    minHeight: 200,
     backgroundColor: '#0B1724',
-    borderWidth: 1,
-    borderColor: '#DCE6EE',
-    shadowColor: '#0A1628',
-    shadowOpacity: Platform.OS === 'ios' ? 0.18 : 0.12,
-    shadowRadius: Platform.OS === 'ios' ? 18 : 12,
-    shadowOffset: { width: 0, height: Platform.OS === 'ios' ? 10 : 8 },
-    elevation: Platform.OS === 'ios' ? 0 : 5,
+    borderWidth: 0,
+    borderColor: 'transparent',
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
   },
   customerHomeHeroImage: {
     ...StyleSheet.absoluteFillObject,
@@ -6980,6 +6980,8 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'flex-end',
     gap: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 18,
   },
   customerHomeSplashHero: {
     gap: 10,
@@ -7111,6 +7113,7 @@ const styles = StyleSheet.create({
   },
   customerHomeCarouselRow: {
     gap: 14,
+    paddingLeft: 18,
     paddingRight: 18,
   },
   customerCarouselDotsRow: {
@@ -7119,6 +7122,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
     marginTop: -2,
+    marginHorizontal: 18,
   },
   customerCarouselDot: {
     height: 8,
@@ -7221,6 +7225,7 @@ const styles = StyleSheet.create({
   },
   customerHomeSearchSection: {
     gap: 10,
+    paddingHorizontal: 18,
   },
   customerHomeSearchInput: {
     flex: 1,
@@ -7265,6 +7270,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     justifyContent: 'space-between',
     gap: 12,
+    paddingHorizontal: 18,
   },
   customerHomeSectionHeaderCompact: {
     flexDirection: 'row',
@@ -7347,6 +7353,7 @@ const styles = StyleSheet.create({
   customerHomeSectionBlock: {
     gap: 16,
     paddingTop: 6,
+    paddingHorizontal: 18,
   },
   customerHomeCategoryRow: {
     flexDirection: 'row',
@@ -9438,37 +9445,42 @@ const styles = StyleSheet.create({
   },
   bottomNav: {
     flexDirection: 'row',
-    gap: 8,
-    backgroundColor: colors.surface,
-    borderRadius: 22,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
+    gap: 0,
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    borderWidth: 0,
+    borderColor: 'transparent',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   bottomNavPremium: {
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000000',
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
+    backgroundColor: 'transparent',
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
   },
   bottomNavDark: {
-    backgroundColor: '#16202B',
-    borderColor: '#273341',
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
   },
   bottomNavItem: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: 12,
-    borderRadius: 16,
-    gap: 4,
+    justifyContent: 'center',
+    paddingVertical: 2,
+    paddingHorizontal: 4,
+    borderRadius: 999,
+    gap: 0,
   },
   bottomNavIconShell: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: '#F3F6FB',
+    width: 30,
+    height: 30,
+    borderRadius: 999,
+    backgroundColor: 'transparent',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -9476,17 +9488,17 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   bottomNavIconDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
     backgroundColor: colors.primary,
-    marginTop: 4,
+    marginTop: 2,
   },
   bottomNavItemDark: {
     backgroundColor: '#1D2A37',
   },
   bottomNavItemActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: 'transparent',
   },
   bottomNavText: {
     color: colors.muted,
@@ -9504,16 +9516,16 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    paddingHorizontal: 18,
-    paddingTop: 10,
-    paddingBottom: 16,
-    backgroundColor: '#F6F4EEFA',
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+    backgroundColor: 'transparent',
+    borderTopWidth: 0,
+    borderTopColor: 'transparent',
   },
   customerBottomDockDark: {
-    backgroundColor: '#0E151DFA',
-    borderTopColor: '#273341',
+    backgroundColor: 'transparent',
+    borderTopColor: 'transparent',
   },
   verificationCard: {
     gap: 10,
