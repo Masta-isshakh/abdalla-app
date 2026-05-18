@@ -1454,8 +1454,8 @@ function WorkspaceScreen() {
   }
 
   return (
-    <SafeAreaView edges={['top']} style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
+    <SafeAreaView edges={['top', 'bottom']} style={styles.safeArea}>
+      <ScrollView style={styles.scrollFlex} contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
         <View style={styles.heroCard}>
           <View style={styles.heroTopRow}>
             <View style={styles.heroTextWrap}>
@@ -1563,6 +1563,12 @@ function WorkspaceScreen() {
 
         {busy ? <ActivityIndicator color={colors.primary} style={styles.busyIndicator} /> : null}
       </ScrollView>
+      {activeRole === 'admin' ? (
+        <AdminBottomNav
+          selectedKey={adminTab}
+          onChange={(value) => setAdminTab(value as 'overview' | 'companies' | 'publishing' | 'inbox' | 'bookings' | 'settings')}
+        />
+      ) : null}
       <OperationPopup visible={!!operationPopup} tone={operationPopup?.tone ?? 'success'} text={operationPopup?.text ?? ''} onClose={() => setOperationPopup(null)} />
     </SafeAreaView>
   );
@@ -2285,10 +2291,6 @@ function AdminWorkspace({
         </View>
       ) : null}
 
-      <AdminBottomNav
-        selectedKey={tab}
-        onChange={(value) => onTabChange(value as 'overview' | 'companies' | 'publishing' | 'inbox' | 'bookings' | 'settings')}
-      />
     </>
   );
 }
@@ -5584,7 +5586,7 @@ function AdminBottomNav({ selectedKey, onChange }: { selectedKey: 'overview' | '
           return (
             <Pressable key={tab.key} style={styles.adminBottomNavItem} onPress={() => onChange(tab.key)}>
               <View style={[styles.adminBottomNavIconShell, isActive && styles.adminBottomNavIconShellActive]}>
-                <MaterialCommunityIcons name={(isActive ? tab.activeIcon : tab.icon) as any} size={19} color={isActive ? '#0F7B45' : '#5C7181'} />
+                <MaterialCommunityIcons name={(isActive ? tab.activeIcon : tab.icon) as any} size={15} color={isActive ? '#0F7B45' : '#5C7181'} />
               </View>
               <Text style={[styles.adminBottomNavLabel, isActive && styles.adminBottomNavLabelActive]} numberOfLines={1}>{tab.label}</Text>
             </Pressable>
@@ -6307,6 +6309,8 @@ const premSidebarStyles = StyleSheet.create({
 
 const phStyles = StyleSheet.create({
   container: {
+    width: '98%',
+    alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 14,
@@ -6667,8 +6671,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.background,
   },
+  scrollFlex: {
+    flex: 1,
+  },
   screenContent: {
-    padding: 18,
+    width: '98%',
+    alignSelf: 'center',
+    paddingHorizontal: 12,
+    paddingTop: 18,
     gap: 16,
     paddingBottom: 28,
   },
@@ -6967,6 +6977,8 @@ const styles = StyleSheet.create({
   customerWorkspaceHost: {
     flex: 1,
     minHeight: 0,
+    width: '98%',
+    alignSelf: 'center',
   },
   customerWorkspace: {
     flex: 1,
@@ -7052,11 +7064,10 @@ const styles = StyleSheet.create({
   },
   customerHomeCarouselHeader: {
     width: '100%',
-    marginLeft: -18,
-    marginRight: -18,
+    alignSelf: 'center',
     paddingHorizontal: 0,
     paddingVertical: 0,
-    borderRadius: 0,
+    borderRadius: 22,
     overflow: 'hidden',
     gap: 14,
     minHeight: 200,
@@ -7101,6 +7112,8 @@ const styles = StyleSheet.create({
   customerHomeLogoRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
     gap: 10,
   },
   customerHomeBrandLogo: {
@@ -8193,17 +8206,22 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   adminBottomNavWrap: {
-    marginTop: 8,
-    paddingHorizontal: 4,
-    paddingBottom: 6,
+    width: '98%',
+    alignSelf: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    backgroundColor: colors.background,
+    borderTopWidth: 1,
+    borderTopColor: '#D7E9DB',
   },
   adminBottomNav: {
+    width: '100%',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderRadius: 24,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
+    borderRadius: 16,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
     backgroundColor: '#FFFFFFE8',
     borderWidth: 1,
     borderColor: '#D7E9DB',
@@ -8217,12 +8235,12 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
-    minHeight: 54,
+    gap: 2,
+    minHeight: 40,
   },
   adminBottomNavIconShell: {
-    width: 34,
-    height: 34,
+    width: 24,
+    height: 24,
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
@@ -8236,7 +8254,7 @@ const styles = StyleSheet.create({
   },
   adminBottomNavLabel: {
     color: '#5C7181',
-    fontSize: 10,
+    fontSize: 8,
     fontWeight: '700',
     textAlign: 'center',
   },

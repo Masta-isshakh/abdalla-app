@@ -73,15 +73,27 @@ async function provisionCompanyUser(userPoolId: string, email: string, temporary
       throw error;
     }
 
-    await cognito.send(
-      new AdminCreateUserCommand({
-        UserPoolId: userPoolId,
-        Username: email,
-        TemporaryPassword: temporaryPassword,
-        MessageAction: 'RESEND',
-        DesiredDeliveryMediums: ['EMAIL'],
-      }),
-    );
+    // User already exists — try resending the invitation. This only works when the user
+    // is still in FORCE_CHANGE_PASSWORD state. If the user is already confirmed,
+    // UnsupportedUserStateException is thrown; in that case we skip the re-invite and
+    // proceed to group assignment so the existing account gets the right permissions.
+    try {
+      await cognito.send(
+        new AdminCreateUserCommand({
+          UserPoolId: userPoolId,
+          Username: email,
+          TemporaryPassword: temporaryPassword,
+          MessageAction: 'RESEND',
+          DesiredDeliveryMediums: ['EMAIL'],
+        }),
+      );
+    } catch (resendError) {
+      const resendErrorName = resendError instanceof Error ? resendError.name : '';
+      if (resendErrorName !== 'UnsupportedUserStateException') {
+        throw resendError;
+      }
+      // Already confirmed — no re-invite needed; continue to group assignment.
+    }
   }
 
   return cognito;
