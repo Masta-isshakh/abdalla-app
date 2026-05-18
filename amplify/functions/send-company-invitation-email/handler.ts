@@ -17,8 +17,28 @@ function getUserPoolRegion(userPoolId: string) {
 }
 
 function generateTemporaryPassword() {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*';
-  return Array.from({ length: 14 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lower = 'abcdefghijkmnopqrstuvwxyz';
+  const digits = '23456789';
+  const special = '!@#$%^&*';
+  const all = `${upper}${lower}${digits}${special}`;
+
+  const chars = [
+    upper[Math.floor(Math.random() * upper.length)],
+    lower[Math.floor(Math.random() * lower.length)],
+    digits[Math.floor(Math.random() * digits.length)],
+    special[Math.floor(Math.random() * special.length)],
+    ...Array.from({ length: 10 }, () => all[Math.floor(Math.random() * all.length)]),
+  ];
+
+  for (let index = chars.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    const current = chars[index];
+    chars[index] = chars[swapIndex];
+    chars[swapIndex] = current;
+  }
+
+  return chars.join('');
 }
 
 function formatErrorReason(error: unknown) {

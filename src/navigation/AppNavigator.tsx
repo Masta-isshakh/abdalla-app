@@ -23,6 +23,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 
 import { readableBookingStatus, useAppState } from '../context/AppContext';
+import { JahzeenLogo } from '../components/JahzeenLogo';
 import {
   Address,
   AvailabilitySlot,
@@ -101,6 +102,8 @@ type CompanyFormState = {
   accentColor: string;
   logoText: string;
   profileImageUrl: string;
+  inviteEmail: string;
+  inviteMessage: string;
 };
 const CATEGORY_GROUPS: Array<{ key: string; title: string; icon: keyof typeof MaterialCommunityIcons.glyphMap; categories: string[] }> = [
   {
@@ -142,7 +145,6 @@ const HOME_CAROUSEL_IMAGES = [
   'https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=1400&q=80',
   'https://images.unsplash.com/photo-1449844908441-8829872d2607?auto=format&fit=crop&w=1400&q=80',
 ];
-const APP_LOGO_IMAGE = require('../../assets/icon.png');
 
 export function AppNavigator() {
   return (
@@ -250,8 +252,9 @@ function WorkspaceScreen() {
     accentColor: '#0F7B45',
     logoText: '',
     profileImageUrl: '',
+    inviteEmail: '',
+    inviteMessage: '',
   });
-  const [inviteForm, setInviteForm] = useState({ companyName: '', email: '', message: '' });
   const [catalogForm, setCatalogForm] = useState({
     title: '',
     summary: '',
@@ -310,11 +313,9 @@ function WorkspaceScreen() {
   const [selectedCatalogItemId, setSelectedCatalogItemId] = useState<string | null>(null);
   const [selectedPromotionId, setSelectedPromotionId] = useState<string | null>(null);
   const [catalogSubmitting, setCatalogSubmitting] = useState(false);
-  const [inviteSubmitting, setInviteSubmitting] = useState(false);
   const [operationPopup, setOperationPopup] = useState<{ tone: BannerTone; text: string } | null>(null);
 
   const [companyFormErrors, setCompanyFormErrors] = useState<ValidationMap>({});
-  const [inviteFormErrors, setInviteFormErrors] = useState<ValidationMap>({});
   const [catalogFormErrors, setCatalogFormErrors] = useState<ValidationMap>({});
   const [loyaltyFormErrors, setLoyaltyFormErrors] = useState<ValidationMap>({});
   const [offerFormErrors, setOfferFormErrors] = useState<ValidationMap>({});
@@ -353,6 +354,17 @@ function WorkspaceScreen() {
     const timeout = setTimeout(() => setOperationPopup(null), 2600);
     return () => clearTimeout(timeout);
   }, [operationPopup]);
+
+  useEffect(() => {
+    const normalizedAuthMessage = authMessage.trim();
+    if (!normalizedAuthMessage) {
+      return;
+    }
+
+    if (/InvalidPasswordException|password policy|temporary password/i.test(normalizedAuthMessage)) {
+      setOperationPopup({ tone: 'error', text: normalizedAuthMessage });
+    }
+  }, [authMessage]);
 
   useEffect(() => {
     setProfileForm(profile);
@@ -430,6 +442,8 @@ function WorkspaceScreen() {
         accentColor: selectedAdminCompany.accentColor,
         logoText: selectedAdminCompany.logoText,
         profileImageUrl: selectedAdminCompany.profileImageUrl,
+        inviteEmail: '',
+        inviteMessage: '',
       });
       return;
     }
@@ -443,6 +457,8 @@ function WorkspaceScreen() {
       accentColor: '#0F7B45',
       logoText: '',
       profileImageUrl: '',
+      inviteEmail: '',
+      inviteMessage: '',
     });
   }, [selectedAdminCompany]);
 
@@ -624,11 +640,11 @@ function WorkspaceScreen() {
   );
 
   const customerTabs = [
-    { key: 'home', label: 'Home', icon: 'home', activeIcon: 'home' },
-    { key: 'browse', label: 'Browse', icon: 'apps-box', activeIcon: 'apps-box' },
-    { key: 'explore', label: 'Explore', icon: 'compass', activeIcon: 'compass' },
-    { key: 'orders', label: 'Orders', icon: 'clipboard-list', activeIcon: 'clipboard-list' },
-    { key: 'profile', label: 'Profile', icon: 'account', activeIcon: 'account' },
+    { key: 'browse', label: 'Browse', icon: 'view-grid-outline', activeIcon: 'view-grid' },
+    { key: 'explore', label: 'Explore', icon: 'compass-outline', activeIcon: 'compass' },
+    { key: 'home', label: 'Home', icon: 'home-variant-outline', activeIcon: 'home-variant' },
+    { key: 'orders', label: 'Orders', icon: 'clipboard-text-clock-outline', activeIcon: 'clipboard-text-clock' },
+    { key: 'profile', label: 'Profile', icon: 'account-circle-outline', activeIcon: 'account-circle' },
   ];
 
   const adminNotifications = useMemo(
@@ -673,6 +689,8 @@ function WorkspaceScreen() {
       accentColor: '#0F7B45',
       logoText: '',
       profileImageUrl: '',
+      inviteEmail: '',
+      inviteMessage: '',
     });
   }
 
@@ -773,45 +791,41 @@ function WorkspaceScreen() {
   }
 
   async function handleCompanySave() {
-    const errors = validateCompanyDraft(companyForm);
+    const creatingCompany = !selectedAdminCompany;
+    const errors = validateCompanyDraft(companyForm, creatingCompany);
     setCompanyFormErrors(errors);
     if (Object.keys(errors).length) {
-      setAdminBanner({ tone: 'error', text: 'Fix the company form errors before saving.' });
+      setAdminBanner({ tone: 'error', text: creatingCompany ? 'Fix the company and invitation details before creating.' : 'Fix the company form errors before saving.' });
       return;
     }
 
+    const companyDraftPayload = {
+      name: companyForm.name,
+      description: companyForm.description,
+      category: companyForm.category,
+      supportEmail: companyForm.supportEmail,
+      supportPhone: companyForm.supportPhone,
+      accentColor: companyForm.accentColor,
+      logoText: companyForm.logoText,
+      profileImageUrl: companyForm.profileImageUrl,
+    };
+
     try {
       if (selectedAdminCompany) {
-        await updateCompany(selectedAdminCompany.id, companyForm);
+        await updateCompany(selectedAdminCompany.id, companyDraftPayload);
         setAdminBanner({ tone: 'success', text: 'Company changes saved.' });
       } else {
-        await createCompany(companyForm);
-        setAdminBanner({ tone: 'success', text: 'Company workspace created.' });
+        await createCompany(companyDraftPayload);
+        await inviteCompany({
+          companyName: companyForm.name,
+          email: companyForm.inviteEmail,
+          message: companyForm.inviteMessage,
+        });
+        setAdminBanner({ tone: 'success', text: `Company workspace created and invitation sent to ${companyForm.inviteEmail.trim().toLowerCase()}.` });
         resetAdminDrafts();
       }
     } catch (error) {
       setAdminBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to save company.' });
-    }
-  }
-
-  async function handleInvitationSend() {
-    const errors = validateInvitationDraft(inviteForm);
-    setInviteFormErrors(errors);
-    if (Object.keys(errors).length) {
-      setAdminBanner({ tone: 'error', text: 'Fix the invitation details before sending.' });
-      return;
-    }
-
-    setInviteSubmitting(true);
-    try {
-      await inviteCompany(inviteForm);
-      setInviteForm({ companyName: '', email: '', message: '' });
-      setInviteFormErrors({});
-      setAdminBanner({ tone: 'success', text: 'Company invitation sent with username and temporary password.' });
-    } catch (error) {
-      setAdminBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to send invitation.' });
-    } finally {
-      setInviteSubmitting(false);
     }
   }
 
@@ -1487,11 +1501,6 @@ function WorkspaceScreen() {
             onToggleCompany={setCompanyActive}
             onPickCompanyImage={handleCompanyImagePick}
             onClearCompanyImage={handleCompanyImageClear}
-            inviteForm={inviteForm}
-            onInviteFormChange={setInviteForm}
-            inviteErrors={inviteFormErrors}
-            inviteSubmitting={inviteSubmitting}
-            onInvite={handleInvitationSend}
             onSaveCategorySetting={handleCategoryLaunchChange}
             onReviewCatalogItem={reviewCatalogItem}
             onReviewOfferPromotion={reviewOfferPromotion}
@@ -1583,6 +1592,8 @@ type AdminWorkspaceProps = {
     accentColor: string;
     logoText: string;
     profileImageUrl: string;
+    inviteEmail: string;
+    inviteMessage: string;
   };
   onFormChange: React.Dispatch<React.SetStateAction<{
     name: string;
@@ -1593,6 +1604,8 @@ type AdminWorkspaceProps = {
     accentColor: string;
     logoText: string;
     profileImageUrl: string;
+    inviteEmail: string;
+    inviteMessage: string;
   }>>;
   formErrors: ValidationMap;
   selectedCompany: Company | null;
@@ -1603,11 +1616,6 @@ type AdminWorkspaceProps = {
   onToggleCompany: (companyId: string, isActive: boolean) => Promise<void>;
   onPickCompanyImage: () => void;
   onClearCompanyImage: () => void;
-  inviteForm: { companyName: string; email: string; message: string };
-  onInviteFormChange: React.Dispatch<React.SetStateAction<{ companyName: string; email: string; message: string }>>;
-  inviteErrors: ValidationMap;
-  inviteSubmitting: boolean;
-  onInvite: () => void;
   onSaveCategorySetting: (category: string, isComingSoon: boolean) => void;
   onReviewCatalogItem: (itemId: string, decision: 'approved' | 'rejected') => Promise<void>;
   onReviewOfferPromotion: (promotionId: string, decision: 'approved' | 'rejected') => Promise<void>;
@@ -1643,11 +1651,6 @@ function AdminWorkspace({
   onToggleCompany,
   onPickCompanyImage,
   onClearCompanyImage,
-  inviteForm,
-  onInviteFormChange,
-  inviteErrors,
-  inviteSubmitting,
-  onInvite,
   onSaveCategorySetting,
   onReviewCatalogItem,
   onReviewOfferPromotion,
@@ -1778,18 +1781,6 @@ function AdminWorkspace({
 
   return (
     <>
-      <SegmentControl
-        items={[
-          { key: 'overview', label: 'Overview' },
-          { key: 'companies', label: 'Companies' },
-          { key: 'publishing', label: 'Publishing' },
-          { key: 'inbox', label: 'Inbox' },
-          { key: 'bookings', label: 'Bookings' },
-          { key: 'settings', label: 'Settings' },
-        ]}
-        selectedKey={tab}
-        onChange={(value) => onTabChange(value as 'overview' | 'companies' | 'publishing' | 'inbox' | 'bookings' | 'settings')}
-      />
       {banner ? <StatusBanner tone={banner.tone} text={banner.text} /> : null}
 
       {tab === 'overview' ? (
@@ -1921,7 +1912,7 @@ function AdminWorkspace({
               </View>
             </SectionCard>
 
-            <SectionCard title={selectedCompany ? 'Edit company profile' : 'Create company profile'} subtitle="Create the company first, upload its profile image, and keep the owner details in one workflow.">
+            <SectionCard title={selectedCompany ? 'Edit company profile' : 'Create company profile'} subtitle={selectedCompany ? 'Update the company profile details and branding from one centralized card.' : 'Create the company and send the owner invitation from this single form.'}>
               <View style={styles.rowGap}>
                 <FormField label="Company name" value={form.name} onChangeText={(value) => onFormChange((current) => ({ ...current, name: value }))} error={formErrors.name} />
                 <SelectField label="Company category" value={form.category} options={APP_CATEGORY_OPTIONS} placeholder="Choose a category" error={formErrors.category} onSelect={(value) => onFormChange((current) => ({ ...current, category: value }))} />
@@ -1935,6 +1926,17 @@ function AdminWorkspace({
                 <FormField label="Accent color" value={form.accentColor} onChangeText={(value) => onFormChange((current) => ({ ...current, accentColor: value }))} error={formErrors.accentColor} />
                 <FormField label="Logo text" value={form.logoText} onChangeText={(value) => onFormChange((current) => ({ ...current, logoText: value }))} error={formErrors.logoText} />
               </View>
+              {!selectedCompany ? (
+                <>
+                  <View style={styles.rowGap}>
+                    <FormField label="Invitation email" value={form.inviteEmail} onChangeText={(value) => onFormChange((current) => ({ ...current, inviteEmail: value }))} error={formErrors.inviteEmail} />
+                    <View style={styles.infoBodyGrow}>
+                      <Text style={styles.helperText}>Invitation is sent automatically when you tap Create company.</Text>
+                    </View>
+                  </View>
+                  <FormField label="Invite note" value={form.inviteMessage} onChangeText={(value) => onFormChange((current) => ({ ...current, inviteMessage: value }))} multiline />
+                </>
+              ) : null}
               <View style={styles.catalogUploadPanel}>
                 {form.profileImageUrl ? (
                   <Image source={{ uri: form.profileImageUrl }} style={styles.catalogUploadPreviewImage} resizeMode="cover" />
@@ -1952,19 +1954,9 @@ function AdminWorkspace({
               </View>
               {formErrors.profileImageUrl ? <FieldError text={formErrors.profileImageUrl} /> : null}
               <View style={styles.rowGap}>
-                <PrimaryButton label={selectedCompany ? 'Save company profile' : 'Create company'} onPress={onSaveCompany} />
+                <PrimaryButton label={selectedCompany ? 'Save company profile' : 'Create company and send invitation'} onPress={onSaveCompany} />
                 <SecondaryButton label="Reset form" onPress={onResetCompany} />
               </View>
-            </SectionCard>
-
-            <SectionCard title="Invite company owner" subtitle="After the profile is ready, send the owner invite from this centralized tab.">
-              <View style={styles.rowGap}>
-                <FormField label="Company name" value={inviteForm.companyName} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, companyName: value }))} error={inviteErrors.companyName} />
-                <FormField label="Owner email" value={inviteForm.email} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, email: value }))} error={inviteErrors.email} />
-              </View>
-              <FormField label="Invite note" value={inviteForm.message} onChangeText={(value) => onInviteFormChange((current) => ({ ...current, message: value }))} multiline />
-              <Text style={styles.helperText}>Use the same company name as the profile above. Invitations are managed only here, not in Settings.</Text>
-              <PrimaryButton label="Send invitation" onPress={onInvite} loading={inviteSubmitting} disabled={inviteSubmitting} />
             </SectionCard>
 
             <SectionCard title="Pending invitations" subtitle="Track invite delivery and activation without leaving the Companies tab.">
@@ -2292,6 +2284,11 @@ function AdminWorkspace({
           </View>
         </View>
       ) : null}
+
+      <AdminBottomNav
+        selectedKey={tab}
+        onChange={(value) => onTabChange(value as 'overview' | 'companies' | 'publishing' | 'inbox' | 'bookings' | 'settings')}
+      />
     </>
   );
 }
@@ -3705,7 +3702,7 @@ function CustomerWorkspace({
             <Image source={{ uri: HOME_CAROUSEL_IMAGES[0] }} style={styles.customerHomeHeroImage} resizeMode="cover" />
             <LinearGradient colors={['rgba(10, 24, 39, 0.08)', 'rgba(10, 24, 39, 0.82)']} style={styles.customerHomeHeroOverlay}>
               <View style={styles.customerHomeLogoRow}>
-                <Image source={APP_LOGO_IMAGE} style={styles.customerHomeBrandLogo} resizeMode="cover" />
+                <JahzeenLogo size={38} />
                 <Text style={styles.customerHomeBrandName}>Jahzeen</Text>
               </View>
               <View style={styles.customerHomeSplashHero}>
@@ -3884,15 +3881,25 @@ function CustomerWorkspace({
                       onTabChange('browse');
                     }}
                   >
-                    <View style={styles.customerCategoryHubTopRow}>
-                      <View style={styles.customerCategoryHubIconWrap}>
-                        <MaterialCommunityIcons name={group.icon as any} size={22} color="#12385E" />
+                    <LinearGradient
+                      colors={['#FBFFFD', '#E8F7EF']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={styles.customerCategoryHubCardGradient}
+                    >
+                      <View style={styles.customerCategoryHubTopRow}>
+                        <View style={styles.customerCategoryHubIconWrap}>
+                          <MaterialCommunityIcons name={group.icon as any} size={22} color="#0F7B45" />
+                        </View>
+                        <Text style={styles.customerCategoryHubCount}>{group.listingsCount} providers</Text>
                       </View>
-                      <Text style={styles.customerCategoryHubCount}>{group.listingsCount} providers</Text>
-                    </View>
-                    <Text style={styles.customerCategoryHubTitle}>{group.title}</Text>
-                    <Text style={styles.customerCategoryHubMeta}>{group.categories.slice(0, 2).join(' · ')}</Text>
-                    {group.categories.some((category) => comingSoonCategories.has(category)) ? <Text style={styles.customerCategoryComingSoonText}>Coming Soon</Text> : null}
+                      <Text style={styles.customerCategoryHubTitle}>{group.title}</Text>
+                      <Text style={styles.customerCategoryHubMeta}>{group.categories.slice(0, 2).join(' · ')}</Text>
+                      <View style={styles.customerCategoryHubFooter}>
+                        {group.categories.some((category) => comingSoonCategories.has(category)) ? <Text style={styles.customerCategoryComingSoonText}>Coming Soon</Text> : <Text style={styles.customerCategoryHubFooterText}>Tap to explore</Text>}
+                        <MaterialCommunityIcons name="arrow-top-right" size={14} color="#0F7B45" />
+                      </View>
+                    </LinearGradient>
                   </Pressable>
                 ))}
               </ScrollView>
@@ -3946,9 +3953,29 @@ function CustomerWorkspace({
                         onTabChange('explore');
                       }}
                     >
-                      <Text style={[styles.customerHomeCategoryChipText, isComingSoon && styles.customerHomeCategoryChipDisabledText]}>
-                        {isComingSoon ? `${category} · Coming Soon` : category}
-                      </Text>
+                      <LinearGradient
+                        colors={isComingSoon ? ['#FAFAFA', '#F0F0F0'] : ['#FFFFFF', '#ECFAF1']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.customerHomeCategoryChipGradient}
+                      >
+                        <View style={styles.customerHomeCategoryChipTopRow}>
+                          <View style={[styles.customerHomeCategoryChipLeading, isComingSoon && styles.customerHomeCategoryChipLeadingDisabled]}>
+                            <MaterialCommunityIcons
+                              name={iconForCategory(category)}
+                              size={18}
+                              color={isComingSoon ? '#98A09A' : '#0F7B45'}
+                            />
+                          </View>
+                          {isComingSoon ? <Text style={styles.customerHomeCategoryChipSoonText}>Soon</Text> : <MaterialCommunityIcons name="chevron-right" size={16} color="#0F7B45" />}
+                        </View>
+                        <Text style={[styles.customerHomeCategoryChipText, isComingSoon && styles.customerHomeCategoryChipDisabledText]} numberOfLines={2}>
+                          {category}
+                        </Text>
+                        <Text style={[styles.customerHomeCategoryChipCaption, isComingSoon && styles.customerHomeCategoryChipDisabledText]}>
+                          {isComingSoon ? 'Launching soon' : 'Explore trusted providers'}
+                        </Text>
+                      </LinearGradient>
                     </Pressable>
                   );
                 })}
@@ -5404,7 +5431,9 @@ function validateCompanyDraft(draft: {
   accentColor: string;
   logoText: string;
   profileImageUrl: string;
-}) {
+  inviteEmail?: string;
+  inviteMessage?: string;
+}, requireInvitation = false) {
   const errors: ValidationMap = {};
   if (!draft.name.trim()) errors.name = 'Company name is required.';
   if (!draft.description.trim()) errors.description = 'Description is required.';
@@ -5415,13 +5444,7 @@ function validateCompanyDraft(draft: {
   if (!isHexColor(draft.accentColor)) errors.accentColor = 'Use a hex color like #0F7B45.';
   if (!draft.logoText.trim()) errors.logoText = 'Logo text is required.';
   if (!draft.profileImageUrl.trim()) errors.profileImageUrl = 'Company profile image is required.';
-  return errors;
-}
-
-function validateInvitationDraft(draft: { companyName: string; email: string }) {
-  const errors: ValidationMap = {};
-  if (!draft.companyName.trim()) errors.companyName = 'Company name is required.';
-  if (!isEmail(draft.email)) errors.email = 'Use a valid invite email.';
+  if (requireInvitation && !isEmail(draft.inviteEmail ?? '')) errors.inviteEmail = 'Use a valid invitation email.';
   return errors;
 }
 
@@ -5539,6 +5562,35 @@ function SegmentControl({ items, selectedKey, onChange }: { items: Array<{ key: 
           <Text style={[styles.segmentText, item.key === selectedKey && styles.segmentTextActive]}>{item.label}</Text>
         </Pressable>
       ))}
+    </View>
+  );
+}
+
+function AdminBottomNav({ selectedKey, onChange }: { selectedKey: 'overview' | 'companies' | 'publishing' | 'inbox' | 'bookings' | 'settings'; onChange: (value: string) => void }) {
+  const tabs = [
+    { key: 'overview', label: 'Overview', icon: 'view-dashboard-outline', activeIcon: 'view-dashboard' },
+    { key: 'companies', label: 'Companies', icon: 'domain', activeIcon: 'domain' },
+    { key: 'publishing', label: 'Publishing', icon: 'publish', activeIcon: 'publish' },
+    { key: 'inbox', label: 'Inbox', icon: 'inbox-outline', activeIcon: 'inbox' },
+    { key: 'bookings', label: 'Bookings', icon: 'clipboard-list-outline', activeIcon: 'clipboard-list' },
+    { key: 'settings', label: 'Settings', icon: 'cog-outline', activeIcon: 'cog' },
+  ] as const;
+
+  return (
+    <View style={styles.adminBottomNavWrap}>
+      <View style={styles.adminBottomNav}>
+        {tabs.map((tab) => {
+          const isActive = selectedKey === tab.key;
+          return (
+            <Pressable key={tab.key} style={styles.adminBottomNavItem} onPress={() => onChange(tab.key)}>
+              <View style={[styles.adminBottomNavIconShell, isActive && styles.adminBottomNavIconShellActive]}>
+                <MaterialCommunityIcons name={(isActive ? tab.activeIcon : tab.icon) as any} size={19} color={isActive ? '#0F7B45' : '#5C7181'} />
+              </View>
+              <Text style={[styles.adminBottomNavLabel, isActive && styles.adminBottomNavLabelActive]} numberOfLines={1}>{tab.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -5981,14 +6033,41 @@ function BottomNavBar({ items, selectedKey, onChange, containerStyle, itemStyle,
     <View style={[styles.bottomNav, containerStyle, styles.bottomNavPremium]}>
       {items.map((item) => {
         const isActive = item.key === selectedKey;
+        const isCenter = item.key === 'home';
         return (
-          <Pressable key={item.key} style={[styles.bottomNavItem, itemStyle, isActive && styles.bottomNavItemActive]} onPress={() => onChange(item.key)}>
-            <MaterialCommunityIcons
-              name={(isActive ? (item.activeIcon || item.icon) : item.icon) as any}
-              size={24}
-              color={isActive ? colors.primary : darkMode ? '#8A9FAE' : '#5A7182'}
-            />
-            {isActive ? <View style={styles.bottomNavIconDot} /> : null}
+          <Pressable
+            key={item.key}
+            style={[styles.bottomNavItem, itemStyle, isCenter && styles.bottomNavItemCenter, isActive && styles.bottomNavItemActive]}
+            onPress={() => onChange(item.key)}
+          >
+            {isCenter ? (
+              <LinearGradient
+                colors={darkMode ? ['#1AA65F', '#0F7B45'] : ['#1ECB72', '#0F7B45']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.bottomNavHomeOrb, darkMode && styles.bottomNavHomeOrbDark]}
+              >
+                <View style={styles.bottomNavHomeOrbInner}>
+                  <MaterialCommunityIcons
+                    name={(isActive ? (item.activeIcon || item.icon) : item.icon) as any}
+                    size={28}
+                    color="#FFFFFF"
+                  />
+                </View>
+              </LinearGradient>
+            ) : (
+              <View style={[styles.bottomNavIconShell, darkMode && styles.bottomNavIconShellDark, isActive && styles.bottomNavIconShellActive]}>
+                <MaterialCommunityIcons
+                  name={(isActive ? (item.activeIcon || item.icon) : item.icon) as any}
+                  size={20}
+                  color={isActive ? colors.primary : darkMode ? '#91A5B3' : '#5C7181'}
+                />
+              </View>
+            )}
+            <Text style={[styles.bottomNavText, textStyle, darkMode && styles.bottomNavTextDark, isActive && styles.bottomNavTextActive, isCenter && styles.bottomNavTextCenter]} numberOfLines={1}>
+              {item.label}
+            </Text>
+            {isActive && !isCenter ? <View style={styles.bottomNavIconDot} /> : null}
           </Pressable>
         );
       })}
@@ -6022,10 +6101,11 @@ function PremiumHeader({
     <View style={[phStyles.container, { backgroundColor: bg, borderColor }]}>
       {/* Logo */}
       <Pressable onPress={onMenuPress} style={phStyles.logoRow}>
-        <View style={phStyles.logoMark}>
-          <MaterialCommunityIcons name="star-four-points" size={18} color="#FFFFFF" />
+        <JahzeenLogo size={36} />
+        <View style={phStyles.logoTextStack}>
+          <Text style={[phStyles.logoTextAr, { color: colors.primary }]}>جاهزين</Text>
+          <Text style={[phStyles.logoTextEn, { color: darkMode ? '#B9DCC8' : '#2A6E48' }]}>JAHZEEN</Text>
         </View>
-        <Text style={[phStyles.logoText, { color: colors.primary }]}>{logoText || 'Abdalla'}</Text>
       </Pressable>
       {/* Search Bar */}
       <Pressable style={[phStyles.searchBar, searchFocused && phStyles.searchBarFocused, darkMode && phStyles.searchBarDark]} onPress={onSearchPress}>
@@ -6243,6 +6323,24 @@ const phStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+  },
+  logoImage: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+  },
+  logoTextStack: {
+    gap: 1,
+  },
+  logoTextAr: {
+    fontSize: 16,
+    fontWeight: '900',
+    lineHeight: 18,
+  },
+  logoTextEn: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 1.6,
   },
   logoMark: {
     width: 30,
@@ -7352,31 +7450,82 @@ const styles = StyleSheet.create({
   },
   customerHomeSectionBlock: {
     gap: 16,
-    paddingTop: 6,
-    paddingHorizontal: 18,
+    marginHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 16,
+    paddingHorizontal: 14,
+    borderRadius: 28,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#DCEBDD',
+    shadowColor: '#0F7B45',
+    shadowOpacity: Platform.OS === 'ios' ? 0.08 : 0.04,
+    shadowRadius: Platform.OS === 'ios' ? 16 : 8,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: Platform.OS === 'ios' ? 0 : 2,
   },
   customerHomeCategoryRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 12,
   },
   customerHomeCategoryChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: '#FFF8EF',
-    borderWidth: 1,
-    borderColor: '#DDD0BC',
+    minWidth: '47%',
+    borderRadius: 22,
+    overflow: 'hidden',
+    shadowColor: '#0F7B45',
+    shadowOpacity: Platform.OS === 'ios' ? 0.12 : 0.06,
+    shadowRadius: Platform.OS === 'ios' ? 12 : 6,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: Platform.OS === 'ios' ? 0 : 2,
+  },
+  customerHomeCategoryChipGradient: {
+    minHeight: 104,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderRadius: 22,
+    gap: 8,
+  },
+  customerHomeCategoryChipTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
   },
   customerHomeCategoryChipDisabled: {
-    backgroundColor: '#F5F5F5',
-    borderColor: '#D8D8D8',
     opacity: 0.6,
+  },
+  customerHomeCategoryChipLeading: {
+    width: 28,
+    height: 28,
+    borderRadius: 10,
+    backgroundColor: '#EAF8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  customerHomeCategoryChipLeadingDisabled: {
+    backgroundColor: '#EEF1EF',
   },
   customerHomeCategoryChipText: {
     color: colors.text,
-    fontSize: 13,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '900',
+  },
+  customerHomeCategoryChipCaption: {
+    color: '#5D7466',
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '700',
+  },
+  customerHomeCategoryChipTrailing: {
+    minWidth: 16,
+    alignItems: 'flex-end',
+  },
+  customerHomeCategoryChipSoonText: {
+    color: '#8B5A12',
+    fontSize: 11,
+    fontWeight: '800',
   },
   customerHomeCategoryChipDisabledText: {
     color: '#9E9E9E',
@@ -7424,19 +7573,28 @@ const styles = StyleSheet.create({
     borderColor: '#E3D6C1',
   },
   customerCategoryHubRow: {
-    gap: 12,
+    gap: 14,
     paddingRight: 18,
   },
   customerCategoryHubCard: {
-    width: 236,
-    minHeight: 126,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    backgroundColor: '#FFF8EF',
+    width: 246,
+    minHeight: 144,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#E4D7C4',
-    gap: 8,
+    borderColor: '#D6E8DB',
+    overflow: 'hidden',
+    shadowColor: '#0F7B45',
+    shadowOpacity: Platform.OS === 'ios' ? 0.14 : 0.08,
+    shadowRadius: Platform.OS === 'ios' ? 16 : 8,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: Platform.OS === 'ios' ? 0 : 4,
+  },
+  customerCategoryHubCardGradient: {
+    flex: 1,
+    paddingHorizontal: 15,
+    paddingVertical: 15,
+    gap: 10,
   },
   customerCategoryHubTopRow: {
     flexDirection: 'row',
@@ -7445,28 +7603,40 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   customerCategoryHubIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 42,
+    height: 42,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#EDF3F9',
+    backgroundColor: '#EAF8F0',
   },
   customerCategoryHubCount: {
-    color: colors.muted,
+    color: '#2D7E53',
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   customerCategoryHubTitle: {
     color: colors.text,
-    fontSize: 18,
+    fontSize: 19,
     lineHeight: 24,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   customerCategoryHubMeta: {
-    color: colors.muted,
+    color: '#607667',
     fontSize: 13,
     lineHeight: 19,
+    fontWeight: '600',
+  },
+  customerCategoryHubFooter: {
+    marginTop: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  customerCategoryHubFooterText: {
+    color: '#2D7E53',
+    fontSize: 12,
+    fontWeight: '800',
   },
   customerCategoryComingSoonText: {
     color: '#8B5A12',
@@ -7558,12 +7728,12 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   customerBrowseGroupCard: {
-    borderRadius: 18,
+    borderRadius: 22,
     paddingHorizontal: 14,
     paddingVertical: 14,
-    backgroundColor: '#FFFBF5',
+    backgroundColor: '#FFFCF8',
     borderWidth: 1,
-    borderColor: '#E9DCC8',
+    borderColor: '#E8DEC9',
     gap: 12,
   },
   customerBrowseGroupHeader: {
@@ -7578,39 +7748,39 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   customerBrowseGroupIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 42,
+    height: 42,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#EDF3F9',
+    backgroundColor: '#EAF1F8',
   },
   customerBrowseGroupTitle: {
     color: colors.text,
-    fontSize: 17,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '800',
   },
   customerBrowseGroupCount: {
-    color: colors.muted,
+    color: '#617173',
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   customerBrowseChipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 10,
   },
   customerBrowseChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
     borderRadius: 999,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#E3D8C8',
+    borderColor: '#E4DDCF',
   },
   customerBrowseChipActive: {
-    backgroundColor: '#E6F0FA',
-    borderColor: '#B8D1EA',
+    backgroundColor: '#EAF6EE',
+    borderColor: '#B7DBC5',
   },
   customerBrowseChipDisabled: {
     backgroundColor: '#F5F5F5',
@@ -8021,6 +8191,58 @@ const styles = StyleSheet.create({
   },
   segmentTextActive: {
     color: '#FFFFFF',
+  },
+  adminBottomNavWrap: {
+    marginTop: 8,
+    paddingHorizontal: 4,
+    paddingBottom: 6,
+  },
+  adminBottomNav: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderRadius: 24,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    backgroundColor: '#FFFFFFE8',
+    borderWidth: 1,
+    borderColor: '#D7E9DB',
+    shadowColor: '#0E7B45',
+    shadowOpacity: Platform.OS === 'ios' ? 0.12 : 0.08,
+    shadowRadius: Platform.OS === 'ios' ? 14 : 8,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: Platform.OS === 'ios' ? 0 : 5,
+  },
+  adminBottomNavItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    minHeight: 54,
+  },
+  adminBottomNavIconShell: {
+    width: 34,
+    height: 34,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F8F4',
+    borderWidth: 1,
+    borderColor: '#DBEADF',
+  },
+  adminBottomNavIconShellActive: {
+    backgroundColor: '#EAF8F0',
+    borderColor: '#B7DBC5',
+  },
+  adminBottomNavLabel: {
+    color: '#5C7181',
+    fontSize: 10,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  adminBottomNavLabelActive: {
+    color: '#0F7B45',
+    fontWeight: '800',
   },
   workspaceColumns: {
     gap: 16,
@@ -9445,54 +9667,99 @@ const styles = StyleSheet.create({
   },
   bottomNav: {
     flexDirection: 'row',
-    gap: 0,
+    gap: 2,
     backgroundColor: 'transparent',
-    borderRadius: 0,
-    paddingHorizontal: 0,
-    paddingVertical: 0,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
     borderWidth: 0,
     borderColor: 'transparent',
-    justifyContent: 'space-between',
+    justifyContent: 'space-around',
     alignItems: 'center',
   },
   bottomNavPremium: {
-    backgroundColor: 'transparent',
-    shadowColor: 'transparent',
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 0,
+    backgroundColor: '#FFFFFFE6',
+    borderWidth: 1,
+    borderColor: '#D7E9DB',
+    shadowColor: '#0E7B45',
+    shadowOpacity: Platform.OS === 'ios' ? 0.12 : 0.08,
+    shadowRadius: Platform.OS === 'ios' ? 18 : 10,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: Platform.OS === 'ios' ? 0 : 6,
   },
   bottomNavDark: {
-    backgroundColor: 'transparent',
-    borderColor: 'transparent',
+    backgroundColor: '#101B25E8',
+    borderColor: '#1E2F3D',
   },
   bottomNavItem: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 2,
+    paddingVertical: 4,
     paddingHorizontal: 4,
     borderRadius: 999,
-    gap: 0,
+    gap: 5,
+  },
+  bottomNavItemCenter: {
+    flex: 1.1,
+    transform: [{ translateY: -9 }],
+  },
+  bottomNavHomeOrb: {
+    width: 60,
+    height: 60,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#F4FFF8',
+    shadowColor: '#0F7B45',
+    shadowOpacity: Platform.OS === 'ios' ? 0.28 : 0.16,
+    shadowRadius: Platform.OS === 'ios' ? 16 : 8,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: Platform.OS === 'ios' ? 0 : 8,
+  },
+  bottomNavHomeOrbDark: {
+    shadowColor: '#34D07D',
+  },
+  bottomNavHomeOrbInner: {
+    width: 48,
+    height: 48,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF18',
   },
   bottomNavIconShell: {
-    width: 30,
-    height: 30,
+    width: 38,
+    height: 38,
     borderRadius: 999,
-    backgroundColor: 'transparent',
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F4FAF6',
+    borderWidth: 1,
+    borderColor: '#D9EBDD',
+  },
+  bottomNavIconShellDark: {
+    backgroundColor: '#17222D',
+    borderColor: '#273744',
   },
   bottomNavIconShellActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: '#EAF8F0',
+    borderColor: '#B7DBC5',
+  },
+  bottomNavIconShellActiveDark: {
+    backgroundColor: '#0F2A1E',
+    borderColor: '#1D4C39',
   },
   bottomNavIconDot: {
     width: 4,
     height: 4,
     borderRadius: 2,
     backgroundColor: colors.primary,
-    marginTop: 2,
+    marginTop: 3,
+  },
+  bottomNavIconDotActive: {
+    backgroundColor: '#1ECB72',
   },
   bottomNavItemDark: {
     backgroundColor: '#1D2A37',
@@ -9503,22 +9770,29 @@ const styles = StyleSheet.create({
   bottomNavText: {
     color: colors.muted,
     fontWeight: '700',
-    fontSize: 12,
+    fontSize: 11,
+    letterSpacing: 0.2,
+    textAlign: 'center',
   },
   bottomNavTextDark: {
     color: '#C8D3DC',
   },
   bottomNavTextActive: {
-    color: '#FFFFFF',
+    color: colors.primary,
+    fontWeight: '800',
+  },
+  bottomNavTextCenter: {
+    color: '#0F7B45',
+    fontWeight: '800',
   },
   customerBottomDock: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    paddingHorizontal: 0,
+    paddingHorizontal: 8,
     paddingTop: 0,
-    paddingBottom: 0,
+    paddingBottom: Platform.OS === 'ios' ? 8 : 4,
     backgroundColor: 'transparent',
     borderTopWidth: 0,
     borderTopColor: 'transparent',

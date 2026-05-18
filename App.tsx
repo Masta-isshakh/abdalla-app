@@ -1,9 +1,11 @@
 ﻿import { StatusBar } from 'expo-status-bar';
-import { ActivityIndicator, Image, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { AppProvider, useAppState } from './src/context/AppContext';
 import { configureAmplify } from './src/lib/amplify';
 import { AppNavigator } from './src/navigation/AppNavigator';
+import { JahzeenLogo } from './src/components/JahzeenLogo';
 
 configureAmplify();
 
@@ -12,14 +14,25 @@ function AppBoot() {
 
   if (!initialized) {
     return (
-      <View style={styles.loadingScreen}>
+      <LinearGradient colors={['#0E8E4E', '#16A55D', '#29BC74']} style={styles.loadingScreen}>
         <View style={styles.loadingGlowTop} />
         <View style={styles.loadingGlowBottom} />
-        <Image source={require('./assets/icon.png')} style={styles.loadingLogo} resizeMode="cover" />
-        <Text style={styles.loadingTitle}>Jahzeen</Text>
-        <Text style={styles.loadingSubtitle}>Premium home services marketplace</Text>
-        <ActivityIndicator color="#0F7B45" size="large" />
-      </View>
+
+        <View style={styles.loadingBrandWrap}>
+          <JahzeenLogo size={122} showWordmark wordmarkColor="#F7FFF9" subtitleColor="#E1F8EA" />
+          <Text style={styles.loadingSubtitle}>Premium home services, beautifully organized.</Text>
+        </View>
+
+        <View style={styles.loadingActionRail}>
+          <View style={styles.loadingPrimaryButton}>
+            <Text style={styles.loadingPrimaryButtonText}>تسجيل الدخول</Text>
+          </View>
+          <View style={styles.loadingGhostButton}>
+            <Text style={styles.loadingGhostButtonText}>إنشاء حساب جديد</Text>
+          </View>
+          <Text style={styles.loadingLanguageText}>العربية</Text>
+        </View>
+      </LinearGradient>
     );
   }
 
@@ -38,46 +51,82 @@ export default function App() {
 const styles = StyleSheet.create({
   loadingScreen: {
     flex: 1,
-    backgroundColor: '#F4F8F2',
+    backgroundColor: '#0F7B45',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     overflow: 'hidden',
+    paddingTop: 120,
+    paddingBottom: 70,
   },
   loadingGlowTop: {
     position: 'absolute',
-    width: 320,
-    height: 320,
+    width: 360,
+    height: 360,
     borderRadius: 999,
-    backgroundColor: '#CFECD8',
-    top: -120,
-    right: -80,
+    borderWidth: 1,
+    borderColor: '#9DE2BB40',
+    top: -140,
+    right: -120,
   },
   loadingGlowBottom: {
     position: 'absolute',
-    width: 280,
-    height: 280,
+    width: 340,
+    height: 340,
     borderRadius: 999,
-    backgroundColor: '#DDEEE3',
-    bottom: -90,
-    left: -70,
+    borderWidth: 1,
+    borderColor: '#C7F0DA36',
+    bottom: -170,
+    left: -120,
   },
-  loadingLogo: {
-    width: 116,
-    height: 116,
-    borderRadius: 32,
-    marginBottom: 16,
-  },
-  loadingTitle: {
-    color: '#0F7B45',
-    fontSize: 30,
-    fontWeight: '800',
-    marginBottom: 4,
-    letterSpacing: 0.5,
+  loadingBrandWrap: {
+    alignItems: 'center',
+    gap: 14,
   },
   loadingSubtitle: {
-    color: '#4F6B59',
-    fontSize: 14,
-    marginBottom: 18,
-    fontWeight: '600',
+    color: '#E6FBEE',
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+    maxWidth: 280,
+    lineHeight: 22,
+  },
+  loadingActionRail: {
+    width: '100%',
+    paddingHorizontal: 30,
+    gap: 12,
+    alignItems: 'center',
+  },
+  loadingPrimaryButton: {
+    width: '100%',
+    minHeight: 54,
+    borderRadius: 28,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingPrimaryButtonText: {
+    color: '#0F7B45',
+    fontSize: 21,
+    fontWeight: '800',
+  },
+  loadingGhostButton: {
+    width: '100%',
+    minHeight: 54,
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: '#E5F9EE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingGhostButtonText: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  loadingLanguageText: {
+    color: '#DDF8E7',
+    marginTop: 10,
+    fontSize: 20,
+    fontWeight: '700',
   },
 });
