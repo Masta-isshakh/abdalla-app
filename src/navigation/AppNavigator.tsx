@@ -9,6 +9,7 @@ import {
   Image,
   Alert,
   Animated,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -279,6 +280,8 @@ function WorkspaceScreen() {
     accentColor: '#0F7B45',
     logoText: '',
     profileImageUrl: '',
+    inviteEmail: '',
+    inviteMessage: '',
   });
   const [loyaltyForm, setLoyaltyForm] = useState({
     title: '',
@@ -485,6 +488,8 @@ function WorkspaceScreen() {
         accentColor: currentCompany.accentColor,
         logoText: currentCompany.logoText,
         profileImageUrl: currentCompany.profileImageUrl,
+        inviteEmail: '',
+        inviteMessage: '',
       });
     }
   }, [currentCompany]);
@@ -2417,6 +2422,8 @@ type CompanyWorkspaceProps = {
     accentColor: string;
     logoText: string;
     profileImageUrl: string;
+    inviteEmail: string;
+    inviteMessage: string;
   };
   onCompanySettingsFormChange: React.Dispatch<React.SetStateAction<{
     name: string;
@@ -2427,6 +2434,8 @@ type CompanyWorkspaceProps = {
     accentColor: string;
     logoText: string;
     profileImageUrl: string;
+    inviteEmail: string;
+    inviteMessage: string;
   }>>;
   companyErrors: ValidationMap;
   onSaveSettings: () => void;
@@ -3793,7 +3802,7 @@ function CustomerWorkspace({
       {banner ? <StatusBanner tone={banner.tone} text={banner.text} /> : null}
 
       {tab === 'home' ? (
-        <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <View style={styles.customerHomeScreen}>
           <Pressable style={styles.customerHomeCarouselHeader} onPress={() => onTabChange('explore')}>
             <Image source={{ uri: HOME_CAROUSEL_IMAGES[0] }} style={styles.customerHomeHeroImage} resizeMode="cover" />
@@ -4265,7 +4274,7 @@ function CustomerWorkspace({
       ) : null}
 
       {tab === 'explore' ? (
-        <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false} stickyHeaderIndices={[0]}>
+        <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false} stickyHeaderIndices={[0]} keyboardShouldPersistTaps="handled">
           <View style={styles.customerExploreStickyHeader}>
             <View style={styles.customerExploreStickySearchBar}>
               <MaterialCommunityIcons name="magnify" size={22} color="#12385E" />
@@ -4465,7 +4474,8 @@ function CustomerWorkspace({
 
       {tab === 'profile' ? (
         !authUser ? (
-          <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false}>
+          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}>
+          <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             <SectionCard title="Profile" subtitle="Sign in only when you need to order, track bookings, or save your preferences." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
               <View style={[styles.darkModeCard, customerTheme.metaCard]}>
                 <View style={styles.infoBodyGrow}>
@@ -4511,8 +4521,10 @@ function CustomerWorkspace({
             ) : null}
             </SectionCard>
           </ScrollView>
+          </KeyboardAvoidingView>
         ) : (
-          <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false}>
+          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}>
+          <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
             <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
               <SectionCard title="Profile" subtitle={`Signed in as ${currentUserRole}`} cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
@@ -4555,6 +4567,7 @@ function CustomerWorkspace({
             </View>
           </View>
           </ScrollView>
+          </KeyboardAvoidingView>
         )
       ) : null}
     </View>
@@ -5809,6 +5822,8 @@ function FormField({
   error?: string;
   theme?: 'light' | 'dark';
 }) {
+  const isEmail = label.toLowerCase().includes('email');
+  const isPhone = label.toLowerCase().includes('phone');
   return (
     <View style={styles.fieldWrap}>
       <Text style={[styles.fieldLabel, theme === 'dark' && styles.fieldLabelDark]}>{label}</Text>
@@ -5819,6 +5834,10 @@ function FormField({
         placeholderTextColor={theme === 'dark' ? '#728190' : '#90A0A6'}
         multiline={multiline}
         secureTextEntry={secureTextEntry}
+        autoCorrect={multiline ? true : false}
+        autoCapitalize={isEmail || secureTextEntry ? 'none' : multiline ? 'sentences' : 'words'}
+        keyboardType={isEmail ? 'email-address' : isPhone ? 'phone-pad' : 'default'}
+        returnKeyType={multiline ? 'default' : 'done'}
         style={[styles.input, theme === 'dark' && styles.inputDark, multiline && styles.inputMultiline, error && styles.inputError]}
       />
       {error ? <FieldError text={error} /> : null}

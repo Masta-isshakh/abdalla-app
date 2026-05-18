@@ -9,7 +9,7 @@
     "newArchEnabled": true,
     "updates": {
       "enabled": true,
-      "checkAutomatically": "ON_APP_RESUME",
+      "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 30000,
       "url": "https://u.expo.dev/deefeb67-a065-4240-8a3f-a3f2ed6e6c4c"
     },
