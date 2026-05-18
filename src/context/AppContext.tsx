@@ -923,6 +923,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function createCompany(draft: CompanyDraft) {
+    const normalizedName = draft.name.trim().toLowerCase();
+    const normalizedSupportEmail = draft.supportEmail.trim().toLowerCase();
+    const duplicate = companies.find(
+      (entry) =>
+        entry.name.trim().toLowerCase() === normalizedName ||
+        entry.supportEmail.trim().toLowerCase() === normalizedSupportEmail,
+    );
+
+    if (duplicate) {
+      throw new Error('A company with the same name or support email already exists.');
+    }
+
     const company: Company = { id: `company-${Date.now()}`, name: draft.name, slug: slugify(draft.name), description: draft.description, category: draft.category, supportEmail: draft.supportEmail, supportPhone: draft.supportPhone, accentColor: draft.accentColor, logoText: draft.logoText, profileImageUrl: draft.profileImageUrl, ownerEmail: '', isActive: true, createdAtLabel: nowLabel() };
     setCompanies((current) => [company, ...current]);
     await safeCreate('Company', { ...company });
@@ -958,6 +970,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   async function inviteCompany(draft: InvitationDraft) {
     const existingCompany = companies.find((entry) => entry.name === draft.companyName);
     const company = existingCompany ?? (await createCompany({ name: draft.companyName, description: 'New partner workspace', category: APP_DEFAULT_COMPANY_CATEGORY, supportEmail: draft.email, supportPhone: '', accentColor: '#0F7B45', logoText: draft.companyName.slice(0, 2).toUpperCase(), profileImageUrl: '' }));
+    const normalizedInviteEmail = draft.email.trim().toLowerCase();
+    const duplicateInvitation = invitations.find(
+      (entry) =>
+        entry.companyId === company.id &&
+        entry.email.trim().toLowerCase() === normalizedInviteEmail &&
+        entry.status !== 'revoked',
+    );
+
+    if (duplicateInvitation) {
+      throw new Error('An invitation for this company and email already exists.');
+    }
+
     const invitation: CompanyInvitation = { id: `invite-${Date.now()}`, companyId: company.id, companyName: company.name, email: draft.email.trim().toLowerCase(), invitedByEmail: authUser?.email ?? 'admin@jahzeen.app', status: 'pending', message: draft.message, emailDeliveryStatus: 'pending' };
     setInvitations((current) => [invitation, ...current]);
     await safeCreate('CompanyInvitation', { ...invitation });

@@ -313,6 +313,9 @@ function WorkspaceScreen() {
   const [selectedCatalogItemId, setSelectedCatalogItemId] = useState<string | null>(null);
   const [selectedPromotionId, setSelectedPromotionId] = useState<string | null>(null);
   const [catalogSubmitting, setCatalogSubmitting] = useState(false);
+  const [companySubmitting, setCompanySubmitting] = useState(false);
+  const [globalLoadingCount, setGlobalLoadingCount] = useState(0);
+  const [globalLoadingMessage, setGlobalLoadingMessage] = useState('Processing...');
   const [operationPopup, setOperationPopup] = useState<{ tone: BannerTone; text: string } | null>(null);
 
   const [companyFormErrors, setCompanyFormErrors] = useState<ValidationMap>({});
@@ -331,6 +334,15 @@ function WorkspaceScreen() {
   const customerFiltersHydratedRef = useRef(false);
 
   const customerFilterStorageKey = `${CUSTOMER_FILTER_STORAGE_PREFIX}${authUser?.email?.toLowerCase() ?? 'guest'}`;
+
+  function startGlobalLoading(message: string) {
+    setGlobalLoadingMessage(message);
+    setGlobalLoadingCount((current) => current + 1);
+  }
+
+  function stopGlobalLoading() {
+    setGlobalLoadingCount((current) => Math.max(0, current - 1));
+  }
 
   useEffect(() => {
     const nextPopup = customerBanner && (customerBanner.tone === 'success' || customerBanner.tone === 'error')
@@ -791,8 +803,39 @@ function WorkspaceScreen() {
   }
 
   async function handleCompanySave() {
+    if (companySubmitting) {
+      return;
+    }
+
     const creatingCompany = !selectedAdminCompany;
     const errors = validateCompanyDraft(companyForm, creatingCompany);
+
+    if (creatingCompany) {
+      const normalizedName = companyForm.name.trim().toLowerCase();
+      const normalizedSupportEmail = companyForm.supportEmail.trim().toLowerCase();
+      const normalizedInviteEmail = companyForm.inviteEmail.trim().toLowerCase();
+      const hasDuplicateCompany = companies.some(
+        (entry) =>
+          entry.name.trim().toLowerCase() === normalizedName ||
+          entry.supportEmail.trim().toLowerCase() === normalizedSupportEmail,
+      );
+      const hasDuplicateInvite = invitations.some(
+        (entry) =>
+          entry.companyName.trim().toLowerCase() === normalizedName &&
+          entry.email.trim().toLowerCase() === normalizedInviteEmail &&
+          entry.status !== 'revoked',
+      );
+
+      if (hasDuplicateCompany) {
+        errors.name = errors.name ?? 'A company with this name or support email already exists.';
+        errors.supportEmail = errors.supportEmail ?? 'A company with this name or support email already exists.';
+      }
+
+      if (hasDuplicateInvite) {
+        errors.inviteEmail = errors.inviteEmail ?? 'This invitation email is already linked to the same company.';
+      }
+    }
+
     setCompanyFormErrors(errors);
     if (Object.keys(errors).length) {
       setAdminBanner({ tone: 'error', text: creatingCompany ? 'Fix the company and invitation details before creating.' : 'Fix the company form errors before saving.' });
@@ -810,6 +853,8 @@ function WorkspaceScreen() {
       profileImageUrl: companyForm.profileImageUrl,
     };
 
+    setCompanySubmitting(true);
+    startGlobalLoading(creatingCompany ? 'Creating company workspace...' : 'Saving company profile...');
     try {
       if (selectedAdminCompany) {
         await updateCompany(selectedAdminCompany.id, companyDraftPayload);
@@ -826,24 +871,33 @@ function WorkspaceScreen() {
       }
     } catch (error) {
       setAdminBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to save company.' });
+    } finally {
+      stopGlobalLoading();
+      setCompanySubmitting(false);
     }
   }
 
   async function handleInvitationResend(invitation: CompanyInvitation) {
+    startGlobalLoading('Resending invitation...');
     try {
       await resendCompanyInvitation(invitation.id);
       setAdminBanner({ tone: 'success', text: `Invitation re-sent to ${invitation.email}.` });
     } catch (error) {
       setAdminBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to resend invitation.' });
+    } finally {
+      stopGlobalLoading();
     }
   }
 
   async function handleInvitationRevoke(invitation: CompanyInvitation) {
+    startGlobalLoading('Revoking invitation...');
     try {
       await revokeInvitation(invitation.id);
       setAdminBanner({ tone: 'info', text: `Invitation revoked for ${invitation.email}.` });
     } catch (error) {
       setAdminBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to revoke invitation.' });
+    } finally {
+      stopGlobalLoading();
     }
   }
 
@@ -867,11 +921,14 @@ function WorkspaceScreen() {
       return;
     }
 
+    startGlobalLoading('Saving workspace settings...');
     try {
       await updateCompany(currentCompany.id, companySettingsForm);
       setCompanyBanner({ tone: 'success', text: 'Workspace settings updated.' });
     } catch (error) {
       setCompanyBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to update company workspace.' });
+    } finally {
+      stopGlobalLoading();
     }
   }
 
@@ -889,6 +946,7 @@ function WorkspaceScreen() {
     }
 
     setCatalogSubmitting(true);
+    startGlobalLoading(selectedCatalogItem ? 'Saving catalog item...' : 'Submitting catalog item...');
     try {
       await saveCatalogItem(currentCompany.id, {
         id: selectedCatalogItem?.id,
@@ -920,6 +978,7 @@ function WorkspaceScreen() {
     } catch (error) {
       setCompanyBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to save catalog item.' });
     } finally {
+      stopGlobalLoading();
       setCatalogSubmitting(false);
     }
   }
@@ -935,6 +994,7 @@ function WorkspaceScreen() {
       return;
     }
 
+    startGlobalLoading('Saving loyalty settings...');
     try {
       await saveLoyaltyProgram('company', currentCompany.id, {
         title: loyaltyForm.title.trim(),
@@ -947,6 +1007,8 @@ function WorkspaceScreen() {
       setCompanyBanner({ tone: 'success', text: 'Loyalty program saved.' });
     } catch (error) {
       setCompanyBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to save loyalty program.' });
+    } finally {
+      stopGlobalLoading();
     }
   }
 
@@ -962,6 +1024,7 @@ function WorkspaceScreen() {
       return;
     }
 
+    startGlobalLoading(selectedPromotion ? 'Saving promotion...' : 'Creating promotion...');
     try {
       await saveOfferPromotion(currentCompany.id, {
         id: selectedPromotion?.id,
@@ -985,10 +1048,13 @@ function WorkspaceScreen() {
       });
     } catch (error) {
       setCompanyBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to save promotion.' });
+    } finally {
+      stopGlobalLoading();
     }
   }
 
   async function handleOfferDelete(promotionId: string) {
+    startGlobalLoading('Deleting promotion...');
     try {
       await deleteOfferPromotion(promotionId);
       if (selectedPromotionId === promotionId) {
@@ -997,6 +1063,8 @@ function WorkspaceScreen() {
       setCompanyBanner({ tone: 'info', text: 'Promotion removed.' });
     } catch (error) {
       setCompanyBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to delete promotion.' });
+    } finally {
+      stopGlobalLoading();
     }
   }
 
@@ -1025,6 +1093,7 @@ function WorkspaceScreen() {
     const rawNote = scheduleForm.note.trim().replace(/^Item:\s.*?(\s\|\s)?/, '').trim();
     const linkedNote = rawNote ? `${linkedNotePrefix} | ${rawNote}` : linkedNotePrefix;
 
+    startGlobalLoading(scheduleForm.id ? 'Saving schedule slot...' : 'Adding schedule slot...');
     try {
       await saveAvailabilitySlot(currentCompany.id, {
         id: scheduleForm.id || undefined,
@@ -1037,10 +1106,13 @@ function WorkspaceScreen() {
       setCompanyBanner({ tone: 'success', text: 'Schedule slot saved.' });
     } catch (error) {
       setCompanyBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to save schedule slot.' });
+    } finally {
+      stopGlobalLoading();
     }
   }
 
   async function handleScheduleDelete(slotId: string) {
+    startGlobalLoading('Deleting schedule slot...');
     try {
       await deleteAvailabilitySlot(slotId);
       if (scheduleForm.id === slotId) {
@@ -1049,6 +1121,8 @@ function WorkspaceScreen() {
       setCompanyBanner({ tone: 'info', text: 'Schedule slot removed.' });
     } catch (error) {
       setCompanyBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to delete schedule slot.' });
+    } finally {
+      stopGlobalLoading();
     }
   }
 
@@ -1060,6 +1134,7 @@ function WorkspaceScreen() {
       return;
     }
 
+    startGlobalLoading(authMode === 'signin' ? 'Signing in...' : 'Creating account...');
     try {
       if (authMode === 'signin') {
         await signInWithEmail(signInForm.email.trim(), signInForm.password);
@@ -1078,6 +1153,8 @@ function WorkspaceScreen() {
       }
     } catch (error) {
       setCustomerBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Authentication failed.' });
+    } finally {
+      stopGlobalLoading();
     }
   }
 
@@ -1089,6 +1166,7 @@ function WorkspaceScreen() {
       return;
     }
 
+    startGlobalLoading('Updating password...');
     try {
       await completeNewPassword(trimmedPassword);
       setAuthErrors((current) => {
@@ -1100,10 +1178,13 @@ function WorkspaceScreen() {
       setCustomerBanner({ tone: 'success', text: 'Password updated. You are now signed in.' });
     } catch (error) {
       setCustomerBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to set a new password.' });
+    } finally {
+      stopGlobalLoading();
     }
   }
 
   async function handleSignOut() {
+    startGlobalLoading('Signing out...');
     try {
       await signOutCurrentUser();
       setCustomerBanner({ tone: 'info', text: 'You have been signed out.' });
@@ -1115,6 +1196,8 @@ function WorkspaceScreen() {
       setCustomerBanner({ tone: 'error', text });
       setAdminBanner({ tone: 'error', text });
       setCompanyBanner({ tone: 'error', text });
+    } finally {
+      stopGlobalLoading();
     }
   }
 
@@ -1159,6 +1242,7 @@ function WorkspaceScreen() {
       return;
     }
 
+    startGlobalLoading('Confirming email...');
     try {
       await confirmEmailCode(trimmedCode);
       setAuthErrors((current) => {
@@ -1170,6 +1254,8 @@ function WorkspaceScreen() {
       setCustomerBanner({ tone: 'success', text: 'Email confirmed. You can sign in now.' });
     } catch (error) {
       setCustomerBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to confirm email.' });
+    } finally {
+      stopGlobalLoading();
     }
   }
 
@@ -1181,11 +1267,14 @@ function WorkspaceScreen() {
       return;
     }
 
+    startGlobalLoading('Saving profile...');
     try {
       await saveProfile(profileForm);
       setCustomerBanner({ tone: 'success', text: 'Profile saved.' });
     } catch (error) {
       setCustomerBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to save profile.' });
+    } finally {
+      stopGlobalLoading();
     }
   }
 
@@ -1197,11 +1286,14 @@ function WorkspaceScreen() {
       return;
     }
 
+    startGlobalLoading('Saving address...');
     try {
       await saveAddress({ ...addressForm, isDefault: true });
       setCustomerBanner({ tone: 'success', text: 'Default address saved.' });
     } catch (error) {
       setCustomerBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to save address.' });
+    } finally {
+      stopGlobalLoading();
     }
   }
 
@@ -1216,6 +1308,7 @@ function WorkspaceScreen() {
       return;
     }
 
+    startGlobalLoading('Placing booking...');
     try {
       await placeBooking(bookingComposer);
       setBookingComposer((current) => ({ ...current, itemId: '', companyId: '', slotId: '', notes: '' }));
@@ -1225,6 +1318,8 @@ function WorkspaceScreen() {
     } catch (error) {
       Alert.alert('Booking failed', error instanceof Error ? error.message : 'Unable to place booking.');
       setCustomerBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to place booking.' });
+    } finally {
+      stopGlobalLoading();
     }
   }
 
@@ -1237,6 +1332,7 @@ function WorkspaceScreen() {
       return;
     }
 
+    startGlobalLoading('Submitting rating...');
     try {
       await submitRating(bookingId, Number(draft.score), draft.review.trim());
       setRatingDrafts((current) => {
@@ -1252,6 +1348,8 @@ function WorkspaceScreen() {
       setCustomerBanner({ tone: 'success', text: 'Rating submitted.' });
     } catch (error) {
       setCustomerBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to submit rating.' });
+    } finally {
+      stopGlobalLoading();
     }
   }
 
@@ -1496,6 +1594,7 @@ function WorkspaceScreen() {
             selectedCompany={selectedAdminCompany}
             onSelectCompany={setSelectedAdminCompanyId}
             onSaveCompany={handleCompanySave}
+            companySubmitting={companySubmitting}
             onResetCompany={resetAdminDrafts}
             onDeleteCompany={deleteCompany}
             onToggleCompany={setCompanyActive}
@@ -1569,6 +1668,13 @@ function WorkspaceScreen() {
           onChange={(value) => setAdminTab(value as 'overview' | 'companies' | 'publishing' | 'inbox' | 'bookings' | 'settings')}
         />
       ) : null}
+      {activeRole === 'company' ? (
+        <CompanyBottomNav
+          selectedKey={companyTab}
+          onChange={(value) => setCompanyTab(value as 'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty' | 'requests')}
+        />
+      ) : null}
+      <GlobalLoadingOverlay visible={busy || globalLoadingCount > 0} message={globalLoadingMessage} />
       <OperationPopup visible={!!operationPopup} tone={operationPopup?.tone ?? 'success'} text={operationPopup?.text ?? ''} onClose={() => setOperationPopup(null)} />
     </SafeAreaView>
   );
@@ -1617,6 +1723,7 @@ type AdminWorkspaceProps = {
   selectedCompany: Company | null;
   onSelectCompany: (companyId: string | null) => void;
   onSaveCompany: () => void;
+  companySubmitting: boolean;
   onResetCompany: () => void;
   onDeleteCompany: (companyId: string) => Promise<void>;
   onToggleCompany: (companyId: string, isActive: boolean) => Promise<void>;
@@ -1652,6 +1759,7 @@ function AdminWorkspace({
   selectedCompany,
   onSelectCompany,
   onSaveCompany,
+  companySubmitting,
   onResetCompany,
   onDeleteCompany,
   onToggleCompany,
@@ -1960,7 +2068,7 @@ function AdminWorkspace({
               </View>
               {formErrors.profileImageUrl ? <FieldError text={formErrors.profileImageUrl} /> : null}
               <View style={styles.rowGap}>
-                <PrimaryButton label={selectedCompany ? 'Save company profile' : 'Create company and send invitation'} onPress={onSaveCompany} />
+                <PrimaryButton label={selectedCompany ? 'Save company profile' : 'Create company and send invitation'} onPress={onSaveCompany} loading={companySubmitting} disabled={companySubmitting} />
                 <SecondaryButton label="Reset form" onPress={onResetCompany} />
               </View>
             </SectionCard>
@@ -2633,19 +2741,6 @@ function CompanyWorkspace({
 
   return (
     <>
-      <SegmentControl
-        items={[
-          { key: 'overview', label: 'Overview' },
-          { key: 'catalog', label: 'Catalog' },
-          { key: 'offers', label: 'Offers' },
-          { key: 'schedule', label: 'Schedule' },
-          { key: 'bookings', label: 'Bookings' },
-          { key: 'loyalty', label: 'Loyalty' },
-          { key: 'requests', label: 'Requests' },
-        ]}
-        selectedKey={tab}
-        onChange={(value) => onTabChange(value as 'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty' | 'requests')}
-      />
       {banner ? <StatusBanner tone={banner.tone} text={banner.text} /> : null}
 
       {tab === 'overview' ? (
@@ -5597,6 +5692,51 @@ function AdminBottomNav({ selectedKey, onChange }: { selectedKey: 'overview' | '
   );
 }
 
+function CompanyBottomNav({ selectedKey, onChange }: { selectedKey: 'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty' | 'requests'; onChange: (value: string) => void }) {
+  const tabs = [
+    { key: 'overview', label: 'Home', icon: 'view-dashboard-outline', activeIcon: 'view-dashboard' },
+    { key: 'catalog', label: 'Catalog', icon: 'shape-outline', activeIcon: 'shape' },
+    { key: 'offers', label: 'Offers', icon: 'sale-outline', activeIcon: 'sale' },
+    { key: 'schedule', label: 'Slots', icon: 'calendar-clock', activeIcon: 'calendar-clock' },
+    { key: 'bookings', label: 'Jobs', icon: 'clipboard-list-outline', activeIcon: 'clipboard-list' },
+    { key: 'loyalty', label: 'Rewards', icon: 'gift-outline', activeIcon: 'gift' },
+    { key: 'requests', label: 'Requests', icon: 'inbox-outline', activeIcon: 'inbox' },
+  ] as const;
+
+  return (
+    <View style={styles.adminBottomNavWrap}>
+      <View style={styles.adminBottomNav}>
+        {tabs.map((tab) => {
+          const isActive = selectedKey === tab.key;
+          return (
+            <Pressable key={tab.key} style={styles.adminBottomNavItem} onPress={() => onChange(tab.key)}>
+              <View style={[styles.adminBottomNavIconShell, isActive && styles.adminBottomNavIconShellActive]}>
+                <MaterialCommunityIcons name={(isActive ? tab.activeIcon : tab.icon) as any} size={Platform.OS === 'ios' ? 16 : 14} color={isActive ? '#0F7B45' : '#5C7181'} />
+              </View>
+              <Text style={[styles.adminBottomNavLabel, isActive && styles.adminBottomNavLabelActive]} numberOfLines={1}>{tab.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function GlobalLoadingOverlay({ visible, message }: { visible: boolean; message: string }) {
+  if (!visible) {
+    return null;
+  }
+
+  return (
+    <View style={styles.globalLoadingOverlay}>
+      <View style={styles.globalLoadingCard}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={styles.globalLoadingText}>{message}</Text>
+      </View>
+    </View>
+  );
+}
+
 function SectionCard({ title, subtitle, children, cardStyle, titleStyle, subtitleStyle, bodyStyle }: { title: string; subtitle: string; children: React.ReactNode; cardStyle?: object; titleStyle?: object; subtitleStyle?: object; bodyStyle?: object }) {
   return (
     <View style={[styles.sectionCard, cardStyle]}>
@@ -6420,8 +6560,6 @@ const phStyles = StyleSheet.create({
     fontWeight: '800',
   },
 });
-  },
-});
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
@@ -6458,6 +6596,12 @@ function CatalogCard({ item, actionLabel, onAction, secondaryActionLabel, onSeco
         <Text style={styles.infoTitle}>{item.title}</Text>
         <Text style={styles.infoSubtitle}>{item.companyName} · {item.category} · QAR {item.price.toFixed(0)} · {getCatalogApprovalLabel(item)}</Text>
         <Text style={styles.helperText}>{item.summary}</Text>
+        <Text style={styles.helperText}>{item.description}</Text>
+        <Text style={styles.helperText}>Type: {item.kind === 'service' ? 'Service' : 'Product'} · Duration: {item.durationLabel || 'N/A'} · Points: {item.loyaltyPoints}</Text>
+        <Text style={styles.helperText}>Tags: {item.tags.length ? item.tags.join(', ') : 'None'}</Text>
+        <Text style={styles.helperText}>Visibility: {item.isPublished ? 'Submitted for publishing' : 'Draft'} · Featured: {item.featured ? 'Yes' : 'No'}</Text>
+        {item.imageHint ? <Text style={styles.helperText}>Image hint: {item.imageHint}</Text> : null}
+        {item.approvedByEmail ? <Text style={styles.helperText}>Reviewed by: {item.approvedByEmail}</Text> : null}
       </View>
       <View style={styles.inlineActionGroup}>
         {actionLabel && onAction ? (
@@ -6673,6 +6817,36 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.background,
   },
+  globalLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(9, 17, 26, 0.28)',
+  },
+  globalLoadingCard: {
+    minWidth: 200,
+    maxWidth: '88%',
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D7E9DB',
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    gap: 10,
+    alignItems: 'center',
+    shadowColor: '#103A23',
+    shadowOpacity: 0.16,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  globalLoadingText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
   scrollFlex: {
     flex: 1,
   },
@@ -6683,7 +6857,7 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === 'ios' ? 20 : 18,
     gap: 16,
     paddingBottom: Platform.OS === 'ios' ? 32 : 28,
-  }
+  },
   customerShellSafeAreaDark: {
     backgroundColor: '#0E151D',
   },
@@ -6982,7 +7156,7 @@ const styles = StyleSheet.create({
     width: Platform.OS === 'ios' ? '96%' : '95%',
     alignSelf: 'center',
     paddingHorizontal: Platform.OS === 'ios' ? 8 : 6,
-  }
+  },
   customerWorkspace: {
     flex: 1,
     gap: 16,
@@ -6994,7 +7168,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Platform.OS === 'ios' ? 8 : 6,
     paddingBottom: Platform.OS === 'ios' ? 150 : 140,
     gap: 16,
-  }
+  },
   customerCategoryDrawerOverlay: {
     flex: 1,
     flexDirection: 'row',
