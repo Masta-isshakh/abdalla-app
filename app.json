@@ -7,13 +7,23 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "updates": {
+      "enabled": true,
+      "checkAutomatically": "ON_APP_RESUME",
+      "fallbackToCacheTimeout": 30000,
+      "url": "https://u.expo.dev/deefeb67-a065-4240-8a3f-a3f2ed6e6c4c"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.mastajazz.abdalla"
     },
     "android": {
       "adaptiveIcon": {
@@ -27,6 +37,12 @@
     "web": {
       "bundler": "metro",
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "deefeb67-a065-4240-8a3f-a3f2ed6e6c4c"
+      }
+    },
+    "owner": "masta-jazz"
   }
 }

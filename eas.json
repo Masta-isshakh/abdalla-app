@@ -1,0 +1,46 @@
+{
+  "cli": {
+    "version": ">= 18.3.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "NPM_FLAGS": "--legacy-peer-deps"
+      },
+      "channel": "development"
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "NPM_FLAGS": "--legacy-peer-deps"
+      },
+      "android": {
+        "buildType": "apk"
+      },
+      "channel": "staging"
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "NPM_FLAGS": "--legacy-peer-deps"
+      },
+      "channel": "production"
+    }
+  },
+  "submit": {
+    "production": {}
+  },
+  "channels": {
+    "staging": {
+      "description": "Staging channel for team testing - auto-updates when deployed"
+    },
+    "production": {
+      "description": "Production channel for App Store"
+    },
+    "development": {
+      "description": "Development channel for active development"
+    }
+  }
+}
