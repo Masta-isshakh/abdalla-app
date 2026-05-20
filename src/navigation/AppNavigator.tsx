@@ -340,6 +340,7 @@ function WorkspaceScreen() {
   const customerFiltersHydratedRef = useRef(false);
 
   const customerFilterStorageKey = `${CUSTOMER_FILTER_STORAGE_PREFIX}${authUser?.email?.toLowerCase() ?? 'guest'}`;
+  const interactionLocked = busy || globalLoadingCount > 0;
 
   function startGlobalLoading(message: string) {
     setGlobalLoadingMessage(message);
@@ -1424,7 +1425,7 @@ function WorkspaceScreen() {
   if (activeRole === 'guest' || activeRole === 'customer') {
     return (
       <SafeAreaView edges={['top', 'bottom']} style={[styles.safeArea, customerDarkMode && styles.customerShellSafeAreaDark]}>
-        <View style={[styles.customerShell, customerDarkMode && styles.customerShellDark]}>
+        <View style={[styles.customerShell, customerDarkMode && styles.customerShellDark]} pointerEvents={interactionLocked ? 'none' : 'auto'}>
           <PremiumHeader
             logoText="Jahzeen"
             darkMode={customerDarkMode}
@@ -1613,8 +1614,9 @@ function WorkspaceScreen() {
 
   return (
     <SafeAreaView edges={['top', 'bottom']} style={styles.safeArea}>
-      <ScrollView style={styles.scrollFlex} contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.heroCard}>
+      <View style={styles.flexFill} pointerEvents={interactionLocked ? 'none' : 'auto'}>
+        <ScrollView style={styles.scrollFlex} contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.heroCard}>
           <View style={styles.heroTopRow}>
             <View style={styles.heroTextWrap}>
               <Text style={styles.brandName}>Abdalla</Text>
@@ -1632,8 +1634,8 @@ function WorkspaceScreen() {
           {!!authMessage && <Text style={styles.messageText}>{authMessage}</Text>}
         </View>
 
-        {activeRole === 'admin' ? (
-          <AdminWorkspace
+          {activeRole === 'admin' ? (
+            <AdminWorkspace
             wide={wide}
             tab={adminTab}
             onTabChange={setAdminTab}
@@ -1667,11 +1669,11 @@ function WorkspaceScreen() {
             onRevokeInvitation={handleInvitationRevoke}
             onOpenNotification={handleNotificationOpen}
             banner={adminBanner}
-          />
-        ) : null}
+            />
+          ) : null}
 
-        {activeRole === 'company' ? (
-          <CompanyWorkspace
+          {activeRole === 'company' ? (
+            <CompanyWorkspace
             wide={wide}
             tab={companyTab}
             onTabChange={setCompanyTab}
@@ -1717,23 +1719,24 @@ function WorkspaceScreen() {
             loyaltyErrors={loyaltyFormErrors}
             onSaveLoyalty={handleLoyaltySave}
             currentProgram={currentCompanyProgram}
+            />
+          ) : null}
+
+          {busy ? <ActivityIndicator color={colors.primary} style={styles.busyIndicator} /> : null}
+        </ScrollView>
+        {activeRole === 'admin' ? (
+          <AdminBottomNav
+            selectedKey={adminTab}
+            onChange={(value) => setAdminTab(value as 'overview' | 'companies' | 'publishing' | 'inbox' | 'bookings' | 'settings')}
           />
         ) : null}
-
-        {busy ? <ActivityIndicator color={colors.primary} style={styles.busyIndicator} /> : null}
-      </ScrollView>
-      {activeRole === 'admin' ? (
-        <AdminBottomNav
-          selectedKey={adminTab}
-          onChange={(value) => setAdminTab(value as 'overview' | 'companies' | 'publishing' | 'inbox' | 'bookings' | 'settings')}
-        />
-      ) : null}
-      {activeRole === 'company' ? (
-        <CompanyBottomNav
-          selectedKey={companyTab}
-          onChange={(value) => setCompanyTab(value as 'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty' | 'requests')}
-        />
-      ) : null}
+        {activeRole === 'company' ? (
+          <CompanyBottomNav
+            selectedKey={companyTab}
+            onChange={(value) => setCompanyTab(value as 'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty' | 'requests')}
+          />
+        ) : null}
+      </View>
       <GlobalLoadingOverlay visible={busy || globalLoadingCount > 0} message={globalLoadingMessage} />
       <OperationPopup visible={!!operationPopup} tone={operationPopup?.tone ?? 'success'} text={operationPopup?.text ?? ''} onClose={() => setOperationPopup(null)} />
     </SafeAreaView>
@@ -6884,6 +6887,9 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  flexFill: {
+    flex: 1,
   },
   loadingWrap: {
     flex: 1,
