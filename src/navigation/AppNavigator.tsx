@@ -74,8 +74,8 @@ const colors = {
   infoSurface: '#ECF6F0',
 };
 
-const PAGE_OUTER_WIDTH = Platform.OS === 'ios' ? '98%' : '96%';
-const PAGE_CONTENT_WIDTH = Platform.OS === 'ios' ? '88%' : '92%';
+const PAGE_OUTER_WIDTH = Platform.OS === 'ios' ? '100%' : '96%';
+const PAGE_CONTENT_WIDTH = Platform.OS === 'ios' ? '100%' : '92%';
 
 const tableToneFilterMemory: Record<string, 'all' | 'error' | 'warning' | 'success'> = {};
 const TABLE_TONE_FILTER_STORAGE_PREFIX = 'jahzeen-table-tone-filter:';
@@ -6269,7 +6269,7 @@ function BottomNavBar({ items, selectedKey, onChange, containerStyle, itemStyle,
                 <View style={styles.bottomNavHomeOrbInner}>
                   <MaterialCommunityIcons
                     name={(isActive ? (item.activeIcon || item.icon) : item.icon) as any}
-                    size={28}
+                    size={Platform.OS === 'ios' ? 24 : 28}
                     color="#FFFFFF"
                   />
                 </View>
@@ -6278,7 +6278,7 @@ function BottomNavBar({ items, selectedKey, onChange, containerStyle, itemStyle,
               <View style={[styles.bottomNavIconShell, darkMode && styles.bottomNavIconShellDark, isActive && styles.bottomNavIconShellActive]}>
                 <MaterialCommunityIcons
                   name={(isActive ? (item.activeIcon || item.icon) : item.icon) as any}
-                  size={20}
+                  size={Platform.OS === 'ios' ? 18 : 20}
                   color={isActive ? colors.primary : darkMode ? '#91A5B3' : '#5C7181'}
                 />
               </View>
@@ -6932,8 +6932,8 @@ const styles = StyleSheet.create({
   },
   screenContent: {
     width: PAGE_CONTENT_WIDTH,
-    alignSelf: 'center',
-    paddingHorizontal: Platform.OS === 'ios' ? 8 : 10,
+    alignSelf: Platform.OS === 'ios' ? 'stretch' : 'center',
+    paddingHorizontal: Platform.OS === 'ios' ? 4 : 10,
     paddingTop: Platform.OS === 'ios' ? 20 : 18,
     gap: 16,
     paddingBottom: Platform.OS === 'ios' ? 32 : 28,
@@ -6949,7 +6949,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#0E151D',
   },
   customerHeaderPlain: {
-    marginHorizontal: 18,
+    marginHorizontal: Platform.OS === 'ios' ? 4 : 18,
     marginTop: 12,
     marginBottom: 4,
     flexDirection: 'row',
@@ -6982,7 +6982,7 @@ const styles = StyleSheet.create({
     color: '#F7F8FA',
   },
   customerHeaderCard: {
-    marginHorizontal: 18,
+    marginHorizontal: Platform.OS === 'ios' ? 4 : 18,
     marginTop: 12,
     marginBottom: 10,
     paddingHorizontal: 16,
@@ -7226,7 +7226,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   customerScrollContent: {
-    paddingHorizontal: 18,
+    paddingHorizontal: Platform.OS === 'ios' ? 4 : 18,
     paddingBottom: 140,
     gap: 16,
   },
@@ -7234,8 +7234,8 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
     width: PAGE_OUTER_WIDTH,
-    alignSelf: 'center',
-    paddingHorizontal: Platform.OS === 'ios' ? 6 : 8,
+    alignSelf: Platform.OS === 'ios' ? 'stretch' : 'center',
+    paddingHorizontal: Platform.OS === 'ios' ? 2 : 8,
   },
   customerWorkspace: {
     flex: 1,
@@ -7245,8 +7245,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   customerTabScrollContent: {
-    paddingHorizontal: Platform.OS === 'ios' ? 8 : 6,
-    paddingBottom: Platform.OS === 'ios' ? 150 : 140,
+    paddingHorizontal: Platform.OS === 'ios' ? 4 : 6,
+    paddingBottom: Platform.OS === 'ios' ? 108 : 140,
     gap: 16,
   },
   customerCategoryDrawerOverlay: {
@@ -7481,8 +7481,8 @@ const styles = StyleSheet.create({
   },
   customerHomeCarouselRow: {
     gap: 14,
-    paddingLeft: 18,
-    paddingRight: 18,
+    paddingLeft: Platform.OS === 'ios' ? 4 : 18,
+    paddingRight: Platform.OS === 'ios' ? 4 : 18,
   },
   customerCarouselDotsRow: {
     flexDirection: 'row',
@@ -7490,7 +7490,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
     marginTop: -2,
-    marginHorizontal: 18,
+    marginHorizontal: Platform.OS === 'ios' ? 4 : 18,
   },
   customerCarouselDot: {
     height: 8,
@@ -7593,7 +7593,7 @@ const styles = StyleSheet.create({
   },
   customerHomeSearchSection: {
     gap: 10,
-    paddingHorizontal: 18,
+    paddingHorizontal: Platform.OS === 'ios' ? 4 : 18,
   },
   customerHomeSearchInput: {
     flex: 1,
@@ -7638,7 +7638,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     justifyContent: 'space-between',
     gap: 12,
-    paddingHorizontal: 18,
+    paddingHorizontal: Platform.OS === 'ios' ? 4 : 18,
   },
   customerHomeSectionHeaderCompact: {
     flexDirection: 'row',
@@ -7664,7 +7664,7 @@ const styles = StyleSheet.create({
   },
   customerHomeLotRow: {
     gap: 16,
-    paddingRight: 18,
+    paddingRight: Platform.OS === 'ios' ? 4 : 18,
   },
   customerHomeLotCard: {
     width: 248,
@@ -7720,17 +7720,17 @@ const styles = StyleSheet.create({
   },
   customerHomeSectionBlock: {
     gap: 16,
-    marginHorizontal: 14,
+    marginHorizontal: Platform.OS === 'ios' ? 2 : 14,
     paddingTop: 14,
     paddingBottom: 16,
-    paddingHorizontal: 14,
-    borderRadius: 28,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#DCEBDD',
+    paddingHorizontal: Platform.OS === 'ios' ? 8 : 14,
+    borderRadius: Platform.OS === 'ios' ? 0 : 28,
+    backgroundColor: Platform.OS === 'ios' ? 'transparent' : '#FFFFFF',
+    borderWidth: Platform.OS === 'ios' ? 0 : 1,
+    borderColor: Platform.OS === 'ios' ? 'transparent' : '#DCEBDD',
     shadowColor: '#0F7B45',
-    shadowOpacity: Platform.OS === 'ios' ? 0.08 : 0.04,
-    shadowRadius: Platform.OS === 'ios' ? 16 : 8,
+    shadowOpacity: Platform.OS === 'ios' ? 0 : 0.04,
+    shadowRadius: Platform.OS === 'ios' ? 0 : 8,
     shadowOffset: { width: 0, height: 6 },
     elevation: Platform.OS === 'ios' ? 0 : 2,
   },
@@ -7844,7 +7844,7 @@ const styles = StyleSheet.create({
   },
   customerCategoryHubRow: {
     gap: 14,
-    paddingRight: 18,
+    paddingRight: Platform.OS === 'ios' ? 0 : 18,
   },
   customerCategoryHubCard: {
     width: 246,
@@ -8069,8 +8069,8 @@ const styles = StyleSheet.create({
     color: '#9E9E9E',
   },
   customerExploreStickyHeader: {
-    marginHorizontal: -18,
-    paddingHorizontal: 18,
+    marginHorizontal: Platform.OS === 'ios' ? 2 : -18,
+    paddingHorizontal: Platform.OS === 'ios' ? 4 : 18,
     paddingTop: 2,
     paddingBottom: 12,
     gap: 10,
@@ -8385,7 +8385,7 @@ const styles = StyleSheet.create({
   },
   heroCard: {
     borderRadius: Platform.OS === 'ios' ? 26 : 24,
-    padding: Platform.OS === 'ios' ? 24 : 22,
+    padding: Platform.OS === 'ios' ? 18 : 22,
     gap: Platform.OS === 'ios' ? 14 : 12,
   },
   heroTopRow: {
@@ -8465,7 +8465,7 @@ const styles = StyleSheet.create({
   adminBottomNavWrap: {
     width: PAGE_OUTER_WIDTH,
     alignSelf: 'center',
-    paddingHorizontal: Platform.OS === 'ios' ? 8 : 6,
+    paddingHorizontal: Platform.OS === 'ios' ? 2 : 6,
     paddingVertical: Platform.OS === 'ios' ? 2 : 1,
     backgroundColor: colors.background,
     borderTopWidth: 1,
@@ -8477,7 +8477,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     borderRadius: 16,
-    paddingHorizontal: Platform.OS === 'ios' ? 8 : 6,
+    paddingHorizontal: Platform.OS === 'ios' ? 4 : 6,
     paddingVertical: Platform.OS === 'ios' ? 4 : 2,
     backgroundColor: '#FFFFFFE8',
     borderWidth: 1,
@@ -8535,17 +8535,17 @@ const styles = StyleSheet.create({
     width: undefined,
   },
   sectionCard: {
-    backgroundColor: colors.surface,
-    borderRadius: Platform.OS === 'ios' ? 26 : 24,
-    padding: Platform.OS === 'ios' ? 22 : 20,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: Platform.OS === 'ios' ? 'transparent' : colors.surface,
+    borderRadius: Platform.OS === 'ios' ? 0 : 24,
+    padding: Platform.OS === 'ios' ? 0 : 20,
+    borderWidth: Platform.OS === 'ios' ? 0 : 1,
+    borderColor: Platform.OS === 'ios' ? 'transparent' : colors.border,
     gap: Platform.OS === 'ios' ? 14 : 12,
     shadowColor: '#1A3651',
-    shadowOpacity: 0.06,
-    shadowRadius: 18,
+    shadowOpacity: Platform.OS === 'ios' ? 0 : 0.06,
+    shadowRadius: Platform.OS === 'ios' ? 0 : 18,
     shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
+    elevation: Platform.OS === 'ios' ? 0 : 3,
   },
   sectionTitle: {
     fontSize: Platform.OS === 'ios' ? 22 : 20,
@@ -8924,7 +8924,7 @@ const styles = StyleSheet.create({
   },
   workspaceShowcase: {
     borderRadius: 30,
-    padding: 22,
+    padding: Platform.OS === 'ios' ? 18 : 22,
     gap: 18,
     overflow: 'hidden',
     shadowColor: '#12385E',
@@ -8997,14 +8997,14 @@ const styles = StyleSheet.create({
   workspaceActionDeck: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: Platform.OS === 'ios' ? 10 : 12,
   },
   workspaceActionTile: {
     flex: 1,
     minWidth: 190,
     backgroundColor: '#FFFFFF',
     borderRadius: 22,
-    padding: 16,
+    padding: Platform.OS === 'ios' ? 12 : 16,
     gap: 8,
     borderWidth: 1,
     borderColor: '#D8E7F5',
@@ -9497,7 +9497,7 @@ const styles = StyleSheet.create({
   marketplaceCard: {
     backgroundColor: '#FFFCF6',
     borderRadius: 22,
-    padding: 14,
+    padding: Platform.OS === 'ios' ? 10 : 14,
     borderWidth: 1,
     borderColor: '#E8DDCB',
     gap: 12,
@@ -9516,7 +9516,7 @@ const styles = StyleSheet.create({
   companyDiscoveryCard: {
     backgroundColor: '#FFFCF8',
     borderRadius: 22,
-    padding: 12,
+    padding: Platform.OS === 'ios' ? 8 : 12,
     borderWidth: 1,
     borderColor: '#DCE8DF',
     gap: 10,
@@ -9847,8 +9847,8 @@ const styles = StyleSheet.create({
   bookingCard: {
     backgroundColor: '#FBFAF5',
     borderRadius: 18,
-    padding: 16,
-    gap: 6,
+    padding: Platform.OS === 'ios' ? 12 : 16,
+    gap: Platform.OS === 'ios' ? 4 : 6,
   },
   statusBadge: {
     backgroundColor: colors.paleBlue,
@@ -9867,10 +9867,10 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   ratingCard: {
-    gap: 10,
+    gap: Platform.OS === 'ios' ? 8 : 10,
     backgroundColor: '#FAF8F2',
     borderRadius: 18,
-    padding: 14,
+    padding: Platform.OS === 'ios' ? 12 : 14,
   },
   offerAdminCard: {
     flexDirection: 'row',
@@ -9919,7 +9919,7 @@ const styles = StyleSheet.create({
   },
   darkModeCard: {
     borderRadius: 18,
-    padding: 14,
+    padding: Platform.OS === 'ios' ? 12 : 14,
     backgroundColor: '#F7F4EC',
     flexDirection: 'row',
     alignItems: 'center',
@@ -9950,8 +9950,8 @@ const styles = StyleSheet.create({
     gap: 2,
     backgroundColor: 'transparent',
     borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+    paddingHorizontal: Platform.OS === 'ios' ? 2 : 8,
+    paddingVertical: Platform.OS === 'ios' ? 1 : 6,
     borderWidth: 0,
     borderColor: 'transparent',
     justifyContent: 'space-around',
@@ -9962,9 +9962,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#D7E9DB',
     shadowColor: '#0E7B45',
-    shadowOpacity: Platform.OS === 'ios' ? 0.12 : 0.08,
-    shadowRadius: Platform.OS === 'ios' ? 18 : 10,
-    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: Platform.OS === 'ios' ? 0.09 : 0.08,
+    shadowRadius: Platform.OS === 'ios' ? 12 : 10,
+    shadowOffset: { width: 0, height: Platform.OS === 'ios' ? 5 : 8 },
     elevation: Platform.OS === 'ios' ? 0 : 6,
   },
   bottomNavDark: {
@@ -9975,18 +9975,18 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 4,
+    paddingVertical: Platform.OS === 'ios' ? 1 : 4,
     paddingHorizontal: 4,
     borderRadius: 999,
-    gap: 5,
+    gap: Platform.OS === 'ios' ? 2 : 5,
   },
   bottomNavItemCenter: {
     flex: 1.1,
-    transform: [{ translateY: -9 }],
+    transform: [{ translateY: Platform.OS === 'ios' ? -3 : -9 }],
   },
   bottomNavHomeOrb: {
-    width: 60,
-    height: 60,
+    width: Platform.OS === 'ios' ? 44 : 60,
+    height: Platform.OS === 'ios' ? 44 : 60,
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
@@ -10002,16 +10002,16 @@ const styles = StyleSheet.create({
     shadowColor: '#34D07D',
   },
   bottomNavHomeOrbInner: {
-    width: 48,
-    height: 48,
+    width: Platform.OS === 'ios' ? 34 : 48,
+    height: Platform.OS === 'ios' ? 34 : 48,
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FFFFFF18',
   },
   bottomNavIconShell: {
-    width: 38,
-    height: 38,
+    width: Platform.OS === 'ios' ? 30 : 38,
+    height: Platform.OS === 'ios' ? 30 : 38,
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
@@ -10050,7 +10050,7 @@ const styles = StyleSheet.create({
   bottomNavText: {
     color: colors.muted,
     fontWeight: '700',
-    fontSize: 11,
+    fontSize: Platform.OS === 'ios' ? 9 : 11,
     letterSpacing: 0.2,
     textAlign: 'center',
   },
@@ -10069,10 +10069,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 0,
-    paddingHorizontal: 8,
+    bottom: Platform.OS === 'ios' ? -12 : 0,
+    paddingHorizontal: Platform.OS === 'ios' ? 0 : 8,
     paddingTop: 0,
-    paddingBottom: Platform.OS === 'ios' ? 8 : 4,
+    paddingBottom: Platform.OS === 'ios' ? 0 : 4,
     backgroundColor: 'transparent',
     borderTopWidth: 0,
     borderTopColor: 'transparent',
@@ -10082,10 +10082,10 @@ const styles = StyleSheet.create({
     borderTopColor: 'transparent',
   },
   verificationCard: {
-    gap: 10,
+    gap: Platform.OS === 'ios' ? 8 : 10,
     borderRadius: 18,
     backgroundColor: '#F7F9FC',
-    padding: 14,
+    padding: Platform.OS === 'ios' ? 12 : 14,
   },
   customerVerificationDark: {
     backgroundColor: '#1B2632',
