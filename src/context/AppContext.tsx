@@ -216,6 +216,10 @@ function slugify(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
+function normalizeText(value?: string) {
+  return (value ?? '').trim().toLowerCase();
+}
+
 function formatAddress(address: Address) {
   return [address.area, address.street, address.building, address.unitNumber].filter(Boolean).join(', ');
 }
@@ -923,16 +927,45 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function createCompany(draft: CompanyDraft) {
-    const normalizedName = draft.name.trim().toLowerCase();
-    const normalizedSupportEmail = draft.supportEmail.trim().toLowerCase();
-    const duplicate = companies.find(
-      (entry) =>
-        entry.name.trim().toLowerCase() === normalizedName ||
-        entry.supportEmail.trim().toLowerCase() === normalizedSupportEmail,
-    );
+    const normalizedName = normalizeText(draft.name);
+    const normalizedSupportEmail = normalizeText(draft.supportEmail);
+    const normalizedSupportPhone = normalizeText(draft.supportPhone);
 
-    if (duplicate) {
-      throw new Error('A company with the same name or support email already exists.');
+    const localDuplicate = companies.find((entry) => {
+      const entryName = normalizeText(entry.name);
+      const entryEmail = normalizeText(entry.supportEmail);
+      const entryPhone = normalizeText(entry.supportPhone);
+      return (
+        entryName === normalizedName ||
+        entryEmail === normalizedSupportEmail ||
+        (!!normalizedSupportPhone && entryPhone === normalizedSupportPhone && entryName === normalizedName)
+      );
+    });
+
+    if (localDuplicate) {
+      if (normalizeText(localDuplicate.supportEmail) === normalizedSupportEmail) {
+        throw new Error('A company with this support email already exists.');
+      }
+      throw new Error('A company with the same details already exists.');
+    }
+
+    const remoteCompanies = await safeList('Company');
+    const remoteDuplicate = remoteCompanies.find((entry: any) => {
+      const entryName = normalizeText(entry?.name);
+      const entryEmail = normalizeText(entry?.supportEmail);
+      const entryPhone = normalizeText(entry?.supportPhone);
+      return (
+        entryName === normalizedName ||
+        entryEmail === normalizedSupportEmail ||
+        (!!normalizedSupportPhone && entryPhone === normalizedSupportPhone && entryName === normalizedName)
+      );
+    });
+
+    if (remoteDuplicate) {
+      if (normalizeText(remoteDuplicate.supportEmail) === normalizedSupportEmail) {
+        throw new Error('A company with this support email already exists.');
+      }
+      throw new Error('A company with the same details already exists.');
     }
 
     const company: Company = { id: `company-${Date.now()}`, name: draft.name, slug: slugify(draft.name), description: draft.description, category: draft.category, supportEmail: draft.supportEmail, supportPhone: draft.supportPhone, accentColor: draft.accentColor, logoText: draft.logoText, profileImageUrl: draft.profileImageUrl, ownerEmail: '', isActive: true, createdAtLabel: nowLabel() };
@@ -943,6 +976,55 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function updateCompany(companyId: string, draft: CompanyDraft) {
+    const normalizedName = normalizeText(draft.name);
+    const normalizedSupportEmail = normalizeText(draft.supportEmail);
+    const normalizedSupportPhone = normalizeText(draft.supportPhone);
+
+    const localDuplicate = companies.find((entry) => {
+      if (entry.id === companyId) {
+        return false;
+      }
+
+      const entryName = normalizeText(entry.name);
+      const entryEmail = normalizeText(entry.supportEmail);
+      const entryPhone = normalizeText(entry.supportPhone);
+      return (
+        entryName === normalizedName ||
+        entryEmail === normalizedSupportEmail ||
+        (!!normalizedSupportPhone && entryPhone === normalizedSupportPhone && entryName === normalizedName)
+      );
+    });
+
+    if (localDuplicate) {
+      if (normalizeText(localDuplicate.supportEmail) === normalizedSupportEmail) {
+        throw new Error('Another company already uses this support email.');
+      }
+      throw new Error('Another company already exists with the same details.');
+    }
+
+    const remoteCompanies = await safeList('Company');
+    const remoteDuplicate = remoteCompanies.find((entry: any) => {
+      if (entry?.id === companyId) {
+        return false;
+      }
+
+      const entryName = normalizeText(entry?.name);
+      const entryEmail = normalizeText(entry?.supportEmail);
+      const entryPhone = normalizeText(entry?.supportPhone);
+      return (
+        entryName === normalizedName ||
+        entryEmail === normalizedSupportEmail ||
+        (!!normalizedSupportPhone && entryPhone === normalizedSupportPhone && entryName === normalizedName)
+      );
+    });
+
+    if (remoteDuplicate) {
+      if (normalizeText(remoteDuplicate.supportEmail) === normalizedSupportEmail) {
+        throw new Error('Another company already uses this support email.');
+      }
+      throw new Error('Another company already exists with the same details.');
+    }
+
     setCompanies((current) => current.map((entry) => (entry.id === companyId ? { ...entry, name: draft.name, slug: slugify(draft.name), description: draft.description, category: draft.category, supportEmail: draft.supportEmail, supportPhone: draft.supportPhone, accentColor: draft.accentColor, logoText: draft.logoText, profileImageUrl: draft.profileImageUrl } : entry)));
     await safeUpdate('Company', { id: companyId, ...draft, slug: slugify(draft.name) });
     await createAuditEvent({ entityType: 'company', entityId: companyId, companyId, action: 'updateCompany', status: 'success', summary: `Updated company workspace details for ${draft.name}.`, metadata: [draft.supportEmail, draft.accentColor] });
@@ -968,7 +1050,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function inviteCompany(draft: InvitationDraft) {
-    const existingCompany = companies.find((entry) => entry.name === draft.companyName);
+    const normalizedCompanyName = normalizeText(draft.companyName);
+    const existingCompany = companies.find((entry) => normalizeText(entry.name) === normalizedCompanyName);
     const company = existingCompany ?? (await createCompany({ name: draft.companyName, description: 'New partner workspace', category: APP_DEFAULT_COMPANY_CATEGORY, supportEmail: draft.email, supportPhone: '', accentColor: '#0F7B45', logoText: draft.companyName.slice(0, 2).toUpperCase(), profileImageUrl: '' }));
     const normalizedInviteEmail = draft.email.trim().toLowerCase();
     const duplicateInvitation = invitations.find(

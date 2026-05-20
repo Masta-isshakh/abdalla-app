@@ -74,6 +74,9 @@ const colors = {
   infoSurface: '#ECF6F0',
 };
 
+const PAGE_OUTER_WIDTH = Platform.OS === 'ios' ? '98%' : '96%';
+const PAGE_CONTENT_WIDTH = Platform.OS === 'ios' ? '88%' : '92%';
+
 const tableToneFilterMemory: Record<string, 'all' | 'error' | 'warning' | 'success'> = {};
 const TABLE_TONE_FILTER_STORAGE_PREFIX = 'jahzeen-table-tone-filter:';
 const CUSTOMER_FILTER_STORAGE_PREFIX = 'jahzeen-customer-filters:';
@@ -839,6 +842,10 @@ function WorkspaceScreen() {
       if (hasDuplicateInvite) {
         errors.inviteEmail = errors.inviteEmail ?? 'This invitation email is already linked to the same company.';
       }
+
+      if (normalizedSupportEmail && normalizedSupportEmail === normalizedInviteEmail) {
+        errors.inviteEmail = errors.inviteEmail ?? 'Invitation email must be different from support email.';
+      }
     }
 
     setCompanyFormErrors(errors);
@@ -901,6 +908,54 @@ function WorkspaceScreen() {
       setAdminBanner({ tone: 'info', text: `Invitation revoked for ${invitation.email}.` });
     } catch (error) {
       setAdminBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to revoke invitation.' });
+    } finally {
+      stopGlobalLoading();
+    }
+  }
+
+  async function handleCompanyStatusChange(companyId: string, isActive: boolean) {
+    startGlobalLoading(isActive ? 'Activating company...' : 'Pausing company...');
+    try {
+      await setCompanyActive(companyId, isActive);
+      setAdminBanner({ tone: 'success', text: isActive ? 'Company activated.' : 'Company paused.' });
+    } catch (error) {
+      setAdminBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to update company status.' });
+    } finally {
+      stopGlobalLoading();
+    }
+  }
+
+  async function handleCompanyDelete(companyId: string) {
+    startGlobalLoading('Deleting company workspace...');
+    try {
+      await deleteCompany(companyId);
+      setAdminBanner({ tone: 'info', text: 'Company workspace deleted.' });
+    } catch (error) {
+      setAdminBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to delete company.' });
+    } finally {
+      stopGlobalLoading();
+    }
+  }
+
+  async function handleCatalogReview(itemId: string, decision: 'approved' | 'rejected') {
+    startGlobalLoading(decision === 'approved' ? 'Approving catalog item...' : 'Rejecting catalog item...');
+    try {
+      await reviewCatalogItem(itemId, decision);
+      setAdminBanner({ tone: 'success', text: decision === 'approved' ? 'Catalog item approved.' : 'Catalog item rejected.' });
+    } catch (error) {
+      setAdminBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to review catalog item.' });
+    } finally {
+      stopGlobalLoading();
+    }
+  }
+
+  async function handleOfferReview(promotionId: string, decision: 'approved' | 'rejected') {
+    startGlobalLoading(decision === 'approved' ? 'Approving promotion...' : 'Rejecting promotion...');
+    try {
+      await reviewOfferPromotion(promotionId, decision);
+      setAdminBanner({ tone: 'success', text: decision === 'approved' ? 'Promotion approved.' : 'Promotion rejected.' });
+    } catch (error) {
+      setAdminBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to review promotion.' });
     } finally {
       stopGlobalLoading();
     }
@@ -1601,13 +1656,13 @@ function WorkspaceScreen() {
             onSaveCompany={handleCompanySave}
             companySubmitting={companySubmitting}
             onResetCompany={resetAdminDrafts}
-            onDeleteCompany={deleteCompany}
-            onToggleCompany={setCompanyActive}
+            onDeleteCompany={handleCompanyDelete}
+            onToggleCompany={handleCompanyStatusChange}
             onPickCompanyImage={handleCompanyImagePick}
             onClearCompanyImage={handleCompanyImageClear}
             onSaveCategorySetting={handleCategoryLaunchChange}
-            onReviewCatalogItem={reviewCatalogItem}
-            onReviewOfferPromotion={reviewOfferPromotion}
+            onReviewCatalogItem={handleCatalogReview}
+            onReviewOfferPromotion={handleOfferReview}
             onResendInvitation={handleInvitationResend}
             onRevokeInvitation={handleInvitationRevoke}
             onOpenNotification={handleNotificationOpen}
@@ -6468,7 +6523,7 @@ const premSidebarStyles = StyleSheet.create({
 
 const phStyles = StyleSheet.create({
   container: {
-    width: Platform.OS === 'ios' ? '96%' : '95%',
+    width: PAGE_OUTER_WIDTH,
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
@@ -6870,9 +6925,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   screenContent: {
-    width: Platform.OS === 'ios' ? '96%' : '95%',
+    width: PAGE_CONTENT_WIDTH,
     alignSelf: 'center',
-    paddingHorizontal: Platform.OS === 'ios' ? 16 : 14,
+    paddingHorizontal: Platform.OS === 'ios' ? 8 : 10,
     paddingTop: Platform.OS === 'ios' ? 20 : 18,
     gap: 16,
     paddingBottom: Platform.OS === 'ios' ? 32 : 28,
@@ -7172,9 +7227,9 @@ const styles = StyleSheet.create({
   customerWorkspaceHost: {
     flex: 1,
     minHeight: 0,
-    width: Platform.OS === 'ios' ? '96%' : '95%',
+    width: PAGE_OUTER_WIDTH,
     alignSelf: 'center',
-    paddingHorizontal: Platform.OS === 'ios' ? 8 : 6,
+    paddingHorizontal: Platform.OS === 'ios' ? 6 : 8,
   },
   customerWorkspace: {
     flex: 1,
@@ -8402,7 +8457,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   adminBottomNavWrap: {
-    width: Platform.OS === 'ios' ? '96%' : '95%',
+    width: PAGE_OUTER_WIDTH,
     alignSelf: 'center',
     paddingHorizontal: Platform.OS === 'ios' ? 8 : 6,
     paddingVertical: Platform.OS === 'ios' ? 2 : 1,
