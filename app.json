@@ -36,7 +36,11 @@
     },
     "web": {
       "bundler": "metro",
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "name": "Abdalla",
+      "shortName": "Abdalla",
+      "themeColor": "#0E8E4E",
+      "backgroundColor": "#ffffff"
     },
     "extra": {
       "eas": {
