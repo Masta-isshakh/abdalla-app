@@ -1,18 +1,21 @@
 {
   "auth": {
-    "user_pool_id": "ap-south-1_xtxWgu65e",
+    "user_pool_id": "ap-south-1_BgEantO05",
     "aws_region": "ap-south-1",
-    "user_pool_client_id": "387vff7pp2uh0vvn96m54q0fuj",
-    "identity_pool_id": "ap-south-1:ed40cbb4-2a93-4a4e-9574-aacad38ac9ad",
+    "user_pool_client_id": "7hkl5iqn3ndmfl3s6i58ikq8o0",
+    "identity_pool_id": "ap-south-1:5b148781-9f5f-4175-8e0b-bd3b7019eeb0",
     "mfa_methods": [],
     "standard_required_attributes": [
-      "email"
+      "email",
+      "phone_number"
     ],
     "username_attributes": [
-      "email"
+      "email",
+      "phone_number"
     ],
     "user_verification_types": [
-      "email"
+      "email",
+      "phone_number"
     ],
     "groups": [
       {
@@ -42,7 +45,7 @@
     "unauthenticated_identities_enabled": true
   },
   "data": {
-    "url": "https://frxxzqpyfbdixciyldr6u77neu.appsync-api.ap-south-1.amazonaws.com/graphql",
+    "url": "https://nxeuctz42nbmhjokfdgfssdftq.appsync-api.ap-south-1.amazonaws.com/graphql",
     "aws_region": "ap-south-1",
     "default_authorization_type": "AMAZON_COGNITO_USER_POOLS",
     "authorization_types": [
@@ -437,7 +440,7 @@
                   },
                   {
                     "allow": "public",
-                    "provider": "iam",
+                    "provider": "identityPool",
                     "operations": [
                       "read"
                     ]
@@ -645,7 +648,7 @@
                   },
                   {
                     "allow": "public",
-                    "provider": "iam",
+                    "provider": "identityPool",
                     "operations": [
                       "read"
                     ]
@@ -740,6 +743,27 @@
               "isRequired": false,
               "attributes": []
             },
+            "approvalStatus": {
+              "name": "approvalStatus",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "approvedAtLabel": {
+              "name": "approvedAtLabel",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "approvedByEmail": {
+              "name": "approvedByEmail",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
             "featured": {
               "name": "featured",
               "isArray": false,
@@ -830,7 +854,7 @@
                   },
                   {
                     "allow": "public",
-                    "provider": "iam",
+                    "provider": "identityPool",
                     "operations": [
                       "read"
                     ]
@@ -932,6 +956,27 @@
               "isRequired": false,
               "attributes": []
             },
+            "approvalStatus": {
+              "name": "approvalStatus",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "approvedAtLabel": {
+              "name": "approvedAtLabel",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "approvedByEmail": {
+              "name": "approvedByEmail",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
             "sortOrder": {
               "name": "sortOrder",
               "isArray": false,
@@ -994,7 +1039,7 @@
                   },
                   {
                     "allow": "public",
-                    "provider": "iam",
+                    "provider": "identityPool",
                     "operations": [
                       "read"
                     ]
@@ -1446,7 +1491,7 @@
                   },
                   {
                     "allow": "public",
-                    "provider": "iam",
+                    "provider": "identityPool",
                     "operations": [
                       "read"
                     ]
@@ -1823,7 +1868,7 @@
                   },
                   {
                     "allow": "public",
-                    "provider": "iam",
+                    "provider": "identityPool",
                     "operations": [
                       "read"
                     ]
@@ -1945,7 +1990,7 @@
                   },
                   {
                     "allow": "public",
-                    "provider": "iam",
+                    "provider": "identityPool",
                     "operations": [
                       "read"
                     ]
@@ -2083,7 +2128,7 @@
                   },
                   {
                     "allow": "public",
-                    "provider": "iam",
+                    "provider": "identityPool",
                     "operations": [
                       "read"
                     ]

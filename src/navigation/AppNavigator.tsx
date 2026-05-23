@@ -1,9 +1,11 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { confirmSignUp as confirmPhoneSignUp, resendSignUpCode, signUp as signUpWithPhoneOtp } from 'aws-amplify/auth';
 import {
   ActivityIndicator,
   Image,
@@ -55,8 +57,14 @@ type BannerState = {
 
 type ValidationMap = Record<string, string>;
 type CustomerSortMode = 'popular' | 'newest' | 'priceLow' | 'priceHigh';
+type CustomerTabKey = 'home' | 'browse' | 'explore' | 'orders' | 'profile' | 'notifications';
+type CustomerRestrictedTab = 'orders' | 'profile';
+type OnboardingStep = 'location' | 'phone' | 'account';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+const NativeMapComponents = Platform.OS === 'web' ? null : require('react-native-maps');
+const NativeMapView = NativeMapComponents?.default;
+const NativeMarker = NativeMapComponents?.Marker;
 
 const colors = {
   background: '#F4F8F4',
@@ -80,6 +88,8 @@ const PAGE_CONTENT_WIDTH = Platform.OS === 'ios' ? '100%' : '92%';
 const tableToneFilterMemory: Record<string, 'all' | 'error' | 'warning' | 'success'> = {};
 const TABLE_TONE_FILTER_STORAGE_PREFIX = 'jahzeen-table-tone-filter:';
 const CUSTOMER_FILTER_STORAGE_PREFIX = 'jahzeen-customer-filters:';
+const CUSTOMER_ONBOARDING_STORAGE_KEY = 'jahzeen-customer-onboarding:v1';
+const DEFAULT_MAP_PIN = { latitude: 25.2854, longitude: 51.531 }; // Doha Corniche fallback
 const CATEGORY_DEFINITIONS = [
   { label: 'Home Cleaning', comingSoon: false },
   { label: 'Car Wash', comingSoon: false },
@@ -224,10 +234,36 @@ function WorkspaceScreen() {
 
   const [adminTab, setAdminTab] = useState<'overview' | 'companies' | 'publishing' | 'inbox' | 'bookings' | 'settings'>('overview');
   const [companyTab, setCompanyTab] = useState<'overview' | 'catalog' | 'offers' | 'schedule' | 'bookings' | 'loyalty' | 'requests'>('overview');
-  const [customerTab, setCustomerTab] = useState<'home' | 'browse' | 'explore' | 'orders' | 'profile' | 'notifications'>('home');
+  const [customerTab, setCustomerTab] = useState<CustomerTabKey>('home');
   const [customerDarkMode, setCustomerDarkMode] = useState(false);
   const [customerSortMode, setCustomerSortMode] = useState<CustomerSortMode>('popular');
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
+  const [onboardingHydrated, setOnboardingHydrated] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState<OnboardingStep | null>(null);
+  const [onboardingTargetTab, setOnboardingTargetTab] = useState<CustomerRestrictedTab | null>(null);
+  const [locationMode, setLocationMode] = useState<'current' | 'map'>('current');
+  const [phoneVerificationForm, setPhoneVerificationForm] = useState({ phone: '', code: '' });
+  const [pendingPhoneOtpUsername, setPendingPhoneOtpUsername] = useState('');
+  const [accountSetupForm, setAccountSetupForm] = useState({ firstName: '', lastName: '', email: '' });
+  const [onboardingErrors, setOnboardingErrors] = useState<ValidationMap>({});
+  const [locationBusy, setLocationBusy] = useState(false);
+  const [mapPin, setMapPin] = useState(DEFAULT_MAP_PIN);
+  const [mapRegion, setMapRegion] = useState({
+    ...DEFAULT_MAP_PIN,
+    latitudeDelta: 0.015,
+    longitudeDelta: 0.015,
+  });
+  const [guestOnboardingProfile, setGuestOnboardingProfile] = useState({
+    locationSet: false,
+    phoneVerified: false,
+    accountSetup: false,
+    phone: '',
+    firstName: '',
+    lastName: '',
+    email: '',
+    latitude: null as number | null,
+    longitude: null as number | null,
+  });
 
   const [signInForm, setSignInForm] = useState({ email: '', password: '' });
   const [signUpForm, setSignUpForm] = useState({ fullName: '', email: '', password: '', phone: '' });
@@ -384,6 +420,123 @@ function WorkspaceScreen() {
       setOperationPopup({ tone: 'error', text: normalizedAuthMessage });
     }
   }, [authMessage]);
+
+  useEffect(() => {
+    let active = true;
+
+    AsyncStorage.getItem(CUSTOMER_ONBOARDING_STORAGE_KEY)
+      .then((rawValue) => {
+        if (!active || !rawValue) {
+          return;
+        }
+
+        const parsed = JSON.parse(rawValue) as {
+          locationSet?: boolean;
+          phoneVerified?: boolean;
+          accountSetup?: boolean;
+          phone?: string;
+          firstName?: string;
+          lastName?: string;
+          email?: string;
+          latitude?: number | null;
+          longitude?: number | null;
+          location?: Partial<Address>;
+        };
+
+        setGuestOnboardingProfile((current) => ({
+          ...current,
+          locationSet: parsed.locationSet ?? current.locationSet,
+          phoneVerified: parsed.phoneVerified ?? current.phoneVerified,
+          accountSetup: parsed.accountSetup ?? current.accountSetup,
+          phone: parsed.phone ?? current.phone,
+          firstName: parsed.firstName ?? current.firstName,
+          lastName: parsed.lastName ?? current.lastName,
+          email: parsed.email ?? current.email,
+          latitude: typeof parsed.latitude === 'number' ? parsed.latitude : current.latitude,
+          longitude: typeof parsed.longitude === 'number' ? parsed.longitude : current.longitude,
+        }));
+
+        if (typeof parsed.latitude === 'number' && typeof parsed.longitude === 'number') {
+          const hydratedPin = { latitude: parsed.latitude, longitude: parsed.longitude };
+          setMapPin(hydratedPin);
+          setMapRegion((current) => ({
+            ...current,
+            ...hydratedPin,
+          }));
+        }
+
+        if (parsed.location) {
+          setAddressForm((current) => ({ ...current, ...parsed.location, isDefault: true }));
+        }
+
+        if (parsed.phone) {
+          setPhoneVerificationForm((current) => ({ ...current, phone: parsed.phone ?? current.phone }));
+        }
+
+        if (parsed.firstName || parsed.lastName || parsed.email) {
+          setAccountSetupForm((current) => ({
+            ...current,
+            firstName: parsed.firstName ?? current.firstName,
+            lastName: parsed.lastName ?? current.lastName,
+            email: parsed.email ?? current.email,
+          }));
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (active) {
+          setOnboardingHydrated(true);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!onboardingHydrated || authUser) {
+      return;
+    }
+
+    AsyncStorage.setItem(
+      CUSTOMER_ONBOARDING_STORAGE_KEY,
+      JSON.stringify({
+        ...guestOnboardingProfile,
+        latitude: guestOnboardingProfile.latitude,
+        longitude: guestOnboardingProfile.longitude,
+        location: {
+          label: addressForm.label,
+          area: addressForm.area,
+          street: addressForm.street,
+          building: addressForm.building,
+          unitNumber: addressForm.unitNumber,
+          contactPhone: addressForm.contactPhone,
+          isDefault: true,
+        },
+      }),
+    ).catch(() => undefined);
+  }, [
+    addressForm.area,
+    addressForm.building,
+    addressForm.contactPhone,
+    addressForm.label,
+    addressForm.street,
+    addressForm.unitNumber,
+    authUser,
+    guestOnboardingProfile,
+    onboardingHydrated,
+  ]);
+
+  useEffect(() => {
+    if (!onboardingHydrated || authUser) {
+      return;
+    }
+
+    if (!guestOnboardingProfile.locationSet) {
+      setOnboardingStep('location');
+    }
+  }, [authUser, guestOnboardingProfile.locationSet, onboardingHydrated]);
 
   useEffect(() => {
     setProfileForm(profile);
@@ -661,11 +814,9 @@ function WorkspaceScreen() {
   );
 
   const customerTabs = [
-    { key: 'browse', label: 'Browse', icon: 'view-grid-outline', activeIcon: 'view-grid' },
-    { key: 'explore', label: 'Explore', icon: 'compass-outline', activeIcon: 'compass' },
     { key: 'home', label: 'Home', icon: 'home-variant-outline', activeIcon: 'home-variant' },
     { key: 'orders', label: 'Orders', icon: 'clipboard-text-clock-outline', activeIcon: 'clipboard-text-clock' },
-    { key: 'profile', label: 'Profile', icon: 'account-circle-outline', activeIcon: 'account-circle' },
+    { key: 'profile', label: 'More', icon: 'dots-horizontal-circle-outline', activeIcon: 'dots-horizontal-circle' },
   ];
 
   const adminNotifications = useMemo(
@@ -697,6 +848,296 @@ function WorkspaceScreen() {
         : activeRole === 'customer'
           ? 'Customer account workspace'
           : 'Public marketplace access';
+
+  const customerLocationLabel = [
+    addressForm.building.trim() ? `Building ${addressForm.building.trim()}` : '',
+    addressForm.street.trim(),
+  ].filter(Boolean).join(', ') || 'Set your location';
+
+  const canAccessRestrictedTabs = authUser ? true : guestOnboardingProfile.phoneVerified && guestOnboardingProfile.accountSetup;
+  const shouldShowOnboarding = !!onboardingStep && !authUser;
+
+  function openRestrictedTabFlow(targetTab: CustomerRestrictedTab) {
+    if (authUser) {
+      setCustomerTab(targetTab);
+      return;
+    }
+
+    setOnboardingTargetTab(targetTab);
+    setCustomerTab('home');
+    if (!guestOnboardingProfile.locationSet) {
+      setOnboardingStep('location');
+      setCustomerBanner({ tone: 'info', text: 'Set your location first to continue.' });
+      return;
+    }
+
+    if (!guestOnboardingProfile.phoneVerified) {
+      setOnboardingStep('phone');
+      setCustomerBanner({ tone: 'info', text: 'Verify your phone number to open Orders and More.' });
+      return;
+    }
+
+    if (!guestOnboardingProfile.accountSetup) {
+      setOnboardingStep('account');
+      setCustomerBanner({ tone: 'info', text: 'Complete your account setup to unlock Orders and More.' });
+      return;
+    }
+
+    setCustomerTab(targetTab);
+  }
+
+  function requestCustomerTabChange(nextTab: CustomerTabKey) {
+    if ((nextTab === 'orders' || nextTab === 'profile') && !canAccessRestrictedTabs) {
+      openRestrictedTabFlow(nextTab);
+      return;
+    }
+
+    setCustomerTab(nextTab);
+  }
+
+  async function applyReverseGeocodedAddress(latitude: number, longitude: number) {
+    const geocoded = await Location.reverseGeocodeAsync({ latitude, longitude });
+    const primary = geocoded[0];
+    const fallbackPhone = phoneVerificationForm.phone.trim() || guestOnboardingProfile.phone.trim() || '+97455551234';
+
+    setAddressForm((current) => ({
+      ...current,
+      label: current.label.trim() || 'Pinned Location',
+      area: current.area.trim() || primary?.district || primary?.subregion || primary?.city || 'Doha',
+      street: current.street.trim() || [primary?.streetNumber, primary?.street].filter(Boolean).join(' ').trim() || primary?.name || 'Pinned location',
+      building: current.building.trim() || primary?.streetNumber || '1',
+      contactPhone: current.contactPhone.trim() || fallbackPhone,
+      isDefault: true,
+    }));
+  }
+
+  async function fetchCurrentGpsLocation() {
+    setLocationBusy(true);
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (permission.status !== 'granted') {
+        setCustomerBanner({ tone: 'error', text: 'Location permission is required. Please enable it to continue.' });
+        return;
+      }
+
+      const currentPosition = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      const nextPin = {
+        latitude: currentPosition.coords.latitude,
+        longitude: currentPosition.coords.longitude,
+      };
+
+      setMapPin(nextPin);
+      setMapRegion((current) => ({
+        ...current,
+        ...nextPin,
+      }));
+      await applyReverseGeocodedAddress(nextPin.latitude, nextPin.longitude);
+
+      setGuestOnboardingProfile((current) => ({
+        ...current,
+        latitude: nextPin.latitude,
+        longitude: nextPin.longitude,
+      }));
+      setOnboardingErrors((current) => {
+        const next = { ...current };
+        delete next.locationPin;
+        return next;
+      });
+      setCustomerBanner({ tone: 'success', text: 'Current GPS location detected.' });
+    } catch (error) {
+      setCustomerBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to fetch your current location.' });
+    } finally {
+      setLocationBusy(false);
+    }
+  }
+
+  async function handleMapPinSelection(latitude: number, longitude: number) {
+    setLocationBusy(true);
+    try {
+      setMapPin({ latitude, longitude });
+      await applyReverseGeocodedAddress(latitude, longitude);
+      setGuestOnboardingProfile((current) => ({
+        ...current,
+        latitude,
+        longitude,
+      }));
+      setOnboardingErrors((current) => {
+        const next = { ...current };
+        delete next.locationPin;
+        return next;
+      });
+    } catch (error) {
+      setCustomerBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to read map location details.' });
+    } finally {
+      setLocationBusy(false);
+    }
+  }
+
+  async function handleOnboardingLocationContinue() {
+    if (locationMode === 'current' && (!guestOnboardingProfile.latitude || !guestOnboardingProfile.longitude)) {
+      await fetchCurrentGpsLocation();
+    }
+
+    const nextAddressDraft = {
+      ...addressForm,
+      label: addressForm.label.trim() || (locationMode === 'current' ? 'Current Location' : 'Pinned Location'),
+      isDefault: true,
+    };
+
+    if (!guestOnboardingProfile.latitude || !guestOnboardingProfile.longitude) {
+      setOnboardingErrors((current) => ({ ...current, locationPin: 'Choose your exact map pin before continuing.' }));
+      setCustomerBanner({ tone: 'error', text: 'Pin your location on map or use current GPS location.' });
+      return;
+    }
+
+    const locationErrors = validateAddressDraft(nextAddressDraft);
+    setOnboardingErrors(locationErrors);
+    if (Object.keys(locationErrors).length) {
+      setCustomerBanner({ tone: 'error', text: 'Please complete your location details first.' });
+      return;
+    }
+
+    if (authUser) {
+      startGlobalLoading('Saving address...');
+      try {
+        await saveAddress({ ...nextAddressDraft, isDefault: true });
+      } catch (error) {
+        setCustomerBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to save location.' });
+      } finally {
+        stopGlobalLoading();
+      }
+    }
+
+    setGuestOnboardingProfile((current) => ({ ...current, locationSet: true }));
+    setOnboardingErrors({});
+    if (onboardingTargetTab === 'orders' || onboardingTargetTab === 'profile') {
+      setOnboardingStep('phone');
+    } else {
+      setOnboardingStep(null);
+    }
+    setCustomerBanner({ tone: 'success', text: 'Location saved. You are ready to continue.' });
+  }
+
+  async function handleIssuePhoneCode() {
+    const normalizedPhone = normalizePhoneE164(phoneVerificationForm.phone);
+    if (!normalizedPhone) {
+      setOnboardingErrors((current) => ({ ...current, phone: 'Use a valid phone number in international format.' }));
+      return;
+    }
+
+    startGlobalLoading('Sending SMS verification code...');
+    try {
+      const otpUsername = `otp.${Date.now()}.${Math.floor(Math.random() * 10000)}@jahzeen.app`;
+      await signUpWithPhoneOtp({
+        username: otpUsername,
+        password: generateEphemeralPassword(),
+        options: {
+          userAttributes: {
+            phone_number: normalizedPhone,
+            email: otpUsername,
+          },
+        },
+      });
+      setPendingPhoneOtpUsername(otpUsername);
+      setPhoneVerificationForm((current) => ({ ...current, phone: normalizedPhone, code: '' }));
+      setOnboardingErrors((current) => {
+        const next = { ...current };
+        delete next.phone;
+        delete next.code;
+        return next;
+      });
+      setCustomerBanner({ tone: 'info', text: `Verification code sent to ${normalizedPhone}.` });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to send SMS verification code.';
+      if (/UsernameExistsException/i.test(message) && pendingPhoneOtpUsername) {
+        try {
+          await resendSignUpCode({ username: pendingPhoneOtpUsername });
+          setCustomerBanner({ tone: 'info', text: `Verification code re-sent to ${normalizedPhone}.` });
+        } catch (resendError) {
+          setCustomerBanner({ tone: 'error', text: resendError instanceof Error ? resendError.message : 'Unable to resend verification code.' });
+        }
+      } else {
+        setCustomerBanner({ tone: 'error', text: message });
+      }
+    } finally {
+      stopGlobalLoading();
+    }
+  }
+
+  async function handleVerifyPhoneCode() {
+    const username = pendingPhoneOtpUsername;
+    if (!username) {
+      setOnboardingErrors((current) => ({ ...current, phone: 'Send the SMS code first.' }));
+      return;
+    }
+
+    if (!phoneVerificationForm.code.trim()) {
+      setOnboardingErrors((current) => ({ ...current, code: 'Verification code is required.' }));
+      return;
+    }
+
+    startGlobalLoading('Verifying SMS code...');
+    try {
+      await confirmPhoneSignUp({
+        username,
+        confirmationCode: phoneVerificationForm.code.trim(),
+      });
+
+      setGuestOnboardingProfile((current) => ({
+        ...current,
+        phoneVerified: true,
+        phone: username,
+      }));
+      setProfileForm((current) => ({ ...current, phone: username || current.phone }));
+      setOnboardingErrors({});
+      setOnboardingStep('account');
+      setCustomerBanner({ tone: 'success', text: 'Phone number verified successfully.' });
+    } catch (error) {
+      setOnboardingErrors((current) => ({ ...current, code: error instanceof Error ? error.message : 'Invalid verification code.' }));
+    } finally {
+      stopGlobalLoading();
+    }
+  }
+
+  function handleCompleteGuestAccount() {
+    const errors: ValidationMap = {};
+    if (!accountSetupForm.firstName.trim()) {
+      errors.firstName = 'First name is required.';
+    }
+    if (!accountSetupForm.lastName.trim()) {
+      errors.lastName = 'Last name is required.';
+    }
+    if (!isEmail(accountSetupForm.email)) {
+      errors.email = 'Use a valid email address.';
+    }
+
+    setOnboardingErrors(errors);
+    if (Object.keys(errors).length) {
+      return;
+    }
+
+    const fullName = `${accountSetupForm.firstName.trim()} ${accountSetupForm.lastName.trim()}`.trim();
+    setGuestOnboardingProfile((current) => ({
+      ...current,
+      accountSetup: true,
+      firstName: accountSetupForm.firstName.trim(),
+      lastName: accountSetupForm.lastName.trim(),
+      email: accountSetupForm.email.trim().toLowerCase(),
+    }));
+    setProfileForm((current) => ({
+      ...current,
+      fullName,
+      email: accountSetupForm.email.trim().toLowerCase(),
+      phone: phoneVerificationForm.phone.trim() || current.phone,
+    }));
+    setOnboardingStep(null);
+    setOnboardingTargetTab(null);
+    setCustomerTab('home');
+    setCustomerBanner({ tone: 'success', text: 'Account setup complete. Welcome to Jahzeen.' });
+  }
 
   function resetAdminDrafts() {
     setSelectedAdminCompanyId(null);
@@ -1281,8 +1722,8 @@ function WorkspaceScreen() {
       return;
     }
 
-    setCustomerTab((['home', 'browse', 'explore', 'orders', 'profile', 'notifications'] as const).includes(notification.destinationTab as any)
-      ? (notification.destinationTab as 'home' | 'browse' | 'explore' | 'orders' | 'profile' | 'notifications')
+    requestCustomerTabChange((['home', 'browse', 'explore', 'orders', 'profile', 'notifications'] as const).includes(notification.destinationTab as any)
+      ? (notification.destinationTab as CustomerTabKey)
       : 'notifications');
   }
 
@@ -1292,7 +1733,7 @@ function WorkspaceScreen() {
       return;
     }
 
-    setCustomerTab('notifications');
+    requestCustomerTabChange('notifications');
   }
 
   async function handleConfirmCode() {
@@ -1364,7 +1805,7 @@ function WorkspaceScreen() {
     if (Object.keys(errors).length) {
       setCustomerBanner({ tone: 'error', text: authUser ? 'Fix the booking details before placing the order.' : 'Open Profile and sign in before placing a booking.' });
       if (!authUser) {
-        setCustomerTab('profile');
+        requestCustomerTabChange('profile');
       }
       return;
     }
@@ -1374,7 +1815,7 @@ function WorkspaceScreen() {
       await placeBooking(bookingComposer);
       setBookingComposer((current) => ({ ...current, itemId: '', companyId: '', slotId: '', notes: '' }));
       setBookingErrors({});
-      setCustomerTab('orders');
+      requestCustomerTabChange('orders');
       setCustomerBanner({ tone: 'success', text: 'Booking placed successfully.' });
     } catch (error) {
       Alert.alert('Booking failed', error instanceof Error ? error.message : 'Unable to place booking.');
@@ -1429,10 +1870,11 @@ function WorkspaceScreen() {
           <PremiumHeader
             logoText="Jahzeen"
             darkMode={customerDarkMode}
+            locationText={customerLocationLabel}
             notificationCount={customerNotificationCount}
             onSearchPress={() => setCustomerTab('explore')}
             onNotificationPress={handleNotificationPress}
-            onProfilePress={() => setCustomerTab('profile')}
+            onProfilePress={() => requestCustomerTabChange('profile')}
             onMenuPress={() => setCustomerCategoryMenuOpen(true)}
           />
 
@@ -1440,7 +1882,7 @@ function WorkspaceScreen() {
             <CustomerWorkspace
               wide={wide}
               tab={customerTab}
-              onTabChange={setCustomerTab}
+              onTabChange={requestCustomerTabChange}
               authUser={authUser}
               currentUserRole={currentUserRecord?.role ?? 'customer'}
               companies={companies}
@@ -1514,11 +1956,139 @@ function WorkspaceScreen() {
             />
           </View>
 
+          {shouldShowOnboarding ? (
+            <View style={styles.onboardingOverlay}>
+              <LinearGradient colors={['rgba(8, 22, 46, 0.82)', 'rgba(15, 64, 123, 0.75)']} style={styles.onboardingOverlayGradient}>
+                <View style={styles.onboardingCardWrap}>
+                  <View style={styles.onboardingTitleRow}>
+                    <View style={styles.onboardingIconMark}>
+                      <MaterialCommunityIcons
+                        name={onboardingStep === 'location' ? 'map-marker-radius' : onboardingStep === 'phone' ? 'cellphone-key' : 'account-edit-outline'}
+                        size={22}
+                        color="#FFFFFF"
+                      />
+                    </View>
+                    <View style={styles.infoBodyGrow}>
+                      <Text style={styles.onboardingEyebrow}>Quick setup</Text>
+                      <Text style={styles.onboardingTitle}>
+                        {onboardingStep === 'location'
+                          ? 'Set your location'
+                          : onboardingStep === 'phone'
+                            ? 'Verify your phone number'
+                            : 'Set up your account'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text style={styles.onboardingBody}>
+                    {onboardingStep === 'location'
+                      ? 'Before exploring services, choose your current location or pin a home location on map mode.'
+                      : onboardingStep === 'phone'
+                        ? `To open ${onboardingTargetTab === 'orders' ? 'Orders' : 'More'}, verify your phone with a one-time code.`
+                        : 'Almost done. Add first name, last name, and email to finish account setup.'}
+                  </Text>
+
+                  {onboardingStep === 'location' ? (
+                    <View style={styles.onboardingSectionStack}>
+                      <View style={styles.toggleRow}>
+                        <ChoiceChip label="Use current location" selected={locationMode === 'current'} onPress={() => setLocationMode('current')} />
+                        <ChoiceChip label="Choose from map" selected={locationMode === 'map'} onPress={() => setLocationMode('map')} />
+                      </View>
+
+                      {locationMode === 'current' ? (
+                        <View style={styles.onboardingHintCard}>
+                          <Text style={styles.onboardingHintTitle}>Current GPS location</Text>
+                          <Text style={styles.onboardingHintBody}>Detect your live location using device GPS and set it as your booking default.</Text>
+                          <SecondaryButton label={locationBusy ? 'Detecting location...' : 'Use my current location'} onPress={() => { void fetchCurrentGpsLocation(); }} loading={locationBusy} disabled={locationBusy} />
+                          {guestOnboardingProfile.latitude && guestOnboardingProfile.longitude ? (
+                            <Text style={styles.onboardingGpsMeta}>{`Lat ${guestOnboardingProfile.latitude.toFixed(5)} · Lng ${guestOnboardingProfile.longitude.toFixed(5)}`}</Text>
+                          ) : null}
+                        </View>
+                      ) : (
+                        <>
+                          {Platform.OS !== 'web' && NativeMapView && NativeMarker ? (
+                            <View style={styles.onboardingMapFrame}>
+                              <NativeMapView
+                                style={styles.onboardingMapView}
+                                initialRegion={mapRegion}
+                                region={mapRegion}
+                                onRegionChangeComplete={(region: any) => setMapRegion(region)}
+                                onPress={(event: any) => {
+                                  const coords = event?.nativeEvent?.coordinate;
+                                  if (coords?.latitude && coords?.longitude) {
+                                    setMapPin(coords);
+                                    void handleMapPinSelection(coords.latitude, coords.longitude);
+                                  }
+                                }}
+                              >
+                                <NativeMarker
+                                  coordinate={mapPin}
+                                  draggable
+                                  onDragEnd={(event: any) => {
+                                    const coords = event?.nativeEvent?.coordinate;
+                                    if (coords?.latitude && coords?.longitude) {
+                                      setMapPin(coords);
+                                      void handleMapPinSelection(coords.latitude, coords.longitude);
+                                    }
+                                  }}
+                                />
+                              </NativeMapView>
+                            </View>
+                          ) : (
+                            <View style={styles.onboardingHintCard}>
+                              <Text style={styles.onboardingHintTitle}>Map preview unavailable on web</Text>
+                              <Text style={styles.onboardingHintBody}>Open the app on iPhone/Android to pick an exact map pin. For now, use current location mode.</Text>
+                            </View>
+                          )}
+
+                          <View style={styles.rowGap}>
+                            <FormField label="Area" value={addressForm.area} onChangeText={(value) => setAddressForm((current) => ({ ...current, area: value }))} error={onboardingErrors.area} />
+                            <FormField label="Street" value={addressForm.street} onChangeText={(value) => setAddressForm((current) => ({ ...current, street: value }))} error={onboardingErrors.street} />
+                            <View style={styles.rowGap}>
+                              <FormField label="Building" value={addressForm.building} onChangeText={(value) => setAddressForm((current) => ({ ...current, building: value }))} error={onboardingErrors.building} />
+                              <FormField label="Phone" value={addressForm.contactPhone} onChangeText={(value) => setAddressForm((current) => ({ ...current, contactPhone: value }))} error={onboardingErrors.contactPhone} />
+                            </View>
+                          </View>
+                        </>
+                      )}
+
+                      {onboardingErrors.locationPin ? <FieldError text={onboardingErrors.locationPin} /> : null}
+
+                      <PrimaryButton label="Save location and continue" onPress={() => { void handleOnboardingLocationContinue(); }} />
+                    </View>
+                  ) : null}
+
+                  {onboardingStep === 'phone' ? (
+                    <View style={styles.onboardingSectionStack}>
+                      <FormField label="Phone" value={phoneVerificationForm.phone} onChangeText={(value) => setPhoneVerificationForm((current) => ({ ...current, phone: value }))} error={onboardingErrors.phone} />
+                      <FormField label="Verification code" value={phoneVerificationForm.code} onChangeText={(value) => setPhoneVerificationForm((current) => ({ ...current, code: value }))} error={onboardingErrors.code} />
+                      <View style={styles.rowGap}>
+                        <SecondaryButton label="Send code" onPress={handleIssuePhoneCode} />
+                        <PrimaryButton label="Verify and continue" onPress={handleVerifyPhoneCode} />
+                      </View>
+                    </View>
+                  ) : null}
+
+                  {onboardingStep === 'account' ? (
+                    <View style={styles.onboardingSectionStack}>
+                      <View style={styles.rowGap}>
+                        <FormField label="First name" value={accountSetupForm.firstName} onChangeText={(value) => setAccountSetupForm((current) => ({ ...current, firstName: value }))} error={onboardingErrors.firstName} />
+                        <FormField label="Last name" value={accountSetupForm.lastName} onChangeText={(value) => setAccountSetupForm((current) => ({ ...current, lastName: value }))} error={onboardingErrors.lastName} />
+                      </View>
+                      <FormField label="Email" value={accountSetupForm.email} onChangeText={(value) => setAccountSetupForm((current) => ({ ...current, email: value }))} error={onboardingErrors.email} />
+                      <PrimaryButton label="Submit and go to Home" onPress={handleCompleteGuestAccount} />
+                    </View>
+                  ) : null}
+                </View>
+              </LinearGradient>
+            </View>
+          ) : null}
+
           <View style={[styles.customerBottomDock, customerDarkMode && styles.customerBottomDockDark]}>
             <BottomNavBar
               items={customerTabs}
               selectedKey={customerTab}
-              onChange={(value) => setCustomerTab(value as 'home' | 'browse' | 'explore' | 'orders' | 'profile')}
+              onChange={(value) => requestCustomerTabChange(value as CustomerTabKey)}
               containerStyle={customerDarkMode ? styles.bottomNavDark : undefined}
               itemStyle={customerDarkMode ? styles.bottomNavItemDark : undefined}
               textStyle={customerDarkMode ? styles.bottomNavTextDark : undefined}
@@ -1547,16 +2117,14 @@ function WorkspaceScreen() {
                 <View style={premSidebarStyles.navSection}>
                   {[
                     { key: 'home', label: 'Home', icon: 'home' as const },
-                    { key: 'browse', label: 'Browse', icon: 'apps-box' as const },
-                    { key: 'explore', label: 'Explore', icon: 'compass' as const },
                     { key: 'orders', label: 'My Orders', icon: 'clipboard-list' as const },
-                    { key: 'profile', label: 'My Profile', icon: 'account' as const },
+                    { key: 'profile', label: 'More', icon: 'dots-horizontal-circle' as const },
                   ].map((item) => (
                     <Pressable
                       key={item.key}
                       style={[premSidebarStyles.navRow, customerDarkMode && premSidebarStyles.navRowDark]}
                       onPress={() => {
-                        setCustomerTab(item.key as any);
+                        requestCustomerTabChange(item.key as CustomerTabKey);
                         setCustomerCategoryMenuOpen(false);
                       }}
                     >
@@ -3619,6 +4187,8 @@ function CustomerWorkspace({
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
   const [providerDetailOpen, setProviderDetailOpen] = useState(false);
   const [homeCarouselPage, setHomeCarouselPage] = useState(0);
+  const [promoStartIndex, setPromoStartIndex] = useState(0);
+  const promoRowFade = useRef(new Animated.Value(1)).current;
   const normalizedCustomerSearch = customerSearchQuery.trim().toLowerCase();
   const normalizedSelectedCategory = selectedCustomerCategory?.trim() || null;
   const categorySettingMap = useMemo(() => new Map(categorySettings.map((entry) => [entry.category, entry.isComingSoon])), [categorySettings]);
@@ -3748,6 +4318,59 @@ function CustomerWorkspace({
     subtitle: index % 2 === 0 ? 'Discover standout listings across the marketplace.' : 'Preview premium inventory and services before you search deeper.',
   }));
   const liveEntries = (featuredOffers.length ? featuredOffers : marketplaceItems.slice(0, 8).map((item) => ({ item, promotion: undefined }))).slice(0, 8);
+  const homePromoCards = liveEntries.length
+    ? liveEntries.map(({ item, promotion }, index) => ({
+        id: item.id,
+        title: item.title,
+        subtitle: promotion?.headline?.trim() || item.category,
+        badge: promotion?.badgeText?.trim() || item.category,
+        priceLabel: promotion?.discountLabel?.trim() || (item.price > 0 ? `QAR ${item.price}` : 'Book now'),
+        imageUrl: item.imageUrl || HOME_CAROUSEL_IMAGES[index % HOME_CAROUSEL_IMAGES.length],
+        companyName: item.companyName,
+        item,
+      }))
+    : HOME_CAROUSEL_IMAGES.concat(HOME_CAROUSEL_IMAGES).slice(0, 6).map((imageUrl, index) => {
+        const fallbackCategory = allCategories[index % Math.max(allCategories.length, 1)] || APP_CATEGORY_OPTIONS[index % APP_CATEGORY_OPTIONS.length] || 'AC Services';
+        const fallbackTitle = index % 2 === 0 ? 'Foam Deep Cleaning' : 'Washing Machine Service';
+        const fallbackDiscount = index % 2 === 0 ? 'QAR 15 OFF*' : '30 DAY WARRANTY';
+        return {
+          id: `fallback-offer-${index}`,
+          title: fallbackTitle,
+          subtitle: fallbackCategory,
+          badge: index % 3 === 1 ? 'NEW' : fallbackCategory,
+          priceLabel: fallbackDiscount,
+          imageUrl,
+          companyName: fallbackCategory,
+          item: marketplaceItems[0] ?? {
+            id: `fallback-item-${index}`,
+            companyId: '',
+            companyName: fallbackCategory,
+            title: fallbackTitle,
+            summary: 'Featured offer',
+            category: fallbackCategory,
+            kind: 'service' as const,
+            price: 0,
+            imageUrl,
+            imageHint: 'Featured offer',
+            durationLabel: '3 Hours',
+            featured: true,
+            isPublished: true,
+            isApproved: true,
+            approvalStatus: 'approved' as const,
+            createdAtLabel: 'Today',
+            updatedAtLabel: 'Today',
+          },
+        };
+      });
+  const rotatingPromoCards = useMemo(() => {
+    if (!homePromoCards.length) {
+      return [];
+    }
+
+    const visibleCount = Math.min(3, homePromoCards.length);
+    return Array.from({ length: visibleCount }, (_, offset) => homePromoCards[(promoStartIndex + offset) % homePromoCards.length]);
+  }, [homePromoCards, promoStartIndex]);
+  const homeGridCategories = allCategories.slice(0, 12);
   const liveCompanyCount = activeCompanies.length;
   const marketplaceCounts = {
     listings: marketplaceItems.length,
@@ -3781,6 +4404,35 @@ function CustomerWorkspace({
   const carouselItemWidth = carouselCardWidth + 12;
   const carouselDotDuration = Platform.OS === 'ios' ? 280 : 360;
   const carouselAutoAdvanceMs = Platform.OS === 'ios' ? 3400 : 4200;
+  const roundedCustomerWidth = Math.round(customerWidth);
+  const isIphone1314Class = Platform.OS === 'ios' && roundedCustomerWidth >= 390 && roundedCustomerWidth <= 393;
+  const isIphone15ProMaxClass = Platform.OS === 'ios' && roundedCustomerWidth >= 428 && roundedCustomerWidth <= 430;
+  const isIOSPhone = Platform.OS === 'ios' && customerWidth < 500;
+  const homeUsableWidth = Math.max(customerWidth - (Platform.OS === 'ios' ? 8 : 14), 320);
+  const promoCardGap = isIphone15ProMaxClass ? 10 : 8;
+  const promoCardWidth = Math.floor((homeUsableWidth - (promoCardGap * 2)) / 3);
+  const promoCardHeight = isIphone15ProMaxClass ? 166 : isIphone1314Class ? 154 : 158;
+  const activeOfferShowcase = homePromoCards[promoStartIndex % Math.max(homePromoCards.length, 1)] ?? null;
+  const homeDeviceTuning = {
+    homeScreenGap: isIphone15ProMaxClass ? 16 : isIphone1314Class ? 14 : 18,
+    heroMinHeight: isIphone15ProMaxClass ? 228 : isIphone1314Class ? 210 : Platform.OS === 'ios' ? 216 : 198,
+    heroTextPaddingHorizontal: isIphone15ProMaxClass ? 20 : 18,
+    heroTextPaddingVertical: isIphone15ProMaxClass ? 14 : 12,
+    heroTitleSize: isIphone15ProMaxClass ? 44 : isIphone1314Class ? 38 : Platform.OS === 'ios' ? 40 : 34,
+    heroTitleLineHeight: isIphone15ProMaxClass ? 48 : isIphone1314Class ? 42 : Platform.OS === 'ios' ? 44 : 38,
+    heroSubtitleSize: isIphone15ProMaxClass ? 16 : 15,
+    heroSubtitleLineHeight: isIphone15ProMaxClass ? 21 : 20,
+    promoStripGap: isIphone15ProMaxClass ? 10 : 8,
+    promoTitleSize: isIphone15ProMaxClass ? 19 : 18,
+    promoTitleLineHeight: isIphone15ProMaxClass ? 22 : 21,
+    promoPriceSize: isIphone15ProMaxClass ? 20 : 18,
+    promoPriceLineHeight: isIphone15ProMaxClass ? 23 : 21,
+    serviceGridRowGap: isIphone15ProMaxClass ? 14 : 12,
+    serviceTileGap: isIphone15ProMaxClass ? 7 : 6,
+    serviceIconSize: isIphone15ProMaxClass ? 52 : isIphone1314Class ? 48 : 48,
+    serviceLabelSize: isIphone15ProMaxClass ? 15 : 14,
+    serviceLabelLineHeight: isIphone15ProMaxClass ? 17 : 16,
+  };
 
   useEffect(() => {
     if (!normalizedSelectedCategory) {
@@ -3839,6 +4491,30 @@ function CustomerWorkspace({
 
     return () => clearInterval(intervalId);
   }, [tab, carouselAutoAdvanceMs, carouselEntries.length, carouselItemWidth]);
+
+  useEffect(() => {
+    if (tab !== 'home' || homePromoCards.length <= 3) {
+      promoRowFade.setValue(1);
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      Animated.timing(promoRowFade, {
+        toValue: 0,
+        duration: 220,
+        useNativeDriver: true,
+      }).start(() => {
+        setPromoStartIndex((current) => (current + 1) % homePromoCards.length);
+        Animated.timing(promoRowFade, {
+          toValue: 1,
+          duration: 280,
+          useNativeDriver: true,
+        }).start();
+      });
+    }, 3800);
+
+    return () => clearInterval(intervalId);
+  }, [homePromoCards.length, promoRowFade, tab]);
   const customerTheme = {
     canvas: darkMode ? styles.customerCanvasDark : undefined,
     card: darkMode ? styles.customerSectionDark : undefined,
@@ -3861,313 +4537,120 @@ function CustomerWorkspace({
 
       {tab === 'home' ? (
         <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        <View style={styles.customerHomeScreen}>
-          <Pressable style={styles.customerHomeCarouselHeader} onPress={() => onTabChange('explore')}>
-            <Image source={{ uri: HOME_CAROUSEL_IMAGES[0] }} style={styles.customerHomeHeroImage} resizeMode="cover" />
-            <LinearGradient colors={['rgba(10, 24, 39, 0.08)', 'rgba(10, 24, 39, 0.82)']} style={styles.customerHomeHeroOverlay}>
-              <View style={styles.customerHomeLogoRow}>
-                <JahzeenLogo size={38} />
-                <Text style={styles.customerHomeBrandName}>Jahzeen</Text>
-              </View>
-              <View style={styles.customerHomeSplashHero}>
-                <Text style={styles.customerHomeSplashEyebrow}>Trusted Services in One Place</Text>
-                <Text style={styles.customerHomeSplashTitle}>Premium home services with a beautiful shopping experience.</Text>
-                <Text style={styles.customerHomeSplashSubtitle}>Browse curated services, featured listings, and trusted providers with a cleaner and more polished look.</Text>
-              </View>
-              <View style={styles.customerHomeLocationRow}>
-                <Text style={styles.customerHomeLocationLabel}>Location</Text>
-                <Text style={styles.customerHomeLocationValue} numberOfLines={1}>Commercial Street Avenue, Building 18</Text>
-              </View>
-              <View style={styles.customerHomePromoRow}>
-                <View style={styles.customerHomePromoPill}>
-                  <Text style={styles.customerHomePromoPillLabel}>Featured</Text>
-                  <Text style={styles.customerHomePromoPillValue}>Premium providers</Text>
+          <View style={[styles.customerHomeScreen, { gap: homeDeviceTuning.homeScreenGap }]}>
+            <Pressable style={[styles.customerHomeHeroCard, { minHeight: homeDeviceTuning.heroMinHeight }]} onPress={() => onTabChange('explore')}>
+              <Image source={{ uri: HOME_CAROUSEL_IMAGES[0] }} style={styles.customerHomeHeroImageFull} resizeMode="cover" />
+              <LinearGradient
+                colors={['rgba(249, 251, 255, 0.95)', 'rgba(249, 251, 255, 0.6)', 'rgba(249, 251, 255, 0.08)']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0.25 }}
+                style={[styles.customerHomeHeroCardGradient, { minHeight: homeDeviceTuning.heroMinHeight }]}
+              >
+                <View style={[styles.customerHomeHeroTextBlock, { width: isIphone15ProMaxClass ? '56%' : '58%', paddingHorizontal: homeDeviceTuning.heroTextPaddingHorizontal, paddingVertical: homeDeviceTuning.heroTextPaddingVertical }]}>
+                  <Text style={[styles.customerHomeHeroTitle, { fontSize: homeDeviceTuning.heroTitleSize, lineHeight: homeDeviceTuning.heroTitleLineHeight }]}>Get your AC ready for summer</Text>
+                  <Text style={[styles.customerHomeHeroSubtitle, { fontSize: homeDeviceTuning.heroSubtitleSize, lineHeight: homeDeviceTuning.heroSubtitleLineHeight }]}>QAR 15 off first order*</Text>
                 </View>
-                <View style={styles.customerHomePromoPill}>
-                  <Text style={styles.customerHomePromoPillLabel}>Instant</Text>
-                  <Text style={styles.customerHomePromoPillValue}>Easy booking</Text>
+              </LinearGradient>
+            </Pressable>
+
+            <Animated.View style={[styles.customerHomePromoStrip, { gap: promoCardGap, opacity: promoRowFade }]}>
+              {rotatingPromoCards.map((promo, index) => (
+                <Pressable
+                  key={`${promo.id}-${index}`}
+                  style={[styles.customerHomePromoCard, { width: promoCardWidth, height: promoCardHeight }]}
+                  onPress={() => {
+                    onSelectItem(promo.item);
+                    onTabChange('explore');
+                  }}
+                >
+                  <Image source={{ uri: promo.imageUrl }} style={styles.customerHomePromoImage} resizeMode="cover" />
+                  <LinearGradient colors={['rgba(8, 19, 58, 0.03)', 'rgba(8, 19, 58, 0.72)']} style={styles.customerHomePromoOverlay}>
+                    <View style={[styles.customerHomePromoTagWrap, /new/i.test(promo.badge || '') && styles.customerHomePromoTagWrapNew]}>
+                      <Text style={[styles.customerHomePromoTag, /new/i.test(promo.badge || '') && styles.customerHomePromoTagNew]}>{promo.badge || `Offer ${index + 1}`}</Text>
+                    </View>
+                    <Text style={[styles.customerHomePromoTitle, { fontSize: homeDeviceTuning.promoTitleSize, lineHeight: homeDeviceTuning.promoTitleLineHeight }]} numberOfLines={2}>{promo.title}</Text>
+                    <Text style={styles.customerHomePromoSubtitle} numberOfLines={1}>{promo.companyName || promo.subtitle}</Text>
+                    <Text style={[styles.customerHomePromoPrice, { fontSize: homeDeviceTuning.promoPriceSize, lineHeight: homeDeviceTuning.promoPriceLineHeight }]}>{promo.priceLabel}</Text>
+                  </LinearGradient>
+                </Pressable>
+              ))}
+            </Animated.View>
+
+            <View style={[styles.customerHomeServicesGrid, { rowGap: homeDeviceTuning.serviceGridRowGap }]}>
+              {homeGridCategories.map((category) => (
+                <Pressable
+                  key={`home-grid-${category}`}
+                  style={[styles.customerHomeServiceTile, { gap: homeDeviceTuning.serviceTileGap }]}
+                  onPress={() => {
+                    onSelectCustomerCategory(category);
+                    onCustomerSearchQueryChange('');
+                    onTabChange('explore');
+                  }}
+                >
+                  <View style={styles.customerHomeServiceIconCard}>
+                    <MaterialCommunityIcons name={iconForCategory(category)} size={homeDeviceTuning.serviceIconSize} color={colors.primary} />
+                  </View>
+                  <Text style={[styles.customerHomeServiceLabel, { fontSize: homeDeviceTuning.serviceLabelSize, lineHeight: homeDeviceTuning.serviceLabelLineHeight }]} numberOfLines={2}>{category}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <View style={styles.customerHomeDualCardsRow}>
+              <Pressable style={styles.customerHomeDualCard} onPress={() => onTabChange('explore')}>
+                <LinearGradient colors={['#ECEFF5', '#DEE6F4']} style={styles.customerHomeDualCardGradient}>
+                  <View style={styles.infoBodyGrow}>
+                    <Text style={styles.customerHomeDualCardTitle}>Luxury Laundry</Text>
+                    <Text style={styles.customerHomeDualCardSubtitle}>Premium care for your garments</Text>
+                  </View>
+                  <MaterialCommunityIcons name="hanger" size={34} color="#2E4A8E" />
+                </LinearGradient>
+              </Pressable>
+
+              <Pressable style={styles.customerHomeDualCard} onPress={() => onTabChange('explore')}>
+                <LinearGradient colors={['#EAF0F8', '#DCE7F5']} style={styles.customerHomeDualCardGradient}>
+                  <View style={styles.infoBodyGrow}>
+                    <Text style={styles.customerHomeDualCardBadge}>New Launch</Text>
+                    <Text style={styles.customerHomeDualCardTitle}>Baby Laundry</Text>
+                  </View>
+                  <MaterialCommunityIcons name="baby-face-outline" size={34} color="#3E68BE" />
+                </LinearGradient>
+              </Pressable>
+            </View>
+
+            <Text style={styles.customerHomeSectionHeading}>Offers & discounts</Text>
+            <Pressable style={styles.customerHomeOfferCard} onPress={() => onTabChange('explore')}>
+              <Image source={{ uri: activeOfferShowcase?.imageUrl || HOME_CAROUSEL_IMAGES[1] }} style={styles.customerHomeOfferCardImage} resizeMode="cover" />
+              <LinearGradient colors={['rgba(255,255,255,0.96)', 'rgba(255,255,255,0.78)', 'rgba(255,255,255,0.26)']} style={styles.customerHomeOfferCardOverlay}>
+                <View style={styles.customerHomeOfferBadgeWrap}>
+                  <Text style={styles.customerHomeOfferBadge}>NEW</Text>
                 </View>
+                <Text style={styles.customerHomeOfferTitle}>{activeOfferShowcase?.title || 'Washing machine service'}</Text>
+                <Text style={styles.customerHomeOfferSubtitle}>Service available for all major brands</Text>
+                <Pressable style={styles.customerHomeOfferButton} onPress={() => onTabChange('explore')}>
+                  <Text style={styles.customerHomeOfferButtonText}>Know More</Text>
+                </Pressable>
+              </LinearGradient>
+            </Pressable>
+
+            <View style={styles.customerHomeDotsRow}>
+              <View style={[styles.customerHomeDot, styles.customerHomeDotActive]} />
+              <View style={styles.customerHomeDot} />
+            </View>
+
+            <Text style={styles.customerHomeSectionHeading}>Make it your own</Text>
+            <LinearGradient colors={['#3751E8', '#2E46D7']} style={styles.customerHomeCustomizeCard}>
+              <View style={styles.customerHomeCustomizeBody}>
+                <Text style={styles.customerHomeCustomizeTitle}>Customize your experience</Text>
+                <Text style={styles.customerHomeCustomizeSubtitle}>Tailor Jahzeen to your preference and discover better providers faster.</Text>
+                <Pressable style={styles.customerHomeCustomizeButton} onPress={() => onTabChange('explore')}>
+                  <Text style={styles.customerHomeCustomizeButtonText}>Explore</Text>
+                </Pressable>
               </View>
-              <View style={styles.customerHomeQuickRow}>
-                {APP_CATEGORY_OPTIONS.slice(0, 3).map((category, index) => {
-                  const heroIconColors = ['#12385E', '#2563EB', '#B45309'];
-                  return (
-                    <Pressable
-                      key={`hero-${category}`}
-                      style={styles.customerHomeQuickCard}
-                      onPress={() => {
-                        onSelectCustomerCategory(category);
-                        onTabChange('explore');
-                      }}
-                    >
-                      <View style={styles.customerHomeQuickIconWrap}>
-                        <MaterialCommunityIcons name={iconForCategory(category)} size={22} color={heroIconColors[index % heroIconColors.length]} />
-                      </View>
-                      <Text style={styles.customerHomeQuickLabel} numberOfLines={1}>{category}</Text>
-                    </Pressable>
-                  );
-                })}
+              <View style={styles.customerHomeCustomizeArt}>
+                <MaterialCommunityIcons name="cellphone-cog" size={88} color="#DCE6FF" />
               </View>
             </LinearGradient>
-          </Pressable>
-          {carouselEntries.length ? (
-            <Animated.ScrollView
-              ref={homeCarouselRef}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              pagingEnabled
-              snapToInterval={carouselItemWidth}
-              decelerationRate="fast"
-              onScroll={Animated.event(
-                [{ nativeEvent: { contentOffset: { x: homeCarouselScrollX } } }],
-                { useNativeDriver: true },
-              )}
-              scrollEventThrottle={16}
-              onMomentumScrollEnd={(event) => {
-                const offsetX = event.nativeEvent.contentOffset.x;
-                const computedIndex = Math.round(offsetX / carouselItemWidth);
-                homeCarouselIndexRef.current = Math.max(0, Math.min(computedIndex, carouselEntries.length - 1));
-                setHomeCarouselPage(homeCarouselIndexRef.current);
-              }}
-              contentContainerStyle={styles.customerHomeCarouselRow}
-            >
-              {carouselEntries.map((entry, index) => (
-                <CustomerHomeBannerCard
-                  key={`${entry.title}-${index}`}
-                  imageUrl={entry.imageUrl}
-                  title={entry.title}
-                  subtitle={entry.subtitle}
-                  index={index}
-                  scrollX={homeCarouselScrollX}
-                  itemWidth={carouselItemWidth}
-                  width={carouselCardWidth}
-                  onPress={() => {
-                    onTabChange('explore');
-                  }}
-                />
-              ))}
-            </Animated.ScrollView>
-          ) : (
-            <EmptyState title="Marketplace is empty" body="Once companies publish live listings, the home carousel will lead customers into the storefront." cardStyle={styles.customerHomeEmptyCard} titleStyle={styles.customerHomeSectionTitle} bodyStyle={styles.customerHomeSectionSubtitle} />
-          )}
-          {carouselEntries.length ? (
-            <View style={styles.customerCarouselDotsRow}>
-              {carouselDotValues.map((value, index) => (
-                <Animated.View
-                  key={`carousel-dot-${index}`}
-                  style={[
-                    styles.customerCarouselDot,
-                    {
-                      width: value.interpolate({ inputRange: [0, 1], outputRange: [8, 18] }),
-                      opacity: value.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1] }),
-                      backgroundColor: value.interpolate({ inputRange: [0, 1], outputRange: ['#B8CABC', colors.primary] as any }),
-                    },
-                  ]}
-                />
-              ))}
-            </View>
-          ) : null}
-
-          <View style={styles.customerHomeSearchSection}>
-            <View style={styles.customerHomeSearchBar}>
-              <MaterialCommunityIcons name="magnify" size={22} color="#12385E" />
-              <TextInput
-                value={customerSearchQuery}
-                onChangeText={onCustomerSearchQueryChange}
-                onSubmitEditing={() => onTabChange('explore')}
-                autoCorrect={false}
-                autoCapitalize="none"
-                returnKeyType="search"
-                placeholder="Search companies or services"
-                placeholderTextColor="#8A8F98"
-                style={styles.customerHomeSearchInput}
-              />
-              {customerSearchQuery ? (
-                <Pressable style={styles.customerHomeSearchClearButton} onPress={() => onCustomerSearchQueryChange('')}>
-                  <MaterialCommunityIcons name="close-circle-outline" size={18} color="#5B7A90" />
-                </Pressable>
-              ) : null}
-            </View>
-            <View style={styles.customerHomeSearchMetaRow}>
-              <Text style={styles.customerHomeSearchMetaText}>
-                {normalizedCustomerSearch
-                  ? `${filteredCompanies.length} matching companies`
-                  : 'Search companies by service category'}
-              </Text>
-              {normalizedCustomerSearch ? (
-                <Pressable onPress={() => onTabChange('explore')}>
-                  <Text style={styles.customerHomeSearchLink}>View all</Text>
-                </Pressable>
-              ) : null}
-            </View>
           </View>
-
-          {normalizedCustomerSearch ? (
-            <View style={styles.customerHomeSectionBlock}>
-              <View style={styles.customerHomeSectionHeaderCompact}>
-                <Text style={styles.customerHomeSectionTitle}>Search results</Text>
-                <Text style={styles.customerHomeSectionMeta}>{filteredCompanies.length} found</Text>
-              </View>
-              {homeCompanies.length ? (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.customerHomeLotRow}>
-                  {homeCompanies.map((company) => (
-                    <CustomerCompanyCard
-                      key={`search-company-${company.id}`}
-                      company={company}
-                      variant="featured"
-                      onPress={() => {
-                        openProviderDetails(company.id);
-                        onTabChange('explore');
-                      }}
-                    />
-                  ))}
-                </ScrollView>
-              ) : (
-                <EmptyState title="No companies found" body="Try a different keyword or clear the selected category to widen results." cardStyle={styles.customerHomeEmptyCard} titleStyle={styles.customerHomeSectionTitle} bodyStyle={styles.customerHomeSectionSubtitle} />
-              )}
-            </View>
-          ) : null}
-
-          <View style={styles.customerHomeSectionBlock}>
-            <View style={styles.customerHomeSectionHeaderCompact}>
-              <Text style={styles.customerHomeSectionTitle}>Category hubs</Text>
-              <Text style={styles.customerHomeSectionMeta}>{allCategories.length} categories</Text>
-            </View>
-            {groupedCategoryCards.length ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.customerCategoryHubRow}>
-                {groupedCategoryCards.map((group) => (
-                  <Pressable
-                    key={group.key}
-                    style={styles.customerCategoryHubCard}
-                    onPress={() => {
-                      setActiveBrowseGroupKey(group.key);
-                      onSelectCustomerCategory(group.categories[0] ?? null);
-                      onTabChange('browse');
-                    }}
-                  >
-                    <LinearGradient
-                      colors={['#FBFFFD', '#E8F7EF']}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={styles.customerCategoryHubCardGradient}
-                    >
-                      <View style={styles.customerCategoryHubTopRow}>
-                        <View style={styles.customerCategoryHubIconWrap}>
-                          <MaterialCommunityIcons name={group.icon as any} size={22} color="#0F7B45" />
-                        </View>
-                        <Text style={styles.customerCategoryHubCount}>{group.listingsCount} providers</Text>
-                      </View>
-                      <Text style={styles.customerCategoryHubTitle}>{group.title}</Text>
-                      <Text style={styles.customerCategoryHubMeta}>{group.categories.slice(0, 2).join(' · ')}</Text>
-                      <View style={styles.customerCategoryHubFooter}>
-                        {group.categories.some((category) => comingSoonCategories.has(category)) ? <Text style={styles.customerCategoryComingSoonText}>Coming Soon</Text> : <Text style={styles.customerCategoryHubFooterText}>Tap to explore</Text>}
-                        <MaterialCommunityIcons name="arrow-top-right" size={14} color="#0F7B45" />
-                      </View>
-                    </LinearGradient>
-                  </Pressable>
-                ))}
-              </ScrollView>
-            ) : null}
-          </View>
-
-          <View style={styles.customerHomeSectionHeader}>
-            <View style={styles.infoBodyGrow}>
-              <Text style={styles.customerHomeSectionTitle}>Featured Companies</Text>
-              <Text style={styles.customerHomeSectionSubtitle}>Discover verified companies and browse by the service category they provide.</Text>
-            </View>
-          </View>
-
-          {homeCompanies.length ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.customerHomeLotRow}>
-              {homeCompanies.map((company) => (
-                <CustomerCompanyCard
-                  key={`featured-company-${company.id}`}
-                  company={company}
-                  variant="featured"
-                  onPress={() => {
-                    openProviderDetails(company.id);
-                    onTabChange('explore');
-                  }}
-                />
-              ))}
-            </ScrollView>
-          ) : null}
-
-          <Pressable style={styles.customerHomePrimaryCta} onPress={() => onTabChange('explore')}>
-            <Text style={styles.customerHomePrimaryCtaText}>See more companies</Text>
-          </Pressable>
-
-          <View style={styles.customerHomeSectionBlock}>
-            <View style={styles.customerHomeSectionHeaderCompact}>
-              <Text style={styles.customerHomeSectionTitle}>Browse by category</Text>
-              <Text style={styles.customerHomeSectionMeta}>{liveCompanyCount} companies live</Text>
-            </View>
-            {categories.length ? (
-              <View style={styles.customerHomeCategoryRow}>
-                {categories.map((category) => {
-                  const isComingSoon = comingSoonCategories.has(category);
-                  return (
-                    <Pressable
-                      key={category}
-                      style={[styles.customerHomeCategoryChip, isComingSoon && styles.customerHomeCategoryChipDisabled]}
-                      onPress={isComingSoon ? undefined : () => {
-                        onSelectCustomerCategory(category);
-                        setSelectedProviderId(null);
-                        onCustomerSearchQueryChange('');
-                        onTabChange('explore');
-                      }}
-                    >
-                      <LinearGradient
-                        colors={isComingSoon ? ['#FAFAFA', '#F0F0F0'] : ['#FFFFFF', '#ECFAF1']}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={styles.customerHomeCategoryChipGradient}
-                      >
-                        <View style={styles.customerHomeCategoryChipTopRow}>
-                          <View style={[styles.customerHomeCategoryChipLeading, isComingSoon && styles.customerHomeCategoryChipLeadingDisabled]}>
-                            <MaterialCommunityIcons
-                              name={iconForCategory(category)}
-                              size={18}
-                              color={isComingSoon ? '#98A09A' : '#0F7B45'}
-                            />
-                          </View>
-                          {isComingSoon ? <Text style={styles.customerHomeCategoryChipSoonText}>Soon</Text> : <MaterialCommunityIcons name="chevron-right" size={16} color="#0F7B45" />}
-                        </View>
-                        <Text style={[styles.customerHomeCategoryChipText, isComingSoon && styles.customerHomeCategoryChipDisabledText]} numberOfLines={2}>
-                          {category}
-                        </Text>
-                        <Text style={[styles.customerHomeCategoryChipCaption, isComingSoon && styles.customerHomeCategoryChipDisabledText]}>
-                          {isComingSoon ? 'Launching soon' : 'Explore trusted providers'}
-                        </Text>
-                      </LinearGradient>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            ) : null}
-          </View>
-
-          {selectedCustomerCategory ? (
-            <Pressable style={styles.customerHomeActiveFilterChip} onPress={() => onSelectCustomerCategory(null)}>
-              <Text style={styles.customerHomeActiveFilterChipText}>{selectedCustomerCategory} · Clear</Text>
-            </Pressable>
-          ) : null}
-
-          <View style={styles.customerHomeStatsPanel}>
-            <View style={styles.customerHomeStatCard}>
-              <Text style={styles.customerHomeStatValue}>{liveCompanyCount}</Text>
-              <Text style={styles.customerHomeStatLabel}>Live companies</Text>
-            </View>
-            <View style={styles.customerHomeStatCard}>
-              <Text style={styles.customerHomeStatValue}>{filteredCompanies.length}</Text>
-              <Text style={styles.customerHomeStatLabel}>Matched companies</Text>
-            </View>
-            <View style={styles.customerHomeStatCard}>
-              <Text style={styles.customerHomeStatValue}>{allCategories.length}</Text>
-              <Text style={styles.customerHomeStatLabel}>Service categories</Text>
-            </View>
-          </View>
-        </View>
         </ScrollView>
       ) : null}
 
@@ -4531,102 +5014,67 @@ function CustomerWorkspace({
       ) : null}
 
       {tab === 'profile' ? (
-        !authUser ? (
-          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}>
           <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <SectionCard title="Profile" subtitle="Sign in only when you need to order, track bookings, or save your preferences." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
-              <View style={[styles.darkModeCard, customerTheme.metaCard]}>
-                <View style={styles.infoBodyGrow}>
-                  <Text style={[styles.infoTitle, customerTheme.title]}>Appearance</Text>
-                  <Text style={[styles.helperText, customerTheme.subtitle]}>Switch between light and dark mode from the profile tab.</Text>
-                </View>
-                <ChoiceChip label={darkMode ? 'Dark mode on' : 'Dark mode off'} selected={darkMode} onPress={onToggleDarkMode} />
-              </View>
-            </SectionCard>
-            <SectionCard title="Login or create account" subtitle="Customers belong to the customer group after sign-up. Admins are manual accounts and company users only become company users from approved invitations." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
-            <View style={styles.toggleRow}>
-              <ChoiceChip label="Sign in" selected={authMode === 'signin'} onPress={() => onAuthModeChange('signin')} />
-              <ChoiceChip label="Sign up" selected={authMode === 'signup'} onPress={() => onAuthModeChange('signup')} />
-            </View>
-            {authMode === 'signin' ? (
-              <>
-                <FormField label="Email" value={signInForm.email} onChangeText={(value) => onSignInFormChange((current) => ({ ...current, email: value }))} error={authErrors.email} theme={customerTheme.inputTheme} />
-                <FormField label="Password" value={signInForm.password} onChangeText={(value) => onSignInFormChange((current) => ({ ...current, password: value }))} error={authErrors.password} secureTextEntry theme={customerTheme.inputTheme} />
-              </>
-            ) : (
-              <>
-                <FormField label="Full name" value={signUpForm.fullName} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, fullName: value }))} error={authErrors.fullName} theme={customerTheme.inputTheme} />
-                <FormField label="Email" value={signUpForm.email} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, email: value }))} error={authErrors.email} theme={customerTheme.inputTheme} />
-                <FormField label="Phone" value={signUpForm.phone} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, phone: value }))} error={authErrors.phone} theme={customerTheme.inputTheme} />
-                <FormField label="Password" value={signUpForm.password} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, password: value }))} error={authErrors.password} secureTextEntry theme={customerTheme.inputTheme} />
-              </>
-            )}
-            {signInChallenge === 'newPasswordRequired' && authMode === 'signin' ? (
-              <View style={[styles.verificationCard, customerTheme.verificationCard]}>
-                <Text style={[styles.verificationTitle, customerTheme.title]}>New password required</Text>
-                <Text style={[styles.helperText, customerTheme.subtitle]}>This Cognito user was created with a temporary password. Set a new password once, then the account will continue into the correct role workspace.</Text>
-                <FormField label="New password" value={newPassword} onChangeText={onNewPasswordChange} error={authErrors.newPassword} secureTextEntry theme={customerTheme.inputTheme} />
-                <PrimaryButton label="Set new password" onPress={onCompleteNewPassword} loading={authBusy} disabled={authBusy} />
-              </View>
-            ) : null}
-            <PrimaryButton label={authMode === 'signin' ? 'Sign in' : 'Create account'} onPress={onAuthAction} loading={authBusy} disabled={authBusy || (authMode === 'signin' && signInChallenge === 'newPasswordRequired')} />
-            {needsConfirmation ? (
-              <View style={[styles.verificationCard, customerTheme.verificationCard]}>
-                <Text style={[styles.verificationTitle, customerTheme.title]}>Email verification required</Text>
-                <FormField label="Verification code" value={confirmCode} onChangeText={onConfirmCodeChange} error={authErrors.confirmCode} theme={customerTheme.inputTheme} />
-                <SecondaryButton label="Confirm email" onPress={onConfirmCode} loading={authBusy} disabled={authBusy} />
-              </View>
-            ) : null}
-            </SectionCard>
-          </ScrollView>
-          </KeyboardAvoidingView>
-        ) : (
-          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}>
-          <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-          <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
-            <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
-              <SectionCard title="Profile" subtitle={`Signed in as ${currentUserRole}`} cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
-                <View style={[styles.darkModeCard, customerTheme.metaCard]}>
-                  <View style={styles.infoBodyGrow}>
-                    <Text style={[styles.infoTitle, customerTheme.title]}>Appearance</Text>
-                    <Text style={[styles.helperText, customerTheme.subtitle]}>Dark mode is available from the profile tab and only affects the customer experience.</Text>
+            <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
+              <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
+                <SectionCard
+                  title="Profile"
+                  subtitle={authUser ? `Signed in as ${currentUserRole}` : 'Guest mode is active. Browse freely and edit local preferences.'}
+                  cardStyle={customerTheme.card}
+                  titleStyle={customerTheme.title}
+                  subtitleStyle={customerTheme.subtitle}
+                >
+                  <View style={[styles.darkModeCard, customerTheme.metaCard]}>
+                    <View style={styles.infoBodyGrow}>
+                      <Text style={[styles.infoTitle, customerTheme.title]}>Appearance</Text>
+                      <Text style={[styles.helperText, customerTheme.subtitle]}>Dark mode is available from the profile tab and only affects the customer experience.</Text>
+                    </View>
+                    <ChoiceChip label={darkMode ? 'Dark mode on' : 'Dark mode off'} selected={darkMode} onPress={onToggleDarkMode} />
                   </View>
-                  <ChoiceChip label={darkMode ? 'Dark mode on' : 'Dark mode off'} selected={darkMode} onPress={onToggleDarkMode} />
-                </View>
-                <FormField label="Full name" value={profileForm.fullName} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, fullName: value }))} error={profileErrors.fullName} theme={customerTheme.inputTheme} />
-                <FormField label="Email" value={profileForm.email} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, email: value }))} error={profileErrors.email} theme={customerTheme.inputTheme} />
-                <FormField label="Phone" value={profileForm.phone} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, phone: value }))} error={profileErrors.phone} theme={customerTheme.inputTheme} />
-                <View style={styles.toggleRow}>
-                  <ChoiceChip label="Card" selected={profileForm.defaultPaymentMethod === 'card'} onPress={() => onProfileFormChange((current) => ({ ...current, defaultPaymentMethod: 'card' }))} />
-                  <ChoiceChip label="Cash" selected={profileForm.defaultPaymentMethod === 'cash'} onPress={() => onProfileFormChange((current) => ({ ...current, defaultPaymentMethod: 'cash' }))} />
-                  <ChoiceChip label="Apple Pay" selected={profileForm.defaultPaymentMethod === 'applePay'} onPress={() => onProfileFormChange((current) => ({ ...current, defaultPaymentMethod: 'applePay' }))} />
-                </View>
-                <PrimaryButton label="Save profile" onPress={onSaveProfile} />
-              </SectionCard>
-            </View>
 
-            <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
-              <SectionCard title="Default address" subtitle="Used as the default destination for future bookings." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
-                <View style={styles.rowGap}>
-                  <FormField label="Label" value={addressForm.label} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, label: value }))} error={addressErrors.label} theme={customerTheme.inputTheme} />
-                  <FormField label="Area" value={addressForm.area} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, area: value }))} error={addressErrors.area} theme={customerTheme.inputTheme} />
-                </View>
-                <View style={styles.rowGap}>
-                  <FormField label="Street" value={addressForm.street} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, street: value }))} error={addressErrors.street} theme={customerTheme.inputTheme} />
-                  <FormField label="Building" value={addressForm.building} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, building: value }))} error={addressErrors.building} theme={customerTheme.inputTheme} />
-                </View>
-                <View style={styles.rowGap}>
-                  <FormField label="Unit" value={addressForm.unitNumber} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, unitNumber: value }))} theme={customerTheme.inputTheme} />
-                  <FormField label="Phone" value={addressForm.contactPhone} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, contactPhone: value }))} error={addressErrors.contactPhone} theme={customerTheme.inputTheme} />
-                </View>
-                <PrimaryButton label="Save address" onPress={onSaveAddress} />
-                <SecondaryButton label={authBusy ? 'Signing out...' : 'Sign out'} onPress={() => onSignOut()} loading={authBusy} disabled={authBusy} />
-              </SectionCard>
+                  {!authUser ? (
+                    <View style={[styles.verificationCard, customerTheme.verificationCard]}>
+                      <Text style={[styles.verificationTitle, customerTheme.title]}>Guest browsing enabled</Text>
+                      <Text style={[styles.helperText, customerTheme.subtitle]}>
+                        Login has been removed from this screen. Customers can open the app and start browsing directly from Home.
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  <FormField label="Full name" value={profileForm.fullName} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, fullName: value }))} error={profileErrors.fullName} theme={customerTheme.inputTheme} />
+                  <FormField label="Email" value={profileForm.email} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, email: value }))} error={profileErrors.email} theme={customerTheme.inputTheme} />
+                  <FormField label="Phone" value={profileForm.phone} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, phone: value }))} error={profileErrors.phone} theme={customerTheme.inputTheme} />
+                  <View style={styles.toggleRow}>
+                    <ChoiceChip label="Card" selected={profileForm.defaultPaymentMethod === 'card'} onPress={() => onProfileFormChange((current) => ({ ...current, defaultPaymentMethod: 'card' }))} />
+                    <ChoiceChip label="Cash" selected={profileForm.defaultPaymentMethod === 'cash'} onPress={() => onProfileFormChange((current) => ({ ...current, defaultPaymentMethod: 'cash' }))} />
+                    <ChoiceChip label="Apple Pay" selected={profileForm.defaultPaymentMethod === 'applePay'} onPress={() => onProfileFormChange((current) => ({ ...current, defaultPaymentMethod: 'applePay' }))} />
+                  </View>
+                  {authUser ? <PrimaryButton label="Save profile" onPress={onSaveProfile} /> : null}
+                </SectionCard>
+              </View>
+
+              <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
+                <SectionCard title="Default address" subtitle="Used as the default destination for future bookings." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+                  <View style={styles.rowGap}>
+                    <FormField label="Label" value={addressForm.label} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, label: value }))} error={addressErrors.label} theme={customerTheme.inputTheme} />
+                    <FormField label="Area" value={addressForm.area} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, area: value }))} error={addressErrors.area} theme={customerTheme.inputTheme} />
+                  </View>
+                  <View style={styles.rowGap}>
+                    <FormField label="Street" value={addressForm.street} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, street: value }))} error={addressErrors.street} theme={customerTheme.inputTheme} />
+                    <FormField label="Building" value={addressForm.building} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, building: value }))} error={addressErrors.building} theme={customerTheme.inputTheme} />
+                  </View>
+                  <View style={styles.rowGap}>
+                    <FormField label="Unit" value={addressForm.unitNumber} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, unitNumber: value }))} theme={customerTheme.inputTheme} />
+                    <FormField label="Phone" value={addressForm.contactPhone} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, contactPhone: value }))} error={addressErrors.contactPhone} theme={customerTheme.inputTheme} />
+                  </View>
+                  {authUser ? <PrimaryButton label="Save address" onPress={onSaveAddress} /> : null}
+                  {authUser ? <SecondaryButton label={authBusy ? 'Signing out...' : 'Sign out'} onPress={() => onSignOut()} loading={authBusy} disabled={authBusy} /> : null}
+                </SectionCard>
+              </View>
             </View>
-          </View>
           </ScrollView>
-          </KeyboardAvoidingView>
-        )
+        </KeyboardAvoidingView>
       ) : null}
     </View>
   );
@@ -5586,6 +6034,33 @@ function isEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
+function normalizePhoneE164(value: string) {
+  const compact = value.trim().replace(/[\s\-()]/g, '');
+  if (!compact) {
+    return '';
+  }
+
+  if (/^\+\d{8,15}$/.test(compact)) {
+    return compact;
+  }
+
+  const digits = compact.replace(/\D/g, '');
+  if (digits.length === 8) {
+    return `+974${digits}`;
+  }
+
+  if (digits.length >= 8 && digits.length <= 15) {
+    return `+${digits}`;
+  }
+
+  return '';
+}
+
+function generateEphemeralPassword() {
+  const nonce = Math.random().toString(36).slice(2, 10);
+  return `Jhz!${Date.now()}${nonce}A1`;
+}
+
 function isHexColor(value: string) {
   return /^#[0-9A-Fa-f]{6}$/.test(value.trim());
 }
@@ -6297,6 +6772,7 @@ function BottomNavBar({ items, selectedKey, onChange, containerStyle, itemStyle,
 function PremiumHeader({
   logoText,
   darkMode,
+  locationText,
   notificationCount,
   onSearchPress,
   onNotificationPress,
@@ -6305,6 +6781,7 @@ function PremiumHeader({
 }: {
   logoText: string;
   darkMode: boolean;
+  locationText: string;
   notificationCount: number;
   onSearchPress: () => void;
   onNotificationPress: () => void;
@@ -6318,33 +6795,28 @@ function PremiumHeader({
   const iconColor = darkMode ? '#D0E0EC' : '#12385E';
   return (
     <View style={[phStyles.container, { backgroundColor: bg, borderColor }]}>
-      {/* Logo */}
-      <Pressable onPress={onMenuPress} style={phStyles.logoRow}>
-        <JahzeenLogo size={36} />
-        <View style={phStyles.logoTextStack}>
-          <Text style={[phStyles.logoTextAr, { color: colors.primary }]}>جاهزين</Text>
-          <Text style={[phStyles.logoTextEn, { color: darkMode ? '#B9DCC8' : '#2A6E48' }]}>JAHZEEN</Text>
+      <Pressable onPress={onMenuPress} style={phStyles.locationBlock}>
+        <Text style={[phStyles.locationLabel, darkMode && phStyles.locationLabelDark]}>Location to</Text>
+        <View style={phStyles.locationValueRow}>
+          <Text style={[phStyles.locationValue, darkMode && phStyles.locationValueDark]} numberOfLines={1}>{locationText}</Text>
+          <MaterialCommunityIcons name="chevron-down" size={18} color={darkMode ? '#9DB8CC' : '#7A8FA3'} />
         </View>
       </Pressable>
-      {/* Search Bar */}
-      <Pressable style={[phStyles.searchBar, searchFocused && phStyles.searchBarFocused, darkMode && phStyles.searchBarDark]} onPress={onSearchPress}>
-        <MaterialCommunityIcons name="magnify" size={18} color={searchFocused ? colors.primary : '#8EA3B8'} />
-        <Text style={[phStyles.searchPlaceholder, darkMode && { color: '#6B8099' }]} numberOfLines={1}>Search services...</Text>
+      <Pressable style={[phStyles.addButton, darkMode && phStyles.addButtonDark]} onPress={onProfilePress}>
+        <MaterialCommunityIcons name="wallet-outline" size={20} color={colors.primary} />
+        <Text style={phStyles.addButtonText}>Add</Text>
       </Pressable>
-      {/* Action Buttons */}
-      <View style={phStyles.actions}>
-        <Pressable style={[phStyles.iconBtn, darkMode && phStyles.iconBtnDark]} onPress={onNotificationPress}>
-          <MaterialCommunityIcons name="bell-outline" size={20} color={iconColor} />
-          {notificationCount > 0 ? (
-            <View style={phStyles.badge}>
-              <Text style={phStyles.badgeText}>{notificationCount > 9 ? '9+' : notificationCount}</Text>
-            </View>
-          ) : null}
-        </Pressable>
-        <Pressable style={[phStyles.iconBtn, phStyles.profileBtn]} onPress={onProfilePress}>
-          <MaterialCommunityIcons name="account" size={20} color="#FFFFFF" />
-        </Pressable>
-      </View>
+      <Pressable style={[phStyles.quickActionButton, darkMode && phStyles.iconBtnDark]} onPress={onNotificationPress}>
+        <MaterialCommunityIcons name="bell-outline" size={20} color={iconColor} />
+        {notificationCount > 0 ? (
+          <View style={phStyles.badge}>
+            <Text style={phStyles.badgeText}>{notificationCount > 9 ? '9+' : notificationCount}</Text>
+          </View>
+        ) : null}
+      </Pressable>
+      <Pressable style={[phStyles.quickActionButton, phStyles.profileBtn]} onPress={onSearchPress}>
+        <MaterialCommunityIcons name="magnify" size={20} color="#FFFFFF" />
+      </Pressable>
     </View>
   );
 }
@@ -6530,15 +7002,69 @@ const phStyles = StyleSheet.create({
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Platform.OS === 'ios' ? 16 : 14,
-    paddingVertical: Platform.OS === 'ios' ? 12 : 10,
-    gap: Platform.OS === 'ios' ? 12 : 10,
+    paddingHorizontal: Platform.OS === 'ios' ? 14 : 12,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 9,
+    gap: 8,
     borderBottomWidth: 1,
     shadowColor: '#000',
     shadowOpacity: 0.04,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
+  },
+  locationBlock: {
+    flex: 1,
+    gap: 2,
+  },
+  locationLabel: {
+    fontSize: 13,
+    color: '#9AA8B8',
+    fontWeight: '600',
+  },
+  locationLabelDark: {
+    color: '#7890A6',
+  },
+  locationValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  locationValue: {
+    flex: 1,
+    fontSize: Platform.OS === 'ios' ? 18 : 16,
+    color: '#10263C',
+    fontWeight: '800',
+  },
+  locationValueDark: {
+    color: '#E1EDF7',
+  },
+  addButton: {
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#DCE8E2',
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  addButtonDark: {
+    backgroundColor: '#16283A',
+    borderColor: '#2A3E53',
+  },
+  addButtonText: {
+    color: '#142437',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  quickActionButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: '#F3F7FB',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   logoRow: {
     flexDirection: 'row',
@@ -7318,6 +7844,314 @@ const styles = StyleSheet.create({
   },
   customerHomeScreen: {
     gap: 22,
+  },
+  customerHomeHeroCard: {
+    borderRadius: 18,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#D6E2DC',
+    minHeight: Platform.OS === 'ios' ? 246 : 208,
+    backgroundColor: '#E9EEF1',
+  },
+  customerHomeHeroImageFull: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+  },
+  customerHomeHeroCardGradient: {
+    minHeight: Platform.OS === 'ios' ? 246 : 208,
+    justifyContent: 'center',
+  },
+  customerHomeHeroTextBlock: {
+    marginLeft: 0,
+    paddingHorizontal: Platform.OS === 'ios' ? 20 : 14,
+    paddingVertical: Platform.OS === 'ios' ? 15 : 14,
+    justifyContent: 'center',
+    gap: 8,
+  },
+  customerHomeHeroTitle: {
+    color: '#22407A',
+    fontSize: Platform.OS === 'ios' ? 46 : 36,
+    lineHeight: Platform.OS === 'ios' ? 50 : 40,
+    fontWeight: '900',
+    letterSpacing: 0,
+    marginTop: Platform.OS === 'ios' ? -1 : 0,
+  },
+  customerHomeHeroSubtitle: {
+    color: '#344A5C',
+    fontSize: Platform.OS === 'ios' ? 16 : 15,
+    lineHeight: Platform.OS === 'ios' ? 21 : 20,
+    fontWeight: '600',
+    marginTop: Platform.OS === 'ios' ? -1 : 0,
+  },
+  customerHomePromoStrip: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 8,
+    paddingRight: 2,
+    marginTop: Platform.OS === 'ios' ? 0 : 0,
+  },
+  customerHomePromoCard: {
+    width: 170,
+    height: 202,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#D3DFD8',
+    backgroundColor: '#EAF2EA',
+    shadowColor: '#0D2B44',
+    shadowOpacity: Platform.OS === 'ios' ? 0.12 : 0.06,
+    shadowRadius: Platform.OS === 'ios' ? 8 : 4,
+    shadowOffset: { width: 0, height: Platform.OS === 'ios' ? 4 : 2 },
+    elevation: Platform.OS === 'ios' ? 0 : 2,
+  },
+  customerHomePromoImage: {
+    width: '100%',
+    height: '100%',
+  },
+  customerHomePromoOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(6, 24, 45, 0.36)',
+  },
+  customerHomePromoTagWrap: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#0E1A55',
+    borderRadius: 7,
+    minWidth: 92,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  customerHomePromoTagWrapNew: {
+    minWidth: 70,
+  },
+  customerHomePromoTag: {
+    color: '#F4F7FF',
+    fontSize: 10.5,
+    fontWeight: '800',
+    textTransform: 'none',
+    letterSpacing: 0.2,
+  },
+  customerHomePromoTagNew: {
+    color: '#91E442',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  customerHomePromoTitle: {
+    color: '#FFFFFF',
+    fontSize: Platform.OS === 'ios' ? 18 : 17,
+    lineHeight: Platform.OS === 'ios' ? 21 : 20,
+    fontWeight: '900',
+  },
+  customerHomePromoSubtitle: {
+    color: '#F2F7FA',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  customerHomePromoPrice: {
+    color: '#FFFFFF',
+    fontSize: Platform.OS === 'ios' ? 18 : 17,
+    lineHeight: Platform.OS === 'ios' ? 21 : 20,
+    fontWeight: '900',
+  },
+  customerHomeServicesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    width: '100%',
+    rowGap: 14,
+  },
+  customerHomeServiceTile: {
+    flexBasis: '31.2%',
+    minWidth: '31.2%',
+    maxWidth: '31.2%',
+    alignItems: 'center',
+    gap: 7,
+  },
+  customerHomeServiceIconCard: {
+    width: '100%',
+    aspectRatio: 1.02,
+    borderRadius: 10,
+    backgroundColor: '#EDF0F4',
+    borderWidth: 1,
+    borderColor: '#E5E8ED',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  customerHomeServiceLabel: {
+    width: '100%',
+    color: '#162638',
+    fontSize: Platform.OS === 'ios' ? 14 : 13,
+    lineHeight: Platform.OS === 'ios' ? 18 : 16,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  customerHomeDualCardsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  customerHomeDualCard: {
+    flex: 1,
+    borderRadius: 14,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#E1E6EE',
+  },
+  customerHomeDualCardGradient: {
+    minHeight: 90,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  customerHomeDualCardBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: '#D9E6FF',
+    color: '#3A62B4',
+    fontSize: 10,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  customerHomeDualCardTitle: {
+    color: '#17263A',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  customerHomeDualCardSubtitle: {
+    color: '#4A5F77',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  customerHomeSectionHeading: {
+    color: '#141F2E',
+    fontSize: Platform.OS === 'ios' ? 40 : 24,
+    lineHeight: Platform.OS === 'ios' ? 44 : 28,
+    fontWeight: '900',
+    marginTop: 2,
+  },
+  customerHomeOfferCard: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#DADFE9',
+    minHeight: 220,
+    backgroundColor: '#F2F5FB',
+  },
+  customerHomeOfferCardImage: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+  },
+  customerHomeOfferCardOverlay: {
+    minHeight: 220,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    justifyContent: 'space-between',
+  },
+  customerHomeOfferBadgeWrap: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#2B4CE4',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+  },
+  customerHomeOfferBadge: {
+    color: '#A8F253',
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0.6,
+  },
+  customerHomeOfferTitle: {
+    color: '#101A2B',
+    fontSize: Platform.OS === 'ios' ? 28 : 24,
+    lineHeight: Platform.OS === 'ios' ? 32 : 28,
+    fontWeight: '900',
+  },
+  customerHomeOfferSubtitle: {
+    color: '#31445F',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  customerHomeOfferButton: {
+    alignSelf: 'flex-start',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#9FB0C9',
+    backgroundColor: '#FFFFFFEE',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  customerHomeOfferButtonText: {
+    color: '#2C4ECE',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  customerHomeDotsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 2,
+  },
+  customerHomeDot: {
+    width: 11,
+    height: 11,
+    borderRadius: 6,
+    backgroundColor: '#DDE2EB',
+  },
+  customerHomeDotActive: {
+    backgroundColor: '#4160EA',
+  },
+  customerHomeCustomizeCard: {
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 8,
+  },
+  customerHomeCustomizeBody: {
+    flex: 1,
+    gap: 10,
+  },
+  customerHomeCustomizeTitle: {
+    color: '#FFFFFF',
+    fontSize: Platform.OS === 'ios' ? 22 : 20,
+    lineHeight: Platform.OS === 'ios' ? 28 : 24,
+    fontWeight: '900',
+  },
+  customerHomeCustomizeSubtitle: {
+    color: '#E6EEFF',
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: '600',
+  },
+  customerHomeCustomizeButton: {
+    alignSelf: 'flex-start',
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+  },
+  customerHomeCustomizeButtonText: {
+    color: '#3451DD',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  customerHomeCustomizeArt: {
+    width: 102,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   customerHomeCarouselHeader: {
     width: '100%',
@@ -10080,6 +10914,106 @@ const styles = StyleSheet.create({
   customerBottomDockDark: {
     backgroundColor: 'transparent',
     borderTopColor: 'transparent',
+  },
+  onboardingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 50,
+  },
+  onboardingOverlayGradient: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: Platform.OS === 'ios' ? 14 : 18,
+    paddingTop: Platform.OS === 'ios' ? 22 : 18,
+    paddingBottom: Platform.OS === 'ios' ? 116 : 120,
+  },
+  onboardingCardWrap: {
+    width: '100%',
+    maxWidth: 560,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#D3E4F8',
+    backgroundColor: '#F8FCFF',
+    paddingHorizontal: Platform.OS === 'ios' ? 16 : 18,
+    paddingVertical: Platform.OS === 'ios' ? 16 : 18,
+    gap: 12,
+    shadowColor: '#081A3D',
+    shadowOpacity: Platform.OS === 'ios' ? 0.2 : 0.14,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
+  },
+  onboardingTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  onboardingIconMark: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1D4F93',
+  },
+  onboardingEyebrow: {
+    color: '#2D5EA3',
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  onboardingTitle: {
+    color: '#102A4C',
+    fontSize: Platform.OS === 'ios' ? 22 : 21,
+    lineHeight: Platform.OS === 'ios' ? 26 : 25,
+    fontWeight: '900',
+  },
+  onboardingBody: {
+    color: '#38536F',
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '600',
+  },
+  onboardingSectionStack: {
+    gap: 10,
+  },
+  onboardingHintCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#D6E5F6',
+    backgroundColor: '#EEF5FD',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  onboardingHintTitle: {
+    color: '#103057',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  onboardingHintBody: {
+    color: '#3A5675',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
+  onboardingGpsMeta: {
+    color: '#244A76',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  onboardingMapFrame: {
+    borderRadius: 14,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#D6E5F6',
+    minHeight: 220,
+    backgroundColor: '#EAF2FA',
+  },
+  onboardingMapView: {
+    width: '100%',
+    height: 220,
   },
   verificationCard: {
     gap: Platform.OS === 'ios' ? 8 : 10,

@@ -74,10 +74,14 @@ function buildAmplifyFallbackConfig() {
         ...(auth.identity_pool_id ? { identityPoolId: auth.identity_pool_id } : {}),
         loginWith: {
           email: auth.username_attributes?.includes('email') ?? true,
+          phone: auth.username_attributes?.includes('phone_number') ?? auth.username_attributes?.includes('phone') ?? true,
         },
         userAttributes: {
           email: {
             required: auth.standard_required_attributes?.includes('email') ?? true,
+          },
+          phone_number: {
+            required: auth.standard_required_attributes?.includes('phone_number') ?? false,
           },
         },
       },

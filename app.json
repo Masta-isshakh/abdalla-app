@@ -23,7 +23,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.mastajazz.abdalla"
+      "bundleIdentifier": "com.mastajazz.abdalla",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Jahzeen uses your location to set your service address and pin nearby bookings accurately."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -32,7 +35,11 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.mastajazz.abdalla"
+      "package": "com.mastajazz.abdalla",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "bundler": "metro",
