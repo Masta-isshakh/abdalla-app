@@ -173,8 +173,6 @@ export function AppNavigator() {
 function WorkspaceScreen() {
   const width = useWindowDimensions().width;
   const wide = width >= 980;
-  const [customerCategoryMenuOpen, setCustomerCategoryMenuOpen] = useState(false);
-  const [customerCategoryQuery, setCustomerCategoryQuery] = useState('');
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [selectedCustomerCategory, setSelectedCustomerCategory] = useState<string | null>(null);
   const {
@@ -244,6 +242,8 @@ function WorkspaceScreen() {
   const [locationMode, setLocationMode] = useState<'current' | 'map'>('current');
   const [phoneVerificationForm, setPhoneVerificationForm] = useState({ phone: '', code: '' });
   const [pendingPhoneOtpUsername, setPendingPhoneOtpUsername] = useState('');
+  const [pendingPhoneOtpTarget, setPendingPhoneOtpTarget] = useState('');
+  const [phoneVerificationBusy, setPhoneVerificationBusy] = useState(false);
   const [accountSetupForm, setAccountSetupForm] = useState({ firstName: '', lastName: '', email: '' });
   const [onboardingErrors, setOnboardingErrors] = useState<ValidationMap>({});
   const [locationBusy, setLocationBusy] = useState(false);
@@ -838,8 +838,6 @@ function WorkspaceScreen() {
     [authUser, notifications],
   );
   const customerNotificationCount = customerNotifications.filter((entry) => !entry.isRead).length;
-  const visibleCustomerCategories = APP_CATEGORY_OPTIONS.filter((category) => category.toLowerCase().includes(customerCategoryQuery.trim().toLowerCase()));
-
   const activeWorkspaceLabel =
     activeRole === 'admin'
       ? 'Admin control center'
@@ -1022,12 +1020,17 @@ function WorkspaceScreen() {
   }
 
   async function handleIssuePhoneCode() {
+    if (phoneVerificationBusy) {
+      return;
+    }
+
     const normalizedPhone = normalizePhoneE164(phoneVerificationForm.phone);
     if (!normalizedPhone) {
       setOnboardingErrors((current) => ({ ...current, phone: 'Use a valid phone number in international format.' }));
       return;
     }
 
+    setPhoneVerificationBusy(true);
     startGlobalLoading('Sending SMS verification code...');
     try {
       const otpUsername = `otp.${Date.now()}.${Math.floor(Math.random() * 10000)}@jahzeen.app`;
@@ -1042,6 +1045,7 @@ function WorkspaceScreen() {
         },
       });
       setPendingPhoneOtpUsername(otpUsername);
+      setPendingPhoneOtpTarget(normalizedPhone);
       setPhoneVerificationForm((current) => ({ ...current, phone: normalizedPhone, code: '' }));
       setOnboardingErrors((current) => {
         const next = { ...current };
@@ -1064,11 +1068,17 @@ function WorkspaceScreen() {
       }
     } finally {
       stopGlobalLoading();
+      setPhoneVerificationBusy(false);
     }
   }
 
   async function handleVerifyPhoneCode() {
+    if (phoneVerificationBusy) {
+      return;
+    }
+
     const username = pendingPhoneOtpUsername;
+    const verifiedPhone = normalizePhoneE164(phoneVerificationForm.phone) || pendingPhoneOtpTarget;
     if (!username) {
       setOnboardingErrors((current) => ({ ...current, phone: 'Send the SMS code first.' }));
       return;
@@ -1079,6 +1089,12 @@ function WorkspaceScreen() {
       return;
     }
 
+    if (!verifiedPhone) {
+      setOnboardingErrors((current) => ({ ...current, phone: 'Use a valid phone number and request a new code.' }));
+      return;
+    }
+
+    setPhoneVerificationBusy(true);
     startGlobalLoading('Verifying SMS code...');
     try {
       await confirmPhoneSignUp({
@@ -1089,16 +1105,19 @@ function WorkspaceScreen() {
       setGuestOnboardingProfile((current) => ({
         ...current,
         phoneVerified: true,
-        phone: username,
+        phone: verifiedPhone,
       }));
-      setProfileForm((current) => ({ ...current, phone: username || current.phone }));
+      setProfileForm((current) => ({ ...current, phone: verifiedPhone || current.phone }));
       setOnboardingErrors({});
       setOnboardingStep('account');
+      setPendingPhoneOtpUsername('');
+      setPendingPhoneOtpTarget('');
       setCustomerBanner({ tone: 'success', text: 'Phone number verified successfully.' });
     } catch (error) {
       setOnboardingErrors((current) => ({ ...current, code: error instanceof Error ? error.message : 'Invalid verification code.' }));
     } finally {
       stopGlobalLoading();
+      setPhoneVerificationBusy(false);
     }
   }
 
@@ -1875,7 +1894,6 @@ function WorkspaceScreen() {
             onSearchPress={() => setCustomerTab('explore')}
             onNotificationPress={handleNotificationPress}
             onProfilePress={() => requestCustomerTabChange('profile')}
-            onMenuPress={() => setCustomerCategoryMenuOpen(true)}
           />
 
           <View style={styles.customerWorkspaceHost}>
@@ -1960,6 +1978,12 @@ function WorkspaceScreen() {
             <View style={styles.onboardingOverlay}>
               <LinearGradient colors={['rgba(8, 22, 46, 0.82)', 'rgba(15, 64, 123, 0.75)']} style={styles.onboardingOverlayGradient}>
                 <View style={styles.onboardingCardWrap}>
+                  <ScrollView
+                    style={styles.onboardingCardScroll}
+                    contentContainerStyle={styles.onboardingCardScrollContent}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                  >
                   <View style={styles.onboardingTitleRow}>
                     <View style={styles.onboardingIconMark}>
                       <MaterialCommunityIcons
@@ -2060,11 +2084,25 @@ function WorkspaceScreen() {
 
                   {onboardingStep === 'phone' ? (
                     <View style={styles.onboardingSectionStack}>
-                      <FormField label="Phone" value={phoneVerificationForm.phone} onChangeText={(value) => setPhoneVerificationForm((current) => ({ ...current, phone: value }))} error={onboardingErrors.phone} />
-                      <FormField label="Verification code" value={phoneVerificationForm.code} onChangeText={(value) => setPhoneVerificationForm((current) => ({ ...current, code: value }))} error={onboardingErrors.code} />
-                      <View style={styles.rowGap}>
-                        <SecondaryButton label="Send code" onPress={handleIssuePhoneCode} />
-                        <PrimaryButton label="Verify and continue" onPress={handleVerifyPhoneCode} />
+                      <View style={styles.onboardingVerificationCard}>
+                        <FormField
+                          label="Phone"
+                          value={phoneVerificationForm.phone}
+                          onChangeText={(value) => setPhoneVerificationForm((current) => ({ ...current, phone: value }))}
+                          error={onboardingErrors.phone}
+                          placeholder="+97450123456"
+                        />
+                        <FormField
+                          label="Verification code"
+                          value={phoneVerificationForm.code}
+                          onChangeText={(value) => setPhoneVerificationForm((current) => ({ ...current, code: value }))}
+                          error={onboardingErrors.code}
+                          placeholder="Enter 6-digit code"
+                        />
+                      </View>
+                      <View style={styles.onboardingActionStack}>
+                        <SecondaryButton label={phoneVerificationBusy ? 'Sending code...' : 'Send code'} onPress={handleIssuePhoneCode} loading={phoneVerificationBusy} disabled={phoneVerificationBusy} />
+                        <PrimaryButton label={phoneVerificationBusy ? 'Verifying...' : 'Verify and continue'} onPress={handleVerifyPhoneCode} loading={phoneVerificationBusy} disabled={phoneVerificationBusy} />
                       </View>
                     </View>
                   ) : null}
@@ -2079,6 +2117,7 @@ function WorkspaceScreen() {
                       <PrimaryButton label="Submit and go to Home" onPress={handleCompleteGuestAccount} />
                     </View>
                   ) : null}
+                  </ScrollView>
                 </View>
               </LinearGradient>
             </View>
@@ -2097,84 +2136,6 @@ function WorkspaceScreen() {
           </View>
 
           <OperationPopup visible={!!operationPopup} tone={operationPopup?.tone ?? 'success'} text={operationPopup?.text ?? ''} onClose={() => setOperationPopup(null)} />
-
-          <Modal visible={customerCategoryMenuOpen} transparent animationType="none" onRequestClose={() => setCustomerCategoryMenuOpen(false)}>
-            <View style={premSidebarStyles.overlay}>
-              <Pressable style={premSidebarStyles.backdrop} onPress={() => setCustomerCategoryMenuOpen(false)} />
-              <View style={[premSidebarStyles.drawer, customerDarkMode && premSidebarStyles.drawerDark]}>
-                {/* Header */}
-                <View style={premSidebarStyles.drawerHeader}>
-                  <View style={premSidebarStyles.drawerLogoMark}>
-                    <MaterialCommunityIcons name="star-four-points" size={16} color="#FFFFFF" />
-                  </View>
-                  <Text style={[premSidebarStyles.drawerBrand, customerDarkMode && premSidebarStyles.drawerBrandDark]}>Jahzeen</Text>
-                  <Pressable style={premSidebarStyles.drawerCloseBtn} onPress={() => setCustomerCategoryMenuOpen(false)}>
-                    <MaterialCommunityIcons name="close" size={18} color={customerDarkMode ? '#9DB8CC' : '#5B7A90'} />
-                  </Pressable>
-                </View>
-
-                {/* Quick Nav */}
-                <View style={premSidebarStyles.navSection}>
-                  {[
-                    { key: 'home', label: 'Home', icon: 'home' as const },
-                    { key: 'orders', label: 'My Orders', icon: 'clipboard-list' as const },
-                    { key: 'profile', label: 'More', icon: 'dots-horizontal-circle' as const },
-                  ].map((item) => (
-                    <Pressable
-                      key={item.key}
-                      style={[premSidebarStyles.navRow, customerDarkMode && premSidebarStyles.navRowDark]}
-                      onPress={() => {
-                        requestCustomerTabChange(item.key as CustomerTabKey);
-                        setCustomerCategoryMenuOpen(false);
-                      }}
-                    >
-                      <View style={[premSidebarStyles.navIcon, customerDarkMode && premSidebarStyles.navIconDark]}>
-                        <MaterialCommunityIcons name={item.icon} size={22} color="#12385E" />
-                      </View>
-                      <Text style={[premSidebarStyles.navLabel, customerDarkMode && premSidebarStyles.navLabelDark]}>{item.label}</Text>
-                      <MaterialCommunityIcons name="chevron-right" size={18} color={customerDarkMode ? '#4A6B85' : '#C8D5DF'} />
-                    </Pressable>
-                  ))}
-                </View>
-
-                <View style={[premSidebarStyles.divider, customerDarkMode && premSidebarStyles.dividerDark]} />
-
-                {/* Categories */}
-                <Text style={[premSidebarStyles.sectionLabel, customerDarkMode && premSidebarStyles.sectionLabelDark]}>Service Categories</Text>
-                <View style={premSidebarStyles.categorySearch}>
-                  <MaterialCommunityIcons name="magnify" size={18} color="#8EA3B8" />
-                  <TextInput
-                    value={customerCategoryQuery}
-                    onChangeText={setCustomerCategoryQuery}
-                    placeholder="Search categories..."
-                    placeholderTextColor="#8EA3B8"
-                    style={[premSidebarStyles.categoryInput, customerDarkMode && premSidebarStyles.categoryInputDark]}
-                  />
-                </View>
-
-                <ScrollView showsVerticalScrollIndicator={false} style={premSidebarStyles.categoryList}>
-                  {visibleCustomerCategories.map((category) => (
-                    <Pressable
-                      key={category}
-                      style={[premSidebarStyles.categoryRow, customerDarkMode && premSidebarStyles.categoryRowDark]}
-                      onPress={() => {
-                        setSelectedCustomerCategory(category);
-                        setCustomerSearchQuery('');
-                        setCustomerCategoryMenuOpen(false);
-                        setCustomerTab('explore');
-                      }}
-                    >
-                      <View style={[premSidebarStyles.categoryIcon, customerDarkMode && premSidebarStyles.categoryIconDark]}>
-                        <MaterialCommunityIcons name={iconForCategory(category)} size={20} color="#12385E" />
-                      </View>
-                      <Text style={[premSidebarStyles.categoryLabel, customerDarkMode && premSidebarStyles.categoryLabelDark]} numberOfLines={1}>{category}</Text>
-                      <MaterialCommunityIcons name="chevron-right" size={14} color={customerDarkMode ? '#4A6B85' : '#C8D5DF'} />
-                    </Pressable>
-                  ))}
-                </ScrollView>
-              </View>
-            </View>
-          </Modal>
         </View>
       </SafeAreaView>
     );
@@ -4588,7 +4549,7 @@ function CustomerWorkspace({
                   }}
                 >
                   <View style={styles.customerHomeServiceIconCard}>
-                    <MaterialCommunityIcons name={iconForCategory(category)} size={homeDeviceTuning.serviceIconSize} color={colors.primary} />
+                    <FontAwesome5 name={premiumHomeIconForCategory(category)} size={Math.max(22, Math.round(homeDeviceTuning.serviceIconSize * 0.5))} color={colors.primary} solid />
                   </View>
                   <Text style={[styles.customerHomeServiceLabel, { fontSize: homeDeviceTuning.serviceLabelSize, lineHeight: homeDeviceTuning.serviceLabelLineHeight }]} numberOfLines={2}>{category}</Text>
                 </Pressable>
@@ -4602,7 +4563,7 @@ function CustomerWorkspace({
                     <Text style={styles.customerHomeDualCardTitle}>Luxury Laundry</Text>
                     <Text style={styles.customerHomeDualCardSubtitle}>Premium care for your garments</Text>
                   </View>
-                  <MaterialCommunityIcons name="hanger" size={34} color="#2E4A8E" />
+                  <FontAwesome5 name="tshirt" size={28} color="#2E4A8E" solid />
                 </LinearGradient>
               </Pressable>
 
@@ -4612,7 +4573,7 @@ function CustomerWorkspace({
                     <Text style={styles.customerHomeDualCardBadge}>New Launch</Text>
                     <Text style={styles.customerHomeDualCardTitle}>Baby Laundry</Text>
                   </View>
-                  <MaterialCommunityIcons name="baby-face-outline" size={34} color="#3E68BE" />
+                  <FontAwesome5 name="baby" size={28} color="#3E68BE" solid />
                 </LinearGradient>
               </Pressable>
             </View>
@@ -4647,7 +4608,7 @@ function CustomerWorkspace({
                 </Pressable>
               </View>
               <View style={styles.customerHomeCustomizeArt}>
-                <MaterialCommunityIcons name="cellphone-cog" size={88} color="#DCE6FF" />
+                <FontAwesome5 name="sliders-h" size={72} color="#DCE6FF" solid />
               </View>
             </LinearGradient>
           </View>
@@ -5098,6 +5059,21 @@ function iconForCategory(category: string): any {
   if (normalized.includes('sofa') || normalized.includes('furniture')) return 'sofa-single-outline';
   if (normalized.includes('vacuum')) return 'vacuum-outline';
   return 'home-outline';
+}
+
+function premiumHomeIconForCategory(category: string): keyof typeof FontAwesome5.glyphMap {
+  const normalized = category.toLowerCase();
+  if (normalized.includes('ac')) return 'snowflake';
+  if (normalized.includes('car') && normalized.includes('wash')) return 'car-side';
+  if (normalized.includes('car') && normalized.includes('service')) return 'tools';
+  if (normalized.includes('car') && normalized.includes('winch')) return 'truck-pickup';
+  if (normalized.includes('moving')) return 'dolly';
+  if (normalized.includes('furniture')) return 'couch';
+  if (normalized.includes('deep') || normalized.includes('home cleaning') || normalized.includes('clean')) return 'spray-can';
+  if (normalized.includes('pest') || normalized.includes('exterminator')) return 'shield-virus';
+  if (normalized.includes('water') && normalized.includes('tank')) return 'faucet';
+  if (normalized.includes('water')) return 'tint';
+  return 'concierge-bell';
 }
 
 function formatMetricValue(value: number) {
@@ -6777,7 +6753,6 @@ function PremiumHeader({
   onSearchPress,
   onNotificationPress,
   onProfilePress,
-  onMenuPress,
 }: {
   logoText: string;
   darkMode: boolean;
@@ -6786,7 +6761,6 @@ function PremiumHeader({
   onSearchPress: () => void;
   onNotificationPress: () => void;
   onProfilePress: () => void;
-  onMenuPress: () => void;
 }) {
   const [searchFocused, setSearchFocused] = useState(false);
   const [searchText, setSearchText] = useState('');
@@ -6795,13 +6769,13 @@ function PremiumHeader({
   const iconColor = darkMode ? '#D0E0EC' : '#12385E';
   return (
     <View style={[phStyles.container, { backgroundColor: bg, borderColor }]}>
-      <Pressable onPress={onMenuPress} style={phStyles.locationBlock}>
+      <View style={phStyles.locationBlock}>
         <Text style={[phStyles.locationLabel, darkMode && phStyles.locationLabelDark]}>Location to</Text>
         <View style={phStyles.locationValueRow}>
           <Text style={[phStyles.locationValue, darkMode && phStyles.locationValueDark]} numberOfLines={1}>{locationText}</Text>
           <MaterialCommunityIcons name="chevron-down" size={18} color={darkMode ? '#9DB8CC' : '#7A8FA3'} />
         </View>
-      </Pressable>
+      </View>
       <Pressable style={[phStyles.addButton, darkMode && phStyles.addButtonDark]} onPress={onProfilePress}>
         <MaterialCommunityIcons name="wallet-outline" size={20} color={colors.primary} />
         <Text style={phStyles.addButtonText}>Add</Text>
@@ -6820,181 +6794,6 @@ function PremiumHeader({
     </View>
   );
 }
-
-const premSidebarStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    flexDirection: 'row',
-  },
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(8,20,36,0.55)',
-  },
-  drawer: {
-    width: 300,
-    backgroundColor: '#FFFFFF',
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    paddingTop: 50,
-    paddingBottom: 24,
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 20,
-    shadowOffset: { width: 6, height: 0 },
-    elevation: 12,
-  },
-  drawerDark: {
-    backgroundColor: '#0D1A26',
-  },
-  drawerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-  },
-  drawerLogoMark: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  drawerBrand: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '800',
-    color: colors.primary,
-    letterSpacing: 0.3,
-  },
-  drawerBrandDark: {
-    color: '#7EC9A2',
-  },
-  drawerCloseBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    backgroundColor: '#F3F7FB',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  navSection: {
-    paddingHorizontal: 14,
-    gap: 4,
-    paddingBottom: 8,
-  },
-  navRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: '#FAFCFE',
-  },
-  navRowDark: {
-    backgroundColor: '#131F2D',
-  },
-  navIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: '#E9F6EF',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  navIconDark: {
-    backgroundColor: '#0F2A1E',
-  },
-  navLabel: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#1A2E42',
-  },
-  navLabelDark: {
-    color: '#C8D8E8',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#EFF4F9',
-    marginHorizontal: 20,
-    marginVertical: 12,
-  },
-  dividerDark: {
-    backgroundColor: '#1A2B3C',
-  },
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#7A92A8',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    paddingHorizontal: 20,
-    marginBottom: 8,
-  },
-  sectionLabelDark: {
-    color: '#4A6B85',
-  },
-  categorySearch: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginHorizontal: 14,
-    marginBottom: 8,
-    backgroundColor: '#F3F7FB',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-  },
-  categoryInput: {
-    flex: 1,
-    fontSize: 14,
-    color: '#1A2E42',
-  },
-  categoryInputDark: {
-    color: '#C8D8E8',
-  },
-  categoryList: {
-    flex: 1,
-    paddingHorizontal: 14,
-  },
-  categoryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-    marginBottom: 2,
-  },
-  categoryRowDark: {
-    backgroundColor: '#131F2D',
-  },
-  categoryIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: '#E9F6EF',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  categoryIconDark: {
-    backgroundColor: '#0F2A1E',
-  },
-  categoryLabel: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#1A2E42',
-  },
-  categoryLabelDark: {
-    color: '#C8D8E8',
-  },
-});
 
 const phStyles = StyleSheet.create({
   container: {
@@ -10930,6 +10729,7 @@ const styles = StyleSheet.create({
   onboardingCardWrap: {
     width: '100%',
     maxWidth: 560,
+    maxHeight: '88%',
     borderRadius: 24,
     borderWidth: 1,
     borderColor: '#D3E4F8',
@@ -10942,6 +10742,13 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 12 },
     elevation: 10,
+  },
+  onboardingCardScroll: {
+    width: '100%',
+  },
+  onboardingCardScrollContent: {
+    gap: 12,
+    paddingBottom: 4,
   },
   onboardingTitleRow: {
     flexDirection: 'row',
@@ -10976,6 +10783,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   onboardingSectionStack: {
+    gap: 10,
+  },
+  onboardingVerificationCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#D7E7F7',
+    backgroundColor: '#F4F9FF',
+    padding: 10,
+    gap: 8,
+  },
+  onboardingActionStack: {
     gap: 10,
   },
   onboardingHintCard: {
