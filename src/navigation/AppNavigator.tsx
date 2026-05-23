@@ -1033,18 +1033,20 @@ function WorkspaceScreen() {
     setPhoneVerificationBusy(true);
     startGlobalLoading('Sending SMS verification code...');
     try {
-      const otpUsername = `otp.${Date.now()}.${Math.floor(Math.random() * 10000)}@jahzeen.app`;
-      await signUpWithPhoneOtp({
-        username: otpUsername,
+      const signUpResult = await signUpWithPhoneOtp({
+        username: normalizedPhone,
         password: generateEphemeralPassword(),
         options: {
           userAttributes: {
             phone_number: normalizedPhone,
-            email: otpUsername,
           },
         },
       });
-      setPendingPhoneOtpUsername(otpUsername);
+      const deliveryDetails = (signUpResult as any)?.nextStep?.codeDeliveryDetails;
+      const medium = deliveryDetails?.deliveryMedium;
+      const destination = deliveryDetails?.destination;
+
+      setPendingPhoneOtpUsername(normalizedPhone);
       setPendingPhoneOtpTarget(normalizedPhone);
       setPhoneVerificationForm((current) => ({ ...current, phone: normalizedPhone, code: '' }));
       setOnboardingErrors((current) => {
@@ -1053,13 +1055,28 @@ function WorkspaceScreen() {
         delete next.code;
         return next;
       });
-      setCustomerBanner({ tone: 'info', text: `Verification code sent to ${normalizedPhone}.` });
+      if (medium === 'SMS') {
+        setCustomerBanner({ tone: 'info', text: `Verification code sent to ${destination || normalizedPhone}.` });
+      } else if (medium) {
+        setCustomerBanner({ tone: 'error', text: `Verification code was sent using ${medium}. Please check your Auth configuration to force SMS delivery.` });
+      } else {
+        setCustomerBanner({ tone: 'info', text: `Verification code requested for ${normalizedPhone}.` });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to send SMS verification code.';
       if (/UsernameExistsException/i.test(message) && pendingPhoneOtpUsername) {
         try {
-          await resendSignUpCode({ username: pendingPhoneOtpUsername });
-          setCustomerBanner({ tone: 'info', text: `Verification code re-sent to ${normalizedPhone}.` });
+          const resendResult = await resendSignUpCode({ username: pendingPhoneOtpUsername });
+          const deliveryDetails = (resendResult as any)?.codeDeliveryDetails;
+          const medium = deliveryDetails?.deliveryMedium;
+          const destination = deliveryDetails?.destination;
+          if (medium === 'SMS') {
+            setCustomerBanner({ tone: 'info', text: `Verification code re-sent to ${destination || normalizedPhone}.` });
+          } else if (medium) {
+            setCustomerBanner({ tone: 'error', text: `Code was re-sent using ${medium}. Please check your Auth configuration to force SMS delivery.` });
+          } else {
+            setCustomerBanner({ tone: 'info', text: `Verification code re-sent to ${normalizedPhone}.` });
+          }
         } catch (resendError) {
           setCustomerBanner({ tone: 'error', text: resendError instanceof Error ? resendError.message : 'Unable to resend verification code.' });
         }

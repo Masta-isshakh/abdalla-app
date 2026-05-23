@@ -4,19 +4,6 @@ import 'react-native-url-polyfill/auto';
 import { Amplify } from 'aws-amplify';
 import { generateClient } from 'aws-amplify/data';
 
-const AUTH_OUTPUT_OVERRIDE = {
-  user_pool_id: 'ap-south-1_xtxWgu65e',
-  aws_region: 'ap-south-1',
-  user_pool_client_id: '387vff7pp2uh0vvn96m54q0fuj',
-  identity_pool_id: 'ap-south-1:ed40cbb4-2a93-4a4e-9574-aacad38ac9ad',
-} as const;
-
-const DATA_OUTPUT_OVERRIDE = {
-  url: 'https://frxxzqpyfbdixciyldr6u77neu.appsync-api.ap-south-1.amazonaws.com/graphql',
-  aws_region: 'ap-south-1',
-  default_authorization_type: 'AMAZON_COGNITO_USER_POOLS',
-} as const;
-
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const amplifyOutputs = require('../../amplify_outputs.json') as {
   auth?: {
@@ -34,17 +21,7 @@ const amplifyOutputs = require('../../amplify_outputs.json') as {
   };
 };
 
-const resolvedAmplifyOutputs = {
-  ...amplifyOutputs,
-  auth: {
-    ...amplifyOutputs.auth,
-    ...AUTH_OUTPUT_OVERRIDE,
-  },
-  data: {
-    ...amplifyOutputs.data,
-    ...DATA_OUTPUT_OVERRIDE,
-  },
-};
+const resolvedAmplifyOutputs = amplifyOutputs;
 
 function toGraphQLAuthMode(value?: string): 'userPool' | 'iam' {
   if (value === 'AMAZON_COGNITO_USER_POOLS') {
