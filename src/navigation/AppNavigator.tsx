@@ -1064,9 +1064,12 @@ function WorkspaceScreen() {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to send SMS verification code.';
-      if (/UsernameExistsException/i.test(message) && pendingPhoneOtpUsername) {
+      if (/UsernameExistsException/i.test(message)) {
         try {
-          const resendResult = await resendSignUpCode({ username: pendingPhoneOtpUsername });
+          const resendUsername = pendingPhoneOtpUsername || normalizedPhone;
+          setPendingPhoneOtpUsername(resendUsername);
+          setPendingPhoneOtpTarget(normalizedPhone);
+          const resendResult = await resendSignUpCode({ username: resendUsername });
           const deliveryDetails = (resendResult as any)?.codeDeliveryDetails;
           const medium = deliveryDetails?.deliveryMedium;
           const destination = deliveryDetails?.destination;
