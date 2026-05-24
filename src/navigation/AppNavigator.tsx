@@ -1039,6 +1039,7 @@ function WorkspaceScreen() {
         options: {
           userAttributes: {
             phone_number: normalizedPhone,
+            email: buildOtpEmailFromPhone(normalizedPhone),
           },
         },
       });
@@ -6055,6 +6056,11 @@ function normalizePhoneE164(value: string) {
 function generateEphemeralPassword() {
   const nonce = Math.random().toString(36).slice(2, 10);
   return `Jhz!${Date.now()}${nonce}A1`;
+}
+
+function buildOtpEmailFromPhone(phoneE164: string) {
+  const digits = phoneE164.replace(/\D/g, '');
+  return `otp+${digits}@jahzeen.app`;
 }
 
 function isHexColor(value: string) {
