@@ -1032,6 +1032,39 @@ function WorkspaceScreen() {
     }
 
     setPhoneVerificationBusy(true);
+    const sendResendCode = async (username: string, phoneForDisplay: string) => {
+      try {
+        const resendResult = await resendSignUpCode({ username });
+        const deliveryDetails = (resendResult as any)?.codeDeliveryDetails;
+        const medium = deliveryDetails?.deliveryMedium;
+        const destination = deliveryDetails?.destination;
+
+        if (medium === 'SMS') {
+          const resendMessage = `Verification code sent to ${destination || phoneForDisplay}.`;
+          setCustomerBanner({ tone: 'info', text: resendMessage });
+          setOperationPopup({ tone: 'success', text: resendMessage });
+          return true;
+        }
+
+        if (medium) {
+          const resendMediumMessage = `SMS was not used. Delivery medium: ${medium}.`;
+          setCustomerBanner({ tone: 'error', text: resendMediumMessage });
+          setOperationPopup({ tone: 'error', text: resendMediumMessage });
+          return false;
+        }
+
+        const resendFallback = `Verification code requested for ${phoneForDisplay}. If no SMS arrives, check Auth SMS settings.`;
+        setCustomerBanner({ tone: 'info', text: resendFallback });
+        setOperationPopup({ tone: 'success', text: resendFallback });
+        return true;
+      } catch (resendError) {
+        const resendFailure = formatOtpFailure('Resend failed', resendError);
+        setCustomerBanner({ tone: 'error', text: resendFailure });
+        setOperationPopup({ tone: 'error', text: resendFailure });
+        return false;
+      }
+    };
+
     startGlobalLoading('Sending SMS verification code...');
     try {
       const signUpResult = await signUpWithPhoneOtp({
@@ -1061,48 +1094,25 @@ function WorkspaceScreen() {
         const successMessage = `Verification code sent to ${destination || normalizedPhone}.`;
         setCustomerBanner({ tone: 'info', text: successMessage });
         setOperationPopup({ tone: 'success', text: successMessage });
-      } else if (medium) {
-        const errorMessage = `Verification code was sent using ${medium}. Please check your Auth configuration to force SMS delivery.`;
-        setCustomerBanner({ tone: 'error', text: errorMessage });
-        setOperationPopup({ tone: 'error', text: errorMessage });
       } else {
-        const fallbackMessage = `Verification code requested for ${normalizedPhone}.`;
-        setCustomerBanner({ tone: 'info', text: fallbackMessage });
-        setOperationPopup({ tone: 'success', text: fallbackMessage });
+        if (medium) {
+          const mediumWarning = `Initial send used ${medium}. Requesting SMS delivery now...`;
+          setCustomerBanner({ tone: 'info', text: mediumWarning });
+        }
+        await sendResendCode(normalizedPhone, normalizedPhone);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to send SMS verification code.';
-      const isUsernameExists = /UsernameExistsException|already exists|user exists|an account with the given/i.test(message);
+      const details = getAuthErrorDetails(error);
+      const isUsernameExists = /UsernameExistsException|already exists|user exists|an account with the given/i.test(`${details.code} ${details.message}`);
       if (isUsernameExists) {
-        try {
-          const resendUsername = pendingPhoneOtpUsername || normalizedPhone;
-          setPendingPhoneOtpUsername(resendUsername);
-          setPendingPhoneOtpTarget(normalizedPhone);
-          const resendResult = await resendSignUpCode({ username: resendUsername });
-          const deliveryDetails = (resendResult as any)?.codeDeliveryDetails;
-          const medium = deliveryDetails?.deliveryMedium;
-          const destination = deliveryDetails?.destination;
-          if (medium === 'SMS') {
-            const resendMessage = `Verification code re-sent to ${destination || normalizedPhone}.`;
-            setCustomerBanner({ tone: 'info', text: resendMessage });
-            setOperationPopup({ tone: 'success', text: resendMessage });
-          } else if (medium) {
-            const resendErrorMessage = `Code was re-sent using ${medium}. Please check your Auth configuration to force SMS delivery.`;
-            setCustomerBanner({ tone: 'error', text: resendErrorMessage });
-            setOperationPopup({ tone: 'error', text: resendErrorMessage });
-          } else {
-            const resendFallbackMessage = `Verification code re-sent to ${normalizedPhone}.`;
-            setCustomerBanner({ tone: 'info', text: resendFallbackMessage });
-            setOperationPopup({ tone: 'success', text: resendFallbackMessage });
-          }
-        } catch (resendError) {
-          const resendFailure = resendError instanceof Error ? resendError.message : 'Unable to resend verification code.';
-          setCustomerBanner({ tone: 'error', text: resendFailure });
-          setOperationPopup({ tone: 'error', text: resendFailure });
-        }
+        const resendUsername = pendingPhoneOtpUsername || normalizedPhone;
+        setPendingPhoneOtpUsername(resendUsername);
+        setPendingPhoneOtpTarget(normalizedPhone);
+        await sendResendCode(resendUsername, normalizedPhone);
       } else {
-        setCustomerBanner({ tone: 'error', text: message });
-        setOperationPopup({ tone: 'error', text: message });
+        const sendFailure = formatOtpFailure('Send code failed', error);
+        setCustomerBanner({ tone: 'error', text: sendFailure });
+        setOperationPopup({ tone: 'error', text: sendFailure });
       }
     } finally {
       stopGlobalLoading();
@@ -6137,6 +6147,35 @@ function buildOtpEmailFromPhone(phoneE164: string) {
   return `otp+${digits}@jahzeen.app`;
 }
 
+function getAuthErrorDetails(error: unknown) {
+  const fallbackMessage = 'Unable to send SMS verification code.';
+  const authError = error as any;
+  const message = [
+    authError?.message,
+    authError?.errors?.[0]?.message,
+    authError?.cause?.message,
+    authError?.underlyingError?.message,
+  ].find((entry) => typeof entry === 'string' && entry.trim()) || fallbackMessage;
+
+  const code = [
+    authError?.name,
+    authError?.code,
+    authError?.__type,
+    authError?.cause?.name,
+    authError?.underlyingError?.name,
+  ].find((entry) => typeof entry === 'string' && entry.trim()) || 'UnknownError';
+
+  return {
+    code: String(code),
+    message: String(message),
+  };
+}
+
+function formatOtpFailure(prefix: string, error: unknown) {
+  const details = getAuthErrorDetails(error);
+  return `${prefix} [${details.code}] ${details.message}`;
+}
+
 function isHexColor(value: string) {
   return /^#[0-9A-Fa-f]{6}$/.test(value.trim());
 }
@@ -6929,11 +6968,11 @@ const phStyles = StyleSheet.create({
   },
   locationLabel: {
     fontSize: 13,
-    color: '#9AA8B8',
+    color: '#4B8E67',
     fontWeight: '600',
   },
   locationLabelDark: {
-    color: '#7890A6',
+    color: '#87BA9A',
   },
   locationValueRow: {
     flexDirection: 'row',
@@ -7943,10 +7982,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   customerHomeSectionHeading: {
-    color: '#113A25',
+    color: '#0E4D2D',
     fontSize: Platform.OS === 'ios' ? 40 : 24,
     lineHeight: Platform.OS === 'ios' ? 44 : 28,
     fontWeight: '900',
+    letterSpacing: 0.2,
     marginTop: 2,
   },
   customerHomeOfferCard: {
@@ -8030,6 +8070,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#2AB56D',
+    shadowColor: '#0E6B3D',
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
   },
   customerHomeCustomizeBody: {
     flex: 1,
@@ -8050,7 +8097,9 @@ const styles = StyleSheet.create({
   customerHomeCustomizeButton: {
     alignSelf: 'flex-start',
     borderRadius: 12,
-    backgroundColor: '#F4FFF8',
+    backgroundColor: '#E9FFF1',
+    borderWidth: 1,
+    borderColor: '#C8F0D8',
     paddingHorizontal: 18,
     paddingVertical: 9,
   },
