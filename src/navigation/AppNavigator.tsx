@@ -240,6 +240,7 @@ function WorkspaceScreen() {
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep | null>(null);
   const [onboardingTargetTab, setOnboardingTargetTab] = useState<CustomerRestrictedTab | null>(null);
   const [locationMode, setLocationMode] = useState<'current' | 'map'>('current');
+  const [headerLocationModalOpen, setHeaderLocationModalOpen] = useState(false);
   const [phoneVerificationForm, setPhoneVerificationForm] = useState({ phone: '', code: '' });
   const [pendingPhoneOtpUsername, setPendingPhoneOtpUsername] = useState('');
   const [pendingPhoneOtpTarget, setPendingPhoneOtpTarget] = useState('');
@@ -1057,15 +1058,22 @@ function WorkspaceScreen() {
         return next;
       });
       if (medium === 'SMS') {
-        setCustomerBanner({ tone: 'info', text: `Verification code sent to ${destination || normalizedPhone}.` });
+        const successMessage = `Verification code sent to ${destination || normalizedPhone}.`;
+        setCustomerBanner({ tone: 'info', text: successMessage });
+        setOperationPopup({ tone: 'success', text: successMessage });
       } else if (medium) {
-        setCustomerBanner({ tone: 'error', text: `Verification code was sent using ${medium}. Please check your Auth configuration to force SMS delivery.` });
+        const errorMessage = `Verification code was sent using ${medium}. Please check your Auth configuration to force SMS delivery.`;
+        setCustomerBanner({ tone: 'error', text: errorMessage });
+        setOperationPopup({ tone: 'error', text: errorMessage });
       } else {
-        setCustomerBanner({ tone: 'info', text: `Verification code requested for ${normalizedPhone}.` });
+        const fallbackMessage = `Verification code requested for ${normalizedPhone}.`;
+        setCustomerBanner({ tone: 'info', text: fallbackMessage });
+        setOperationPopup({ tone: 'success', text: fallbackMessage });
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to send SMS verification code.';
-      if (/UsernameExistsException/i.test(message)) {
+      const isUsernameExists = /UsernameExistsException|already exists|user exists|an account with the given/i.test(message);
+      if (isUsernameExists) {
         try {
           const resendUsername = pendingPhoneOtpUsername || normalizedPhone;
           setPendingPhoneOtpUsername(resendUsername);
@@ -1075,17 +1083,26 @@ function WorkspaceScreen() {
           const medium = deliveryDetails?.deliveryMedium;
           const destination = deliveryDetails?.destination;
           if (medium === 'SMS') {
-            setCustomerBanner({ tone: 'info', text: `Verification code re-sent to ${destination || normalizedPhone}.` });
+            const resendMessage = `Verification code re-sent to ${destination || normalizedPhone}.`;
+            setCustomerBanner({ tone: 'info', text: resendMessage });
+            setOperationPopup({ tone: 'success', text: resendMessage });
           } else if (medium) {
-            setCustomerBanner({ tone: 'error', text: `Code was re-sent using ${medium}. Please check your Auth configuration to force SMS delivery.` });
+            const resendErrorMessage = `Code was re-sent using ${medium}. Please check your Auth configuration to force SMS delivery.`;
+            setCustomerBanner({ tone: 'error', text: resendErrorMessage });
+            setOperationPopup({ tone: 'error', text: resendErrorMessage });
           } else {
-            setCustomerBanner({ tone: 'info', text: `Verification code re-sent to ${normalizedPhone}.` });
+            const resendFallbackMessage = `Verification code re-sent to ${normalizedPhone}.`;
+            setCustomerBanner({ tone: 'info', text: resendFallbackMessage });
+            setOperationPopup({ tone: 'success', text: resendFallbackMessage });
           }
         } catch (resendError) {
-          setCustomerBanner({ tone: 'error', text: resendError instanceof Error ? resendError.message : 'Unable to resend verification code.' });
+          const resendFailure = resendError instanceof Error ? resendError.message : 'Unable to resend verification code.';
+          setCustomerBanner({ tone: 'error', text: resendFailure });
+          setOperationPopup({ tone: 'error', text: resendFailure });
         }
       } else {
         setCustomerBanner({ tone: 'error', text: message });
+        setOperationPopup({ tone: 'error', text: message });
       }
     } finally {
       stopGlobalLoading();
@@ -1134,8 +1151,11 @@ function WorkspaceScreen() {
       setPendingPhoneOtpUsername('');
       setPendingPhoneOtpTarget('');
       setCustomerBanner({ tone: 'success', text: 'Phone number verified successfully.' });
+      setOperationPopup({ tone: 'success', text: 'Phone number verified successfully.' });
     } catch (error) {
-      setOnboardingErrors((current) => ({ ...current, code: error instanceof Error ? error.message : 'Invalid verification code.' }));
+      const verifyMessage = error instanceof Error ? error.message : 'Invalid verification code.';
+      setOnboardingErrors((current) => ({ ...current, code: verifyMessage }));
+      setOperationPopup({ tone: 'error', text: verifyMessage });
     } finally {
       stopGlobalLoading();
       setPhoneVerificationBusy(false);
@@ -1912,6 +1932,7 @@ function WorkspaceScreen() {
             darkMode={customerDarkMode}
             locationText={customerLocationLabel}
             notificationCount={customerNotificationCount}
+            onLocationPress={() => setHeaderLocationModalOpen(true)}
             onSearchPress={() => setCustomerTab('explore')}
             onNotificationPress={handleNotificationPress}
             onProfilePress={() => requestCustomerTabChange('profile')}
@@ -2157,6 +2178,59 @@ function WorkspaceScreen() {
           </View>
 
           <OperationPopup visible={!!operationPopup} tone={operationPopup?.tone ?? 'success'} text={operationPopup?.text ?? ''} onClose={() => setOperationPopup(null)} />
+
+          <Modal visible={headerLocationModalOpen} transparent animationType="fade" onRequestClose={() => setHeaderLocationModalOpen(false)}>
+            <View style={styles.locationEditorOverlay}>
+              <Pressable style={styles.locationEditorBackdrop} onPress={() => setHeaderLocationModalOpen(false)} />
+              <View style={[styles.locationEditorSheet, customerDarkMode && styles.locationEditorSheetDark]}>
+                <Text style={[styles.locationEditorTitle, customerDarkMode && styles.locationEditorTitleDark]}>Update your location</Text>
+                <Text style={[styles.locationEditorBody, customerDarkMode && styles.locationEditorBodyDark]}>
+                  Keep your address current for accurate provider availability and delivery routing.
+                </Text>
+                <View style={styles.rowGap}>
+                  <FormField label="Area" value={addressForm.area} onChangeText={(value) => setAddressForm((current) => ({ ...current, area: value }))} error={onboardingErrors.area} theme={customerDarkMode ? 'dark' : 'light'} />
+                  <FormField label="Street" value={addressForm.street} onChangeText={(value) => setAddressForm((current) => ({ ...current, street: value }))} error={onboardingErrors.street} theme={customerDarkMode ? 'dark' : 'light'} />
+                </View>
+                <View style={styles.rowGap}>
+                  <FormField label="Building" value={addressForm.building} onChangeText={(value) => setAddressForm((current) => ({ ...current, building: value }))} error={onboardingErrors.building} theme={customerDarkMode ? 'dark' : 'light'} />
+                  <FormField label="Phone" value={addressForm.contactPhone} onChangeText={(value) => setAddressForm((current) => ({ ...current, contactPhone: value }))} error={onboardingErrors.contactPhone} theme={customerDarkMode ? 'dark' : 'light'} />
+                </View>
+                <View style={styles.locationEditorActionRow}>
+                  <SecondaryButton label={locationBusy ? 'Detecting location...' : 'Use current location'} onPress={() => { void fetchCurrentGpsLocation(); }} loading={locationBusy} disabled={locationBusy} />
+                  <PrimaryButton
+                    label="Save location"
+                    onPress={() => {
+                      const normalizedContactPhone = normalizePhoneE164(addressForm.contactPhone)
+                        || normalizePhoneE164(phoneVerificationForm.phone)
+                        || guestOnboardingProfile.phone
+                        || '+97455551234';
+                      const nextAddressDraft = {
+                        ...addressForm,
+                        label: addressForm.label.trim() || 'Home',
+                        contactPhone: normalizedContactPhone,
+                        isDefault: true,
+                      };
+                      const nextErrors = validateAddressDraft(nextAddressDraft);
+                      setOnboardingErrors(nextErrors);
+                      if (Object.keys(nextErrors).length) {
+                        setOperationPopup({ tone: 'error', text: 'Complete area, street, building, and phone to save location.' });
+                        return;
+                      }
+
+                      setAddressForm((current) => ({ ...current, ...nextAddressDraft }));
+                      setGuestOnboardingProfile((current) => ({ ...current, locationSet: true }));
+                      if (authUser) {
+                        void saveAddress({ ...nextAddressDraft, isDefault: true }).catch(() => undefined);
+                      }
+                      setHeaderLocationModalOpen(false);
+                      setCustomerBanner({ tone: 'success', text: 'Location updated successfully.' });
+                      setOperationPopup({ tone: 'success', text: 'Location updated successfully.' });
+                    }}
+                  />
+                </View>
+              </View>
+            </View>
+          </Modal>
         </View>
       </SafeAreaView>
     );
@@ -4523,7 +4597,7 @@ function CustomerWorkspace({
             <Pressable style={[styles.customerHomeHeroCard, { minHeight: homeDeviceTuning.heroMinHeight }]} onPress={() => onTabChange('explore')}>
               <Image source={{ uri: HOME_CAROUSEL_IMAGES[0] }} style={styles.customerHomeHeroImageFull} resizeMode="cover" />
               <LinearGradient
-                colors={['rgba(249, 251, 255, 0.95)', 'rgba(249, 251, 255, 0.6)', 'rgba(249, 251, 255, 0.08)']}
+                colors={['rgba(246, 253, 248, 0.95)', 'rgba(238, 249, 242, 0.68)', 'rgba(228, 244, 234, 0.14)']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0.25 }}
                 style={[styles.customerHomeHeroCardGradient, { minHeight: homeDeviceTuning.heroMinHeight }]}
@@ -4546,7 +4620,7 @@ function CustomerWorkspace({
                   }}
                 >
                   <Image source={{ uri: promo.imageUrl }} style={styles.customerHomePromoImage} resizeMode="cover" />
-                  <LinearGradient colors={['rgba(8, 19, 58, 0.03)', 'rgba(8, 19, 58, 0.72)']} style={styles.customerHomePromoOverlay}>
+                  <LinearGradient colors={['rgba(7, 33, 19, 0.06)', 'rgba(7, 33, 19, 0.74)']} style={styles.customerHomePromoOverlay}>
                     <View style={[styles.customerHomePromoTagWrap, /new/i.test(promo.badge || '') && styles.customerHomePromoTagWrapNew]}>
                       <Text style={[styles.customerHomePromoTag, /new/i.test(promo.badge || '') && styles.customerHomePromoTagNew]}>{promo.badge || `Offer ${index + 1}`}</Text>
                     </View>
@@ -4579,22 +4653,22 @@ function CustomerWorkspace({
 
             <View style={styles.customerHomeDualCardsRow}>
               <Pressable style={styles.customerHomeDualCard} onPress={() => onTabChange('explore')}>
-                <LinearGradient colors={['#ECEFF5', '#DEE6F4']} style={styles.customerHomeDualCardGradient}>
+                <LinearGradient colors={['#EEF8F1', '#DDF2E3']} style={styles.customerHomeDualCardGradient}>
                   <View style={styles.infoBodyGrow}>
                     <Text style={styles.customerHomeDualCardTitle}>Luxury Laundry</Text>
                     <Text style={styles.customerHomeDualCardSubtitle}>Premium care for your garments</Text>
                   </View>
-                  <FontAwesome5 name="tshirt" size={28} color="#2E4A8E" solid />
+                  <FontAwesome5 name="spa" size={28} color="#0F7B45" solid />
                 </LinearGradient>
               </Pressable>
 
               <Pressable style={styles.customerHomeDualCard} onPress={() => onTabChange('explore')}>
-                <LinearGradient colors={['#EAF0F8', '#DCE7F5']} style={styles.customerHomeDualCardGradient}>
+                <LinearGradient colors={['#EEF8F1', '#E2F6E8']} style={styles.customerHomeDualCardGradient}>
                   <View style={styles.infoBodyGrow}>
                     <Text style={styles.customerHomeDualCardBadge}>New Launch</Text>
                     <Text style={styles.customerHomeDualCardTitle}>Baby Laundry</Text>
                   </View>
-                  <FontAwesome5 name="baby" size={28} color="#3E68BE" solid />
+                  <FontAwesome5 name="baby" size={28} color="#178C55" solid />
                 </LinearGradient>
               </Pressable>
             </View>
@@ -4602,7 +4676,7 @@ function CustomerWorkspace({
             <Text style={styles.customerHomeSectionHeading}>Offers & discounts</Text>
             <Pressable style={styles.customerHomeOfferCard} onPress={() => onTabChange('explore')}>
               <Image source={{ uri: activeOfferShowcase?.imageUrl || HOME_CAROUSEL_IMAGES[1] }} style={styles.customerHomeOfferCardImage} resizeMode="cover" />
-              <LinearGradient colors={['rgba(255,255,255,0.96)', 'rgba(255,255,255,0.78)', 'rgba(255,255,255,0.26)']} style={styles.customerHomeOfferCardOverlay}>
+              <LinearGradient colors={['rgba(247,253,249,0.96)', 'rgba(247,253,249,0.8)', 'rgba(247,253,249,0.34)']} style={styles.customerHomeOfferCardOverlay}>
                 <View style={styles.customerHomeOfferBadgeWrap}>
                   <Text style={styles.customerHomeOfferBadge}>NEW</Text>
                 </View>
@@ -4620,7 +4694,7 @@ function CustomerWorkspace({
             </View>
 
             <Text style={styles.customerHomeSectionHeading}>Make it your own</Text>
-            <LinearGradient colors={['#3751E8', '#2E46D7']} style={styles.customerHomeCustomizeCard}>
+            <LinearGradient colors={['#0E6B3D', '#0F7B45', '#17A35E']} style={styles.customerHomeCustomizeCard}>
               <View style={styles.customerHomeCustomizeBody}>
                 <Text style={styles.customerHomeCustomizeTitle}>Customize your experience</Text>
                 <Text style={styles.customerHomeCustomizeSubtitle}>Tailor Jahzeen to your preference and discover better providers faster.</Text>
@@ -4629,7 +4703,7 @@ function CustomerWorkspace({
                 </Pressable>
               </View>
               <View style={styles.customerHomeCustomizeArt}>
-                <FontAwesome5 name="sliders-h" size={72} color="#DCE6FF" solid />
+                <FontAwesome5 name="seedling" size={68} color="#D8F5E4" solid />
               </View>
             </LinearGradient>
           </View>
@@ -5086,13 +5160,13 @@ function premiumHomeIconForCategory(category: string): keyof typeof FontAwesome5
   const normalized = category.toLowerCase();
   if (normalized.includes('ac')) return 'snowflake';
   if (normalized.includes('car') && normalized.includes('wash')) return 'car-side';
-  if (normalized.includes('car') && normalized.includes('service')) return 'tools';
+  if (normalized.includes('car') && normalized.includes('service')) return 'wrench';
   if (normalized.includes('car') && normalized.includes('winch')) return 'truck-pickup';
   if (normalized.includes('moving')) return 'dolly';
   if (normalized.includes('furniture')) return 'couch';
-  if (normalized.includes('deep') || normalized.includes('home cleaning') || normalized.includes('clean')) return 'spray-can';
-  if (normalized.includes('pest') || normalized.includes('exterminator')) return 'shield-virus';
-  if (normalized.includes('water') && normalized.includes('tank')) return 'faucet';
+  if (normalized.includes('deep') || normalized.includes('home cleaning') || normalized.includes('clean')) return 'broom';
+  if (normalized.includes('pest') || normalized.includes('exterminator')) return 'bug';
+  if (normalized.includes('water') && normalized.includes('tank')) return 'warehouse';
   if (normalized.includes('water')) return 'tint';
   return 'concierge-bell';
 }
@@ -6776,6 +6850,7 @@ function PremiumHeader({
   darkMode,
   locationText,
   notificationCount,
+  onLocationPress,
   onSearchPress,
   onNotificationPress,
   onProfilePress,
@@ -6784,6 +6859,7 @@ function PremiumHeader({
   darkMode: boolean;
   locationText: string;
   notificationCount: number;
+  onLocationPress: () => void;
   onSearchPress: () => void;
   onNotificationPress: () => void;
   onProfilePress: () => void;
@@ -6795,13 +6871,13 @@ function PremiumHeader({
   const iconColor = darkMode ? '#D0E0EC' : '#12385E';
   return (
     <View style={[phStyles.container, { backgroundColor: bg, borderColor }]}>
-      <View style={phStyles.locationBlock}>
+      <Pressable style={[phStyles.locationBlock, darkMode && phStyles.locationBlockDark]} onPress={onLocationPress}>
         <Text style={[phStyles.locationLabel, darkMode && phStyles.locationLabelDark]}>Location to</Text>
         <View style={phStyles.locationValueRow}>
           <Text style={[phStyles.locationValue, darkMode && phStyles.locationValueDark]} numberOfLines={1}>{locationText}</Text>
           <MaterialCommunityIcons name="chevron-down" size={18} color={darkMode ? '#9DB8CC' : '#7A8FA3'} />
         </View>
-      </View>
+      </Pressable>
       <Pressable style={[phStyles.addButton, darkMode && phStyles.addButtonDark]} onPress={onProfilePress}>
         <MaterialCommunityIcons name="wallet-outline" size={20} color={colors.primary} />
         <Text style={phStyles.addButtonText}>Add</Text>
@@ -6839,7 +6915,17 @@ const phStyles = StyleSheet.create({
   },
   locationBlock: {
     flex: 1,
-    gap: 2,
+    gap: 3,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#F1F9F3',
+    borderWidth: 1,
+    borderColor: '#D2E9D8',
+  },
+  locationBlockDark: {
+    backgroundColor: '#183226',
+    borderColor: '#2F5642',
   },
   locationLabel: {
     fontSize: 13,
@@ -6856,8 +6942,8 @@ const phStyles = StyleSheet.create({
   },
   locationValue: {
     flex: 1,
-    fontSize: Platform.OS === 'ios' ? 18 : 16,
-    color: '#10263C',
+    fontSize: Platform.OS === 'ios' ? 17 : 15,
+    color: '#114E2F',
     fontWeight: '800',
   },
   locationValueDark: {
@@ -7695,7 +7781,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   customerHomeHeroTitle: {
-    color: '#22407A',
+    color: '#165C35',
     fontSize: Platform.OS === 'ios' ? 46 : 36,
     lineHeight: Platform.OS === 'ios' ? 50 : 40,
     fontWeight: '900',
@@ -7703,7 +7789,7 @@ const styles = StyleSheet.create({
     marginTop: Platform.OS === 'ios' ? -1 : 0,
   },
   customerHomeHeroSubtitle: {
-    color: '#344A5C',
+    color: '#295A3F',
     fontSize: Platform.OS === 'ios' ? 16 : 15,
     lineHeight: Platform.OS === 'ios' ? 21 : 20,
     fontWeight: '600',
@@ -7801,9 +7887,9 @@ const styles = StyleSheet.create({
     width: '100%',
     aspectRatio: 1.02,
     borderRadius: 10,
-    backgroundColor: '#EDF0F4',
+    backgroundColor: '#EEF8F1',
     borderWidth: 1,
-    borderColor: '#E5E8ED',
+    borderColor: '#D4EBD9',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -7825,7 +7911,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#E1E6EE',
+    borderColor: '#D4E7D9',
   },
   customerHomeDualCardGradient: {
     minHeight: 90,
@@ -7840,8 +7926,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 999,
-    backgroundColor: '#D9E6FF',
-    color: '#3A62B4',
+    backgroundColor: '#D7F1E0',
+    color: '#1D7A4C',
     fontSize: 10,
     fontWeight: '700',
     marginBottom: 4,
@@ -7852,12 +7938,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   customerHomeDualCardSubtitle: {
-    color: '#4A5F77',
+    color: '#3E614D',
     fontSize: 12,
     fontWeight: '600',
   },
   customerHomeSectionHeading: {
-    color: '#141F2E',
+    color: '#113A25',
     fontSize: Platform.OS === 'ios' ? 40 : 24,
     lineHeight: Platform.OS === 'ios' ? 44 : 28,
     fontWeight: '900',
@@ -7867,9 +7953,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#DADFE9',
+    borderColor: '#D1E5D8',
     minHeight: 220,
-    backgroundColor: '#F2F5FB',
+    backgroundColor: '#EEF8F1',
   },
   customerHomeOfferCardImage: {
     ...StyleSheet.absoluteFillObject,
@@ -7884,13 +7970,13 @@ const styles = StyleSheet.create({
   },
   customerHomeOfferBadgeWrap: {
     alignSelf: 'flex-start',
-    backgroundColor: '#2B4CE4',
+    backgroundColor: '#0F7B45',
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 5,
   },
   customerHomeOfferBadge: {
-    color: '#A8F253',
+    color: '#D8FFE8',
     fontSize: 13,
     fontWeight: '900',
     letterSpacing: 0.6,
@@ -7902,7 +7988,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   customerHomeOfferSubtitle: {
-    color: '#31445F',
+    color: '#345A43',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -7910,13 +7996,13 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#9FB0C9',
-    backgroundColor: '#FFFFFFEE',
+    borderColor: '#8DC9A3',
+    backgroundColor: '#F2FBF5',
     paddingHorizontal: 14,
     paddingVertical: 7,
   },
   customerHomeOfferButtonText: {
-    color: '#2C4ECE',
+    color: '#0F7B45',
     fontSize: 16,
     fontWeight: '800',
   },
@@ -7934,7 +8020,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#DDE2EB',
   },
   customerHomeDotActive: {
-    backgroundColor: '#4160EA',
+    backgroundColor: '#0F7B45',
   },
   customerHomeCustomizeCard: {
     borderRadius: 16,
@@ -7956,7 +8042,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   customerHomeCustomizeSubtitle: {
-    color: '#E6EEFF',
+    color: '#D7F6E3',
     fontSize: 15,
     lineHeight: 21,
     fontWeight: '600',
@@ -7964,12 +8050,12 @@ const styles = StyleSheet.create({
   customerHomeCustomizeButton: {
     alignSelf: 'flex-start',
     borderRadius: 12,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F4FFF8',
     paddingHorizontal: 18,
     paddingVertical: 9,
   },
   customerHomeCustomizeButtonText: {
-    color: '#3451DD',
+    color: '#0F7B45',
     fontSize: 16,
     fontWeight: '800',
   },
@@ -10098,6 +10184,51 @@ const styles = StyleSheet.create({
     color: colors.muted,
     textAlign: 'center',
     lineHeight: 22,
+  },
+  locationEditorOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(8, 23, 14, 0.34)',
+  },
+  locationEditorBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  locationEditorSheet: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    backgroundColor: '#F6FCF7',
+    borderWidth: 1,
+    borderColor: '#D5E8DB',
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 26,
+    gap: 12,
+  },
+  locationEditorSheetDark: {
+    backgroundColor: '#15271E',
+    borderColor: '#2B4A3A',
+  },
+  locationEditorTitle: {
+    color: '#123722',
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  locationEditorTitleDark: {
+    color: '#D7F4E2',
+  },
+  locationEditorBody: {
+    color: '#3C5B48',
+    lineHeight: 20,
+    fontWeight: '600',
+  },
+  locationEditorBodyDark: {
+    color: '#A7C8B4',
+  },
+  locationEditorActionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 4,
   },
   catalogFilterRow: {
     flexDirection: 'row',
