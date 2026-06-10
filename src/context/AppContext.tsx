@@ -40,6 +40,8 @@ import {
   OfferPromotionDraft,
   SignUpPayload,
   UserProfile,
+  SupportRequest,
+  SupportRequestDraft,
 } from '../app-types';
 
 const STORAGE_KEY = 'jahzeen-platform-state-v5';
@@ -145,6 +147,7 @@ type PersistedState = {
   companies: Company[];
   appCategorySettings: AppCategorySetting[];
   invitations: CompanyInvitation[];
+  supportRequests: SupportRequest[];
   catalogItems: CatalogItem[];
   offerPromotions: OfferPromotion[];
   notifications: AppNotification[];
@@ -201,6 +204,7 @@ interface AppContextValue {
   reviewOfferPromotion: (promotionId: string, decision: 'approved' | 'rejected') => Promise<void>;
   deleteOfferPromotion: (promotionId: string) => Promise<void>;
   markNotificationRead: (notificationId: string) => Promise<void>;
+  submitSupportRequest: (draft: SupportRequestDraft) => Promise<void>;
   saveLoyaltyProgram: (scope: 'admin' | 'company', companyId: string | undefined, draft: LoyaltyProgramDraft) => Promise<void>;
   saveCategorySetting: (category: string, isComingSoon: boolean) => Promise<void>;
   saveAvailabilitySlot: (companyId: string, draft: AvailabilitySlotDraft) => Promise<void>;
@@ -277,6 +281,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [appCategorySettings, setAppCategorySettings] = useState<AppCategorySetting[]>([]);
   const [invitations, setInvitations] = useState<CompanyInvitation[]>([]);
+  const [supportRequests, setSupportRequests] = useState<SupportRequest[]>([]);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [offerPromotions, setOfferPromotions] = useState<OfferPromotion[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -304,6 +309,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           })));
           setAppCategorySettings((parsed as PersistedState & { appCategorySettings?: AppCategorySetting[] }).appCategorySettings ?? []);
           setInvitations(parsed.invitations ?? []);
+          setSupportRequests((parsed as PersistedState & { supportRequests?: SupportRequest[] }).supportRequests ?? []);
           setCatalogItems(
             (parsed.catalogItems ?? []).map((entry) => ({
               ...entry,
@@ -349,6 +355,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         companies,
         appCategorySettings,
         invitations,
+        supportRequests,
         catalogItems,
         offerPromotions,
         notifications,
@@ -361,7 +368,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ).catch(() => {
       // Ignore persistence errors.
     });
-  }, [initialized, profile, addresses, users, companies, appCategorySettings, invitations, catalogItems, offerPromotions, notifications, auditEvents, bookings, availabilitySlots, ratings, loyaltyPrograms]);
+  }, [initialized, profile, addresses, users, companies, appCategorySettings, invitations, supportRequests, catalogItems, offerPromotions, notifications, auditEvents, bookings, availabilitySlots, ratings, loyaltyPrograms]);
 
   const currentUserRecord = useMemo(() => {
     if (!authUser) {
@@ -540,6 +547,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await safeCreate('AppNotification', { ...notification });
   }
 
+  async function submitSupportRequest(draft: SupportRequestDraft) {
+    const requestMessage = draft.message.trim();
+    if (!requestMessage) {
+      throw new Error('Message is required.');
+    }
+
+    const request: SupportRequest = {
+      id: `support-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      requestType: draft.requestType,
+      category: draft.category.trim() || (draft.requestType === 'contact' ? 'support' : 'general'),
+      requesterName: draft.requesterName.trim() || profile.fullName || 'Guest Customer',
+      requesterEmail: draft.requesterEmail.trim().toLowerCase() || authUser?.email?.toLowerCase() || profile.email.trim().toLowerCase(),
+      requesterPhone: draft.requesterPhone.trim(),
+      subject: draft.subject?.trim() || (draft.requestType === 'contact' ? 'Contact request' : 'Feedback submission'),
+      message: requestMessage,
+      status: 'new',
+      createdAtLabel: nowLabel(),
+    };
+
+    setSupportRequests((current) => [request, ...current]);
+    await safeCreate('SupportRequest', { ...request });
+  }
+
   async function createAuditEvent(draft: AuditEventDraft) {
     const actorRole = draft.actorRole ?? (authUser ? (activeRole === 'guest' ? 'system' : activeRole) : 'system');
     const actorEmail = draft.actorEmail ?? authUser?.email ?? 'system@jahzeen.app';
@@ -670,11 +700,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   async function syncCloudRecords() {
     try {
-      const [remoteUsers, remoteCompanies, remoteCategorySettings, remoteInvitations, remoteItems, remotePromotions, remoteNotifications, remoteAuditEvents, remoteBookings, remoteSlots, remoteRatings, remotePrograms, remoteAddresses, remoteProfiles] = await Promise.all([
+      const [remoteUsers, remoteCompanies, remoteCategorySettings, remoteInvitations, remoteSupportRequests, remoteItems, remotePromotions, remoteNotifications, remoteAuditEvents, remoteBookings, remoteSlots, remoteRatings, remotePrograms, remoteAddresses, remoteProfiles] = await Promise.all([
         safeList('AppUser'),
         safeList('Company'),
         safeList('AppCategorySetting'),
         safeList('CompanyInvitation'),
+        safeList('SupportRequest'),
         safeList('CatalogItem'),
         safeList('OfferPromotion'),
         safeList('AppNotification'),
@@ -698,6 +729,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       if (remoteInvitations.length) {
         setInvitations(remoteInvitations.map((entry: any) => ({ id: entry.id, companyId: entry.companyId, companyName: entry.companyName, email: entry.email, invitedByEmail: entry.invitedByEmail, status: entry.status, message: entry.message ?? '', emailDeliveryStatus: entry.emailDeliveryStatus ?? 'pending', emailDeliveryError: entry.emailDeliveryError ?? undefined, emailSentAtLabel: entry.emailSentAtLabel ?? undefined })));
+      }
+      if (remoteSupportRequests.length) {
+        setSupportRequests(remoteSupportRequests.map((entry: any) => ({
+          id: entry.id,
+          requestType: entry.requestType === 'feedback' ? 'feedback' : 'contact',
+          category: entry.category ?? 'general',
+          requesterName: entry.requesterName ?? 'Guest Customer',
+          requesterEmail: entry.requesterEmail ?? '',
+          requesterPhone: entry.requesterPhone ?? '',
+          subject: entry.subject ?? '',
+          message: entry.message ?? '',
+          status: entry.status === 'inReview' || entry.status === 'resolved' ? entry.status : 'new',
+          createdAtLabel: entry.createdAtLabel ?? nowLabel(),
+        })));
       }
       if (remoteItems.length) {
         setCatalogItems(
@@ -1588,7 +1633,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, signInChallenge, activeRole, profile, addresses, users, companies, appCategorySettings, invitations, catalogItems, offerPromotions, notifications, auditEvents, bookings, availabilitySlots, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, signInWithEmail, completeNewPassword, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, reviewCatalogItem, deleteCatalogItem, saveOfferPromotion, reviewOfferPromotion, deleteOfferPromotion, markNotificationRead, saveLoyaltyProgram, saveCategorySetting, saveAvailabilitySlot, deleteAvailabilitySlot, placeBooking, changeBookingStatus, submitRating }}>
+    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, signInChallenge, activeRole, profile, addresses, users, companies, appCategorySettings, invitations, supportRequests, catalogItems, offerPromotions, notifications, auditEvents, bookings, availabilitySlots, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, signInWithEmail, completeNewPassword, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, reviewCatalogItem, deleteCatalogItem, saveOfferPromotion, reviewOfferPromotion, deleteOfferPromotion, markNotificationRead, submitSupportRequest, saveLoyaltyProgram, saveCategorySetting, saveAvailabilitySlot, deleteAvailabilitySlot, placeBooking, changeBookingStatus, submitRating }}>
       {children}
     </AppContext.Provider>
   );

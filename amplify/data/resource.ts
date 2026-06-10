@@ -73,6 +73,24 @@ const schema = a.schema({
       allow.group('admin'),
     ]),
 
+  SupportRequest: a
+    .model({
+      requestType: a.string().required(),
+      category: a.string().required(),
+      requesterName: a.string().required(),
+      requesterEmail: a.string().required(),
+      requesterPhone: a.string(),
+      subject: a.string().required(),
+      message: a.string().required(),
+      status: a.string().required(),
+      createdAtLabel: a.string().required(),
+    })
+    .authorization((allow) => [
+      allow.group('admin').to(['read', 'update', 'delete']),
+      allow.owner(),
+      allow.guest().to(['create']),
+    ]),
+
   AppCategorySetting: a
     .model({
       category: a.string().required(),

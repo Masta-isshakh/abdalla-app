@@ -41,6 +41,7 @@ import {
   CompanyInvitation,
   OfferPromotion,
   PaymentMethod,
+  SupportRequest,
   UserProfile,
 } from '../app-types';
 
@@ -200,6 +201,7 @@ function WorkspaceScreen() {
     marketplaceItems,
     notifications,
     auditEvents,
+    supportRequests,
     needsConfirmation,
     signInChallenge,
     offerPromotions,
@@ -228,6 +230,7 @@ function WorkspaceScreen() {
     deleteOfferPromotion,
     deleteAvailabilitySlot,
     markNotificationRead,
+    submitSupportRequest,
   } = useAppState();
 
   const [adminTab, setAdminTab] = useState<'overview' | 'companies' | 'publishing' | 'inbox' | 'bookings' | 'settings'>('overview');
@@ -389,13 +392,7 @@ function WorkspaceScreen() {
   }
 
   useEffect(() => {
-    const nextPopup = customerBanner && (customerBanner.tone === 'success' || customerBanner.tone === 'error')
-      ? customerBanner
-      : companyBanner && (companyBanner.tone === 'success' || companyBanner.tone === 'error')
-        ? companyBanner
-        : adminBanner && (adminBanner.tone === 'success' || adminBanner.tone === 'error')
-          ? adminBanner
-          : null;
+    const nextPopup = customerBanner ?? companyBanner ?? adminBanner;
 
     if (nextPopup) {
       setOperationPopup({ tone: nextPopup.tone, text: nextPopup.text });
@@ -1962,6 +1959,7 @@ function WorkspaceScreen() {
               featuredOffers={activeMarketplacePromotions}
               ratings={ratings}
               notifications={customerNotifications}
+              supportRequests={supportRequests}
               bookingComposer={bookingComposer}
               onBookingComposerChange={setBookingComposer}
               bookingErrors={bookingErrors}
@@ -2017,10 +2015,12 @@ function WorkspaceScreen() {
               onProfileFormChange={setProfileForm}
               profileErrors={profileErrors}
               onSaveProfile={handleProfileSave}
+              addresses={addresses}
               addressForm={addressForm}
               onAddressFormChange={setAddressForm}
               addressErrors={addressErrors}
               onSaveAddress={handleAddressSave}
+              onSubmitSupportRequest={submitSupportRequest}
               onSignOut={handleSignOut}
               banner={customerBanner}
             />
@@ -2279,6 +2279,7 @@ function WorkspaceScreen() {
             offerPromotions={offerPromotions}
             notifications={adminNotifications}
             auditEvents={auditEvents}
+            supportRequests={supportRequests}
             ratings={ratings}
             users={users}
             companies={companies}
@@ -2387,6 +2388,7 @@ type AdminWorkspaceProps = {
   offerPromotions: OfferPromotion[];
   notifications: AppNotification[];
   auditEvents: AuditEvent[];
+  supportRequests: SupportRequest[];
   ratings: Array<{ id: string; companyId: string; score: number }>;
   users: Array<{ id: string; fullName: string; role: string; email: string; companyName?: string }>;
   companies: Company[];
@@ -2445,6 +2447,7 @@ function AdminWorkspace({
   offerPromotions,
   notifications,
   auditEvents,
+  supportRequests,
   ratings,
   users,
   companies,
@@ -2483,6 +2486,7 @@ function AdminWorkspace({
   const adminUsers = users.filter((user) => user.role === 'admin');
   const companyUsers = users.filter((user) => user.role === 'company');
   const pendingInvitations = invitations.filter((invitation) => invitation.status === 'pending');
+  const openSupportRequests = supportRequests.filter((entry) => entry.status !== 'resolved');
   const unreadNotifications = notifications.filter((entry) => !entry.isRead);
   const pausedCompanies = companies.filter((entry) => !entry.isActive);
   const recentBookings = bookings.slice(0, 4);
@@ -2592,8 +2596,6 @@ function AdminWorkspace({
 
   return (
     <>
-      {banner ? <StatusBanner tone={banner.tone} text={banner.text} /> : null}
-
       {tab === 'overview' ? (
         <>
           <LinearGradient colors={['#0B5D33', '#0F7B45', '#16A34A']} style={styles.workspaceShowcase}>
@@ -2613,6 +2615,7 @@ function AdminWorkspace({
               <ShowcaseBadge label="Pending approvals" value={String(pendingCatalogApprovals)} />
               <ShowcaseBadge label="Paused companies" value={String(pausedCompanies.length)} />
               <ShowcaseBadge label="Unread alerts" value={String(unreadNotifications.length)} />
+              <ShowcaseBadge label="Support requests" value={String(openSupportRequests.length)} />
               <ShowcaseBadge label="Live promotions" value={String(livePromotions)} />
             </View>
 
@@ -2961,6 +2964,16 @@ function AdminWorkspace({
                 <CompactBadge label="Products" value={String(pendingProductRequests.length)} />
                 <CompactBadge label="Offers" value={String(pendingOfferRequests.length)} />
               </View>
+            </SectionCard>
+
+            <SectionCard title="Support inbox" subtitle="Customer Contact Us and Send Feedback submissions land here through the shared Amplify data model.">
+              {openSupportRequests.length ? openSupportRequests.map((request) => (
+                <InfoRow
+                  key={request.id}
+                  title={`${request.requestType.toUpperCase()} · ${request.subject}`}
+                  subtitle={`${request.requesterName}${request.requesterEmail ? ` · ${request.requesterEmail}` : ''} · ${request.createdAtLabel}`}
+                />
+              )) : <EmptyState title="No support requests" body="Contact and feedback submissions will appear here after customers send them." />}
             </SectionCard>
 
             <SectionCard title="Products/Services requests" subtitle="All pending catalog submissions grouped by item type.">
@@ -3442,8 +3455,6 @@ function CompanyWorkspace({
 
   return (
     <>
-      {banner ? <StatusBanner tone={banner.tone} text={banner.text} /> : null}
-
       {tab === 'overview' ? (
         <>
           <LinearGradient colors={[currentAccent, '#113B60', '#0E7A8A']} style={styles.workspaceShowcase}>
@@ -4118,6 +4129,7 @@ type CustomerWorkspaceProps = {
   featuredOffers: Array<{ promotion: OfferPromotion; item: CatalogItem }>;
   ratings: Array<{ id: string; bookingId: string; companyId: string; itemId: string; customerEmail: string; score: number; review: string; createdAtLabel: string }>;
   notifications: AppNotification[];
+  supportRequests: SupportRequest[];
   bookingComposer: {
     itemId: string;
     companyId: string;
@@ -4176,10 +4188,12 @@ type CustomerWorkspaceProps = {
   onProfileFormChange: React.Dispatch<React.SetStateAction<UserProfile>>;
   profileErrors: ValidationMap;
   onSaveProfile: () => void;
+  addresses: Address[];
   addressForm: Address;
   onAddressFormChange: React.Dispatch<React.SetStateAction<Address>>;
   addressErrors: ValidationMap;
   onSaveAddress: () => void;
+  onSubmitSupportRequest: (draft: { requestType: 'contact' | 'feedback'; category: string; requesterName: string; requesterEmail: string; requesterPhone: string; subject?: string; message: string }) => Promise<void>;
   onSignOut: () => Promise<void>;
   banner: BannerState;
 };
@@ -4197,6 +4211,7 @@ function CustomerWorkspace({
   featuredOffers,
   ratings,
   notifications,
+  supportRequests,
   bookingComposer,
   onBookingComposerChange,
   bookingErrors,
@@ -4237,10 +4252,12 @@ function CustomerWorkspace({
   onProfileFormChange,
   profileErrors,
   onSaveProfile,
+  addresses,
   addressForm,
   onAddressFormChange,
   addressErrors,
   onSaveAddress,
+  onSubmitSupportRequest,
   onSignOut,
   banner,
 }: CustomerWorkspaceProps) {
@@ -4254,6 +4271,23 @@ function CustomerWorkspace({
   const [providerDetailOpen, setProviderDetailOpen] = useState(false);
   const [homeCarouselPage, setHomeCarouselPage] = useState(0);
   const [promoStartIndex, setPromoStartIndex] = useState(0);
+  const [activeMoreSection, setActiveMoreSection] = useState<'overview' | 'account' | 'addresses' | 'payment' | 'wallet' | 'notifications' | 'region' | 'preferences' | 'contact' | 'privacy' | 'feedback' | 'signin'>('overview');
+  const [notificationPreferences, setNotificationPreferences] = useState({ pushEnabled: true, orderUpdates: true, offers: true, system: true });
+  const [preferenceSettings, setPreferenceSettings] = useState({ reducedMotion: false, compactCards: false, autoLocation: true, haptics: true });
+  const [regionLanguage, setRegionLanguage] = useState<{ region: string; language: 'en' | 'ar' }>({
+    region: 'Qatar',
+    language: profileForm.preferredLanguage,
+  });
+  const [contactSubject, setContactSubject] = useState('Account support');
+  const [contactMessage, setContactMessage] = useState('');
+  const [feedbackCategory, setFeedbackCategory] = useState<'bug' | 'request' | 'general'>('general');
+  const [feedbackMessage, setFeedbackMessage] = useState('');
+  const [walletTopUpAmount, setWalletTopUpAmount] = useState('50');
+  const [walletBalance, setWalletBalance] = useState(120);
+  const [paymentDraft, setPaymentDraft] = useState({ holderName: profileForm.fullName || '', cardLast4: '', expiry: '', brand: 'Visa' });
+  const supportRequesterName = profileForm.fullName || authUser?.email || 'Guest Customer';
+  const supportRequesterEmail = (profileForm.email || authUser?.email || '').trim().toLowerCase();
+  const supportRequesterPhone = profileForm.phone || '';
   const promoRowFade = useRef(new Animated.Value(1)).current;
   const normalizedCustomerSearch = customerSearchQuery.trim().toLowerCase();
   const normalizedSelectedCategory = selectedCustomerCategory?.trim() || null;
@@ -4499,6 +4533,10 @@ function CustomerWorkspace({
     serviceLabelSize: isIphone15ProMaxClass ? 15 : 14,
     serviceLabelLineHeight: isIphone15ProMaxClass ? 17 : 16,
   };
+  const moreSettingsStorageKey = `jahzeen-more-settings:${authUser?.email?.toLowerCase() ?? 'guest'}`;
+  const completedBookings = customerBookings.filter((entry) => entry.status === 'completed').length;
+  const activeBookings = customerBookings.filter((entry) => ['pending', 'approved', 'scheduled', 'enRoute', 'inProgress'].includes(entry.status)).length;
+  const walletEarnedPoints = customerBookings.reduce((total, entry) => total + entry.loyaltyPointsEarned, 0);
 
   useEffect(() => {
     if (!normalizedSelectedCategory) {
@@ -4581,6 +4619,65 @@ function CustomerWorkspace({
 
     return () => clearInterval(intervalId);
   }, [homePromoCards.length, promoRowFade, tab]);
+
+  useEffect(() => {
+    setRegionLanguage((current) => ({ ...current, language: profileForm.preferredLanguage }));
+    setPaymentDraft((current) => ({ ...current, holderName: profileForm.fullName || current.holderName }));
+  }, [profileForm.fullName, profileForm.preferredLanguage]);
+
+  useEffect(() => {
+    let active = true;
+
+    AsyncStorage.getItem(moreSettingsStorageKey)
+      .then((rawValue) => {
+        if (!active || !rawValue) {
+          return;
+        }
+
+        const parsed = JSON.parse(rawValue) as {
+          notificationPreferences?: { pushEnabled: boolean; orderUpdates: boolean; offers: boolean; system: boolean };
+          preferenceSettings?: { reducedMotion: boolean; compactCards: boolean; autoLocation: boolean; haptics: boolean };
+          regionLanguage?: { region: string; language: 'en' | 'ar' };
+          walletBalance?: number;
+          paymentDraft?: { holderName: string; cardLast4: string; expiry: string; brand: string };
+        };
+
+        if (parsed.notificationPreferences) {
+          setNotificationPreferences(parsed.notificationPreferences);
+        }
+        if (parsed.preferenceSettings) {
+          setPreferenceSettings(parsed.preferenceSettings);
+        }
+        if (parsed.regionLanguage) {
+          setRegionLanguage(parsed.regionLanguage);
+        }
+        if (typeof parsed.walletBalance === 'number') {
+          setWalletBalance(parsed.walletBalance);
+        }
+        if (parsed.paymentDraft) {
+          setPaymentDraft(parsed.paymentDraft);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      active = false;
+    };
+  }, [moreSettingsStorageKey]);
+
+  useEffect(() => {
+    AsyncStorage.setItem(
+      moreSettingsStorageKey,
+      JSON.stringify({
+        notificationPreferences,
+        preferenceSettings,
+        regionLanguage,
+        walletBalance,
+        paymentDraft,
+      }),
+    ).catch(() => undefined);
+  }, [moreSettingsStorageKey, notificationPreferences, paymentDraft, preferenceSettings, regionLanguage, walletBalance]);
+
   const customerTheme = {
     canvas: darkMode ? styles.customerCanvasDark : undefined,
     card: darkMode ? styles.customerSectionDark : undefined,
@@ -4599,8 +4696,6 @@ function CustomerWorkspace({
 
   return (
     <View style={[styles.customerWorkspace, customerTheme.canvas]}>
-      {banner ? <StatusBanner tone={banner.tone} text={banner.text} /> : null}
-
       {tab === 'home' ? (
         <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <View style={[styles.customerHomeScreen, { gap: homeDeviceTuning.homeScreenGap }]}>
@@ -5082,63 +5177,369 @@ function CustomerWorkspace({
       {tab === 'profile' ? (
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}>
           <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <View style={[styles.workspaceColumns, wide && styles.workspaceColumnsWide]}>
-              <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
-                <SectionCard
-                  title="Profile"
-                  subtitle={authUser ? `Signed in as ${currentUserRole}` : 'Guest mode is active. Browse freely and edit local preferences.'}
-                  cardStyle={customerTheme.card}
-                  titleStyle={customerTheme.title}
-                  subtitleStyle={customerTheme.subtitle}
-                >
-                  <View style={[styles.darkModeCard, customerTheme.metaCard]}>
+            {activeMoreSection === 'overview' ? (
+              <>
+                <SectionCard title="My Account" subtitle={authUser ? `${profileForm.fullName || 'Account'} · ${profileForm.email}` : 'Guest mode active. Sign in to access customer, admin, or company workspace.'} cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+                  <View style={styles.moreHeaderRow}>
+                    <View style={styles.moreAvatarWrap}>
+                      <MaterialCommunityIcons name="account-circle-outline" size={48} color={colors.primary} />
+                    </View>
                     <View style={styles.infoBodyGrow}>
-                      <Text style={[styles.infoTitle, customerTheme.title]}>Appearance</Text>
-                      <Text style={[styles.helperText, customerTheme.subtitle]}>Dark mode is available from the profile tab and only affects the customer experience.</Text>
+                      <Text style={[styles.infoTitle, customerTheme.title]}>{profileForm.fullName || 'Guest User'}</Text>
+                      <Text style={[styles.helperText, customerTheme.subtitle]}>{authUser ? `Signed in as ${currentUserRole}` : 'Sign in to unlock orders, notifications, and workspace switching.'}</Text>
                     </View>
-                    <ChoiceChip label={darkMode ? 'Dark mode on' : 'Dark mode off'} selected={darkMode} onPress={onToggleDarkMode} />
                   </View>
+                  <View style={styles.moreSectionLabelRow}>
+                    <Text style={styles.moreSectionLabel}>My Account</Text>
+                  </View>
+                  {[
+                    { key: 'account', label: 'Manage Account', icon: 'account-cog-outline', description: 'Profile details and personal info' },
+                    { key: 'addresses', label: 'Manage Addresses', icon: 'map-marker-outline', description: 'Add and update delivery addresses' },
+                    { key: 'payment', label: 'Payment Method', icon: 'credit-card-outline', description: 'Default payment and card preferences' },
+                    { key: 'wallet', label: 'Wallet', icon: 'wallet-outline', description: 'Balance, points, and top-up actions' },
+                    { key: 'notifications', label: 'Notification', icon: 'bell-outline', description: 'Alerts and communication controls' },
+                    { key: 'region', label: 'Region & Language', icon: 'translate', description: 'Localization and region defaults' },
+                    { key: 'preferences', label: 'Preferences', icon: 'tune-vertical-variant', description: 'Experience and personalization settings' },
+                    { key: 'signin', label: 'Sign In', icon: 'login', description: 'Sign in and switch to admin/company workspace' },
+                  ].map((option) => (
+                    <Pressable key={`more-option-${option.key}`} style={({ pressed }) => [styles.moreOptionRow, pressed && styles.moreOptionRowPressed]} onPress={() => setActiveMoreSection(option.key as any)}>
+                      <View style={styles.moreOptionIconWrap}>
+                        <MaterialCommunityIcons name={option.icon as any} size={20} color={colors.primary} />
+                      </View>
+                      <View style={styles.infoBodyGrow}>
+                        <Text style={styles.moreOptionTitle}>{option.label}</Text>
+                        <Text style={styles.moreOptionDescription}>{option.description}</Text>
+                      </View>
+                      <MaterialCommunityIcons name="chevron-right" size={22} color="#8FA1B3" />
+                    </Pressable>
+                  ))}
+                </SectionCard>
 
-                  {!authUser ? (
-                    <View style={[styles.verificationCard, customerTheme.verificationCard]}>
-                      <Text style={[styles.verificationTitle, customerTheme.title]}>Guest browsing enabled</Text>
-                      <Text style={[styles.helperText, customerTheme.subtitle]}>
-                        Login has been removed from this screen. Customers can open the app and start browsing directly from Home.
-                      </Text>
+                <SectionCard title="General" subtitle="Support and legal settings" cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+                  {[
+                    { key: 'contact', label: 'Contact Us', icon: 'headset' },
+                    { key: 'privacy', label: 'Privacy Policy', icon: 'shield-lock-outline' },
+                    { key: 'feedback', label: 'Send Feedback', icon: 'message-text-outline' },
+                  ].map((option) => (
+                    <Pressable key={`more-general-${option.key}`} style={({ pressed }) => [styles.moreOptionRow, pressed && styles.moreOptionRowPressed]} onPress={() => setActiveMoreSection(option.key as any)}>
+                      <View style={styles.moreOptionIconWrap}>
+                        <MaterialCommunityIcons name={option.icon as any} size={20} color={colors.primary} />
+                      </View>
+                      <Text style={styles.moreOptionTitle}>{option.label}</Text>
+                      <MaterialCommunityIcons name="chevron-right" size={22} color="#8FA1B3" />
+                    </Pressable>
+                  ))}
+                </SectionCard>
+              </>
+            ) : null}
+
+            {activeMoreSection === 'account' ? (
+              <SectionCard title="Manage Account" subtitle="Update your personal account details." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+                <SecondaryButton label="Back to More" onPress={() => setActiveMoreSection('overview')} />
+                <FormField label="Full name" value={profileForm.fullName} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, fullName: value }))} error={profileErrors.fullName} theme={customerTheme.inputTheme} />
+                <FormField label="Email" value={profileForm.email} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, email: value }))} error={profileErrors.email} theme={customerTheme.inputTheme} />
+                <FormField label="Phone" value={profileForm.phone} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, phone: value }))} error={profileErrors.phone} theme={customerTheme.inputTheme} />
+                {authUser ? <PrimaryButton label="Save account" onPress={onSaveProfile} /> : <SecondaryButton label="Go to Sign In" onPress={() => setActiveMoreSection('signin')} />}
+              </SectionCard>
+            ) : null}
+
+            {activeMoreSection === 'addresses' ? (
+              <SectionCard title="Manage Addresses" subtitle="Your saved addresses are dynamic and reusable across bookings." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+                <SecondaryButton label="Back to More" onPress={() => setActiveMoreSection('overview')} />
+                {addresses.length ? addresses.map((entry) => (
+                  <View key={`address-${entry.id}`} style={styles.moreInfoCard}>
+                    <Text style={styles.moreInfoTitle}>{entry.label}</Text>
+                    <Text style={styles.moreInfoBody}>{`${entry.area}, ${entry.street}, Building ${entry.building}${entry.unitNumber ? `, Unit ${entry.unitNumber}` : ''}`}</Text>
+                    <SecondaryButton
+                      label="Use this address"
+                      onPress={() => onAddressFormChange((current) => ({
+                        ...current,
+                        id: entry.id,
+                        label: entry.label,
+                        area: entry.area,
+                        street: entry.street,
+                        building: entry.building,
+                        unitNumber: entry.unitNumber,
+                        instructions: entry.instructions,
+                        contactName: entry.contactName,
+                        contactPhone: entry.contactPhone,
+                        isDefault: true,
+                      }))}
+                    />
+                  </View>
+                )) : <EmptyState title="No saved addresses" body="Add your first address below." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />}
+                <View style={styles.rowGap}>
+                  <FormField label="Label" value={addressForm.label} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, label: value }))} error={addressErrors.label} theme={customerTheme.inputTheme} />
+                  <FormField label="Area" value={addressForm.area} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, area: value }))} error={addressErrors.area} theme={customerTheme.inputTheme} />
+                </View>
+                <View style={styles.rowGap}>
+                  <FormField label="Street" value={addressForm.street} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, street: value }))} error={addressErrors.street} theme={customerTheme.inputTheme} />
+                  <FormField label="Building" value={addressForm.building} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, building: value }))} error={addressErrors.building} theme={customerTheme.inputTheme} />
+                </View>
+                <View style={styles.rowGap}>
+                  <FormField label="Unit" value={addressForm.unitNumber} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, unitNumber: value }))} theme={customerTheme.inputTheme} />
+                  <FormField label="Phone" value={addressForm.contactPhone} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, contactPhone: value }))} error={addressErrors.contactPhone} theme={customerTheme.inputTheme} />
+                </View>
+                {authUser ? <PrimaryButton label="Save default address" onPress={onSaveAddress} /> : <SecondaryButton label="Go to Sign In" onPress={() => setActiveMoreSection('signin')} />}
+              </SectionCard>
+            ) : null}
+
+            {activeMoreSection === 'payment' ? (
+              <SectionCard title="Payment Method" subtitle="Manage your preferred payment method and card profile." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+                <SecondaryButton label="Back to More" onPress={() => setActiveMoreSection('overview')} />
+                <View style={styles.toggleRow}>
+                  <ChoiceChip label="Card" selected={profileForm.defaultPaymentMethod === 'card'} onPress={() => onProfileFormChange((current) => ({ ...current, defaultPaymentMethod: 'card' }))} />
+                  <ChoiceChip label="Cash" selected={profileForm.defaultPaymentMethod === 'cash'} onPress={() => onProfileFormChange((current) => ({ ...current, defaultPaymentMethod: 'cash' }))} />
+                  <ChoiceChip label="Apple Pay" selected={profileForm.defaultPaymentMethod === 'applePay'} onPress={() => onProfileFormChange((current) => ({ ...current, defaultPaymentMethod: 'applePay' }))} />
+                </View>
+                <FormField label="Card holder" value={paymentDraft.holderName} onChangeText={(value) => setPaymentDraft((current) => ({ ...current, holderName: value }))} theme={customerTheme.inputTheme} />
+                <View style={styles.rowGap}>
+                  <FormField label="Card last 4" value={paymentDraft.cardLast4} onChangeText={(value) => setPaymentDraft((current) => ({ ...current, cardLast4: value.replace(/[^0-9]/g, '').slice(0, 4) }))} theme={customerTheme.inputTheme} />
+                  <FormField label="Expiry" value={paymentDraft.expiry} onChangeText={(value) => setPaymentDraft((current) => ({ ...current, expiry: value }))} theme={customerTheme.inputTheme} placeholder="MM/YY" />
+                </View>
+                <SelectField label="Card brand" value={paymentDraft.brand} options={['Visa', 'Mastercard', 'AMEX', 'Mada']} onSelect={(value) => setPaymentDraft((current) => ({ ...current, brand: value }))} />
+                {authUser ? <PrimaryButton label="Save payment profile" onPress={onSaveProfile} /> : <SecondaryButton label="Go to Sign In" onPress={() => setActiveMoreSection('signin')} />}
+              </SectionCard>
+            ) : null}
+
+            {activeMoreSection === 'wallet' ? (
+              <SectionCard title="Wallet" subtitle="A dynamic wallet snapshot based on your bookings and local top-ups." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+                <SecondaryButton label="Back to More" onPress={() => setActiveMoreSection('overview')} />
+                <View style={styles.moreStatsRow}>
+                  <View style={styles.moreStatCard}>
+                    <Text style={styles.moreStatValue}>{`QAR ${walletBalance}`}</Text>
+                    <Text style={styles.moreStatLabel}>Balance</Text>
+                  </View>
+                  <View style={styles.moreStatCard}>
+                    <Text style={styles.moreStatValue}>{String(walletEarnedPoints)}</Text>
+                    <Text style={styles.moreStatLabel}>Points Earned</Text>
+                  </View>
+                  <View style={styles.moreStatCard}>
+                    <Text style={styles.moreStatValue}>{String(completedBookings)}</Text>
+                    <Text style={styles.moreStatLabel}>Completed Orders</Text>
+                  </View>
+                </View>
+                <FormField label="Top-up amount (QAR)" value={walletTopUpAmount} onChangeText={(value) => setWalletTopUpAmount(value.replace(/[^0-9]/g, '').slice(0, 4))} theme={customerTheme.inputTheme} />
+                <PrimaryButton
+                  label="Add to wallet"
+                  onPress={() => {
+                    const amount = Number(walletTopUpAmount || '0');
+                    if (Number.isFinite(amount) && amount > 0) {
+                      setWalletBalance((current) => current + amount);
+                    }
+                  }}
+                />
+              </SectionCard>
+            ) : null}
+
+            {activeMoreSection === 'notifications' ? (
+              <SectionCard title="Notification" subtitle="Control what kind of alerts you receive." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+                <SecondaryButton label="Back to More" onPress={() => setActiveMoreSection('overview')} />
+                <View style={styles.toggleRow}>
+                  <ChoiceChip label={notificationPreferences.pushEnabled ? 'Push on' : 'Push off'} selected={notificationPreferences.pushEnabled} onPress={() => setNotificationPreferences((current) => ({ ...current, pushEnabled: !current.pushEnabled }))} />
+                  <ChoiceChip label={notificationPreferences.orderUpdates ? 'Order updates on' : 'Order updates off'} selected={notificationPreferences.orderUpdates} onPress={() => setNotificationPreferences((current) => ({ ...current, orderUpdates: !current.orderUpdates }))} />
+                </View>
+                <View style={styles.toggleRow}>
+                  <ChoiceChip label={notificationPreferences.offers ? 'Offers on' : 'Offers off'} selected={notificationPreferences.offers} onPress={() => setNotificationPreferences((current) => ({ ...current, offers: !current.offers }))} />
+                  <ChoiceChip label={notificationPreferences.system ? 'System on' : 'System off'} selected={notificationPreferences.system} onPress={() => setNotificationPreferences((current) => ({ ...current, system: !current.system }))} />
+                </View>
+                {notifications.length ? notifications.slice(0, 4).map((notification) => (
+                  <NotificationRow key={`more-notification-${notification.id}`} notification={notification} onOpen={() => onOpenNotification(notification)} darkMode={darkMode} />
+                )) : <EmptyState title="No recent notifications" body="Your latest alerts will appear here." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />}
+              </SectionCard>
+            ) : null}
+
+            {activeMoreSection === 'region' ? (
+              <SectionCard title="Region & Language" subtitle="Set your region and application language." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+                <SecondaryButton label="Back to More" onPress={() => setActiveMoreSection('overview')} />
+                <FormField label="Region" value={regionLanguage.region} onChangeText={(value) => setRegionLanguage((current) => ({ ...current, region: value }))} theme={customerTheme.inputTheme} />
+                <View style={styles.toggleRow}>
+                  <ChoiceChip label="English" selected={regionLanguage.language === 'en'} onPress={() => setRegionLanguage((current) => ({ ...current, language: 'en' }))} />
+                  <ChoiceChip label="Arabic" selected={regionLanguage.language === 'ar'} onPress={() => setRegionLanguage((current) => ({ ...current, language: 'ar' }))} />
+                </View>
+                <PrimaryButton
+                  label="Apply region and language"
+                  onPress={() => {
+                    onProfileFormChange((current) => ({ ...current, preferredLanguage: regionLanguage.language }));
+                    if (authUser) {
+                      onSaveProfile();
+                    }
+                  }}
+                />
+              </SectionCard>
+            ) : null}
+
+            {activeMoreSection === 'preferences' ? (
+              <SectionCard title="Preferences" subtitle="Personalize your application behavior." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+                <SecondaryButton label="Back to More" onPress={() => setActiveMoreSection('overview')} />
+                <View style={[styles.darkModeCard, customerTheme.metaCard]}>
+                  <View style={styles.infoBodyGrow}>
+                    <Text style={[styles.infoTitle, customerTheme.title]}>Appearance</Text>
+                    <Text style={[styles.helperText, customerTheme.subtitle]}>Dark mode only affects the customer experience.</Text>
+                  </View>
+                  <ChoiceChip label={darkMode ? 'Dark mode on' : 'Dark mode off'} selected={darkMode} onPress={onToggleDarkMode} />
+                </View>
+                <View style={styles.toggleRow}>
+                  <ChoiceChip label={preferenceSettings.reducedMotion ? 'Reduced motion on' : 'Reduced motion off'} selected={preferenceSettings.reducedMotion} onPress={() => setPreferenceSettings((current) => ({ ...current, reducedMotion: !current.reducedMotion }))} />
+                  <ChoiceChip label={preferenceSettings.compactCards ? 'Compact cards on' : 'Compact cards off'} selected={preferenceSettings.compactCards} onPress={() => setPreferenceSettings((current) => ({ ...current, compactCards: !current.compactCards }))} />
+                </View>
+                <View style={styles.toggleRow}>
+                  <ChoiceChip label={preferenceSettings.autoLocation ? 'Auto location on' : 'Auto location off'} selected={preferenceSettings.autoLocation} onPress={() => setPreferenceSettings((current) => ({ ...current, autoLocation: !current.autoLocation }))} />
+                  <ChoiceChip label={preferenceSettings.haptics ? 'Haptics on' : 'Haptics off'} selected={preferenceSettings.haptics} onPress={() => setPreferenceSettings((current) => ({ ...current, haptics: !current.haptics }))} />
+                </View>
+              </SectionCard>
+            ) : null}
+
+            {activeMoreSection === 'contact' ? (
+              <SectionCard title="Contact Us" subtitle="Reach support with your account details prefilled." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+                <SecondaryButton label="Back to More" onPress={() => setActiveMoreSection('overview')} />
+                <View style={styles.moreInfoCard}>
+                  <Text style={styles.moreInfoTitle}>Customer Support</Text>
+                  <Text style={styles.moreInfoBody}>Email: support@abdalla.app</Text>
+                  <Text style={styles.moreInfoBody}>Phone: +974 4411 2233</Text>
+                  <Text style={styles.moreInfoBody}>{`Requester: ${supportRequesterName} · ${supportRequesterEmail || 'No email'}`}</Text>
+                </View>
+                <FormField label="Subject" value={contactSubject} onChangeText={setContactSubject} theme={customerTheme.inputTheme} />
+                <FormField label="Message" value={contactMessage} onChangeText={setContactMessage} multiline theme={customerTheme.inputTheme} />
+                <PrimaryButton
+                  label="Submit contact request"
+                  onPress={async () => {
+                    const trimmed = contactMessage.trim();
+                    if (!trimmed) {
+                      return;
+                    }
+
+                    try {
+                      await onSubmitSupportRequest({
+                        requestType: 'contact',
+                        category: 'support',
+                        requesterName: supportRequesterName,
+                        requesterEmail: supportRequesterEmail,
+                        requesterPhone: supportRequesterPhone,
+                        subject: contactSubject.trim() || 'Account support',
+                        message: trimmed,
+                      });
+                      setContactMessage('');
+                    } catch (error) {
+                      Alert.alert('Unable to send request', error instanceof Error ? error.message : 'Please try again.');
+                    }
+                  }}
+                />
+                {supportRequests.filter((entry) => entry.requestType === 'contact' && entry.requesterEmail === supportRequesterEmail).slice(0, 3).length ? (
+                  <View style={styles.rowGap}>
+                    {supportRequests
+                      .filter((entry) => entry.requestType === 'contact' && entry.requesterEmail === supportRequesterEmail)
+                      .slice(0, 3)
+                      .map((entry) => (
+                        <InfoRow key={entry.id} title={`${entry.subject} · ${entry.createdAtLabel}`} subtitle={entry.message} />
+                      ))}
+                  </View>
+                ) : null}
+              </SectionCard>
+            ) : null}
+
+            {activeMoreSection === 'privacy' ? (
+              <SectionCard title="Privacy Policy" subtitle="Core privacy and data handling standards." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+                <SecondaryButton label="Back to More" onPress={() => setActiveMoreSection('overview')} />
+                <View style={styles.moreInfoCard}>
+                  <Text style={styles.moreInfoTitle}>How your data is used</Text>
+                  <Text style={styles.moreInfoBody}>1. Booking and account data are used only for service operations and support.</Text>
+                  <Text style={styles.moreInfoBody}>2. Payment preferences are stored securely and never displayed in full.</Text>
+                  <Text style={styles.moreInfoBody}>3. Notifications can be controlled from the Notification settings section.</Text>
+                </View>
+              </SectionCard>
+            ) : null}
+
+            {activeMoreSection === 'feedback' ? (
+              <SectionCard title="Send Feedback" subtitle="Share bugs, feature requests, or general comments." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+                <SecondaryButton label="Back to More" onPress={() => setActiveMoreSection('overview')} />
+                <View style={styles.toggleRow}>
+                  <ChoiceChip label="General" selected={feedbackCategory === 'general'} onPress={() => setFeedbackCategory('general')} />
+                  <ChoiceChip label="Bug" selected={feedbackCategory === 'bug'} onPress={() => setFeedbackCategory('bug')} />
+                  <ChoiceChip label="Feature" selected={feedbackCategory === 'request'} onPress={() => setFeedbackCategory('request')} />
+                </View>
+                <FormField label="Feedback" value={feedbackMessage} onChangeText={setFeedbackMessage} multiline theme={customerTheme.inputTheme} />
+                <PrimaryButton
+                  label="Submit feedback"
+                  onPress={async () => {
+                    const trimmed = feedbackMessage.trim();
+                    if (!trimmed) {
+                      return;
+                    }
+                    try {
+                      await onSubmitSupportRequest({
+                        requestType: 'feedback',
+                        category: feedbackCategory,
+                        requesterName: supportRequesterName,
+                        requesterEmail: supportRequesterEmail,
+                        requesterPhone: supportRequesterPhone,
+                        subject: `${feedbackCategory === 'bug' ? 'Bug' : feedbackCategory === 'request' ? 'Feature' : 'General'} feedback`,
+                        message: trimmed,
+                      });
+                      setFeedbackMessage('');
+                    } catch (error) {
+                      Alert.alert('Unable to send feedback', error instanceof Error ? error.message : 'Please try again.');
+                    }
+                  }}
+                />
+                {supportRequests.filter((entry) => entry.requestType === 'feedback' && entry.requesterEmail === supportRequesterEmail).length ? supportRequests.filter((entry) => entry.requestType === 'feedback' && entry.requesterEmail === supportRequesterEmail).slice(0, 5).map((entry) => (
+                  <InfoRow key={entry.id} title={`${entry.category.toUpperCase()} · ${entry.createdAtLabel}`} subtitle={entry.message} />
+                )) : null}
+              </SectionCard>
+            ) : null}
+
+            {activeMoreSection === 'signin' ? (
+              <SectionCard title="Sign In" subtitle="Sign in to your account. Admin and company accounts automatically open their dedicated workspace." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+                <SecondaryButton label="Back to More" onPress={() => setActiveMoreSection('overview')} />
+                {authUser ? (
+                  <View style={styles.moreInfoCard}>
+                    <Text style={styles.moreInfoTitle}>You are signed in</Text>
+                    <Text style={styles.moreInfoBody}>{`${profileForm.email} · ${currentUserRole}`}</Text>
+                    <Text style={styles.moreInfoBody}>To switch to another workspace account, sign out and sign in with the target account.</Text>
+                    <SecondaryButton label={authBusy ? 'Signing out...' : 'Sign out'} onPress={() => onSignOut()} loading={authBusy} disabled={authBusy} />
+                  </View>
+                ) : (
+                  <>
+                    <View style={styles.toggleRow}>
+                      <ChoiceChip label="Sign in" selected={authMode === 'signin'} onPress={() => onAuthModeChange('signin')} />
+                      <ChoiceChip label="Create account" selected={authMode === 'signup'} onPress={() => onAuthModeChange('signup')} />
                     </View>
-                  ) : null}
 
-                  <FormField label="Full name" value={profileForm.fullName} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, fullName: value }))} error={profileErrors.fullName} theme={customerTheme.inputTheme} />
-                  <FormField label="Email" value={profileForm.email} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, email: value }))} error={profileErrors.email} theme={customerTheme.inputTheme} />
-                  <FormField label="Phone" value={profileForm.phone} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, phone: value }))} error={profileErrors.phone} theme={customerTheme.inputTheme} />
-                  <View style={styles.toggleRow}>
-                    <ChoiceChip label="Card" selected={profileForm.defaultPaymentMethod === 'card'} onPress={() => onProfileFormChange((current) => ({ ...current, defaultPaymentMethod: 'card' }))} />
-                    <ChoiceChip label="Cash" selected={profileForm.defaultPaymentMethod === 'cash'} onPress={() => onProfileFormChange((current) => ({ ...current, defaultPaymentMethod: 'cash' }))} />
-                    <ChoiceChip label="Apple Pay" selected={profileForm.defaultPaymentMethod === 'applePay'} onPress={() => onProfileFormChange((current) => ({ ...current, defaultPaymentMethod: 'applePay' }))} />
-                  </View>
-                  {authUser ? <PrimaryButton label="Save profile" onPress={onSaveProfile} /> : null}
-                </SectionCard>
-              </View>
+                    {authMode === 'signin' ? (
+                      <>
+                        <FormField label="Email" value={signInForm.email} onChangeText={(value) => onSignInFormChange((current) => ({ ...current, email: value }))} error={authErrors.email} theme={customerTheme.inputTheme} />
+                        <FormField label="Password" value={signInForm.password} onChangeText={(value) => onSignInFormChange((current) => ({ ...current, password: value }))} error={authErrors.password} secureTextEntry theme={customerTheme.inputTheme} />
+                      </>
+                    ) : (
+                      <>
+                        <FormField label="Full name" value={signUpForm.fullName} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, fullName: value }))} error={authErrors.fullName} theme={customerTheme.inputTheme} />
+                        <FormField label="Email" value={signUpForm.email} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, email: value }))} error={authErrors.email} theme={customerTheme.inputTheme} />
+                        <FormField label="Phone" value={signUpForm.phone} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, phone: value }))} error={authErrors.phone} theme={customerTheme.inputTheme} />
+                        <FormField label="Password" value={signUpForm.password} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, password: value }))} error={authErrors.password} secureTextEntry theme={customerTheme.inputTheme} />
+                      </>
+                    )}
 
-              <View style={[styles.columnPane, wide && styles.columnPaneWide]}>
-                <SectionCard title="Default address" subtitle="Used as the default destination for future bookings." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
-                  <View style={styles.rowGap}>
-                    <FormField label="Label" value={addressForm.label} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, label: value }))} error={addressErrors.label} theme={customerTheme.inputTheme} />
-                    <FormField label="Area" value={addressForm.area} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, area: value }))} error={addressErrors.area} theme={customerTheme.inputTheme} />
-                  </View>
-                  <View style={styles.rowGap}>
-                    <FormField label="Street" value={addressForm.street} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, street: value }))} error={addressErrors.street} theme={customerTheme.inputTheme} />
-                    <FormField label="Building" value={addressForm.building} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, building: value }))} error={addressErrors.building} theme={customerTheme.inputTheme} />
-                  </View>
-                  <View style={styles.rowGap}>
-                    <FormField label="Unit" value={addressForm.unitNumber} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, unitNumber: value }))} theme={customerTheme.inputTheme} />
-                    <FormField label="Phone" value={addressForm.contactPhone} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, contactPhone: value }))} error={addressErrors.contactPhone} theme={customerTheme.inputTheme} />
-                  </View>
-                  {authUser ? <PrimaryButton label="Save address" onPress={onSaveAddress} /> : null}
-                  {authUser ? <SecondaryButton label={authBusy ? 'Signing out...' : 'Sign out'} onPress={() => onSignOut()} loading={authBusy} disabled={authBusy} /> : null}
-                </SectionCard>
-              </View>
-            </View>
+                    <PrimaryButton label={authMode === 'signin' ? 'Sign in now' : 'Create account'} onPress={onAuthAction} loading={authBusy} disabled={authBusy} />
+
+                    {needsConfirmation ? (
+                      <View style={styles.moreInfoCard}>
+                        <Text style={styles.moreInfoTitle}>Confirm your email</Text>
+                        <FormField label="Verification code" value={confirmCode} onChangeText={onConfirmCodeChange} theme={customerTheme.inputTheme} />
+                        <PrimaryButton label="Confirm code" onPress={onConfirmCode} loading={authBusy} disabled={authBusy} />
+                      </View>
+                    ) : null}
+
+                    {signInChallenge === 'newPasswordRequired' ? (
+                      <View style={styles.moreInfoCard}>
+                        <Text style={styles.moreInfoTitle}>New password required</Text>
+                        <FormField label="New password" value={newPassword} onChangeText={onNewPasswordChange} error={authErrors.newPassword} secureTextEntry theme={customerTheme.inputTheme} />
+                        <PrimaryButton label="Update password" onPress={onCompleteNewPassword} loading={authBusy} disabled={authBusy} />
+                      </View>
+                    ) : null}
+                  </>
+                )}
+              </SectionCard>
+            ) : null}
           </ScrollView>
         </KeyboardAvoidingView>
       ) : null}
@@ -6523,15 +6924,16 @@ function StatusBanner({ tone, text }: { tone: BannerTone; text: string }) {
 
 function OperationPopup({ visible, tone, text, onClose }: { visible: boolean; tone: BannerTone; text: string; onClose: () => void }) {
   const isSuccess = tone === 'success';
+  const isInfo = tone === 'info';
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.operationPopupBackdrop} onPress={onClose}>
         <Pressable style={styles.operationPopupCard} onPress={() => undefined}>
-          <View style={[styles.operationPopupIconWrap, isSuccess ? styles.operationPopupIconSuccess : styles.operationPopupIconError]}>
-            <MaterialCommunityIcons name={isSuccess ? "check-circle" : "close-circle"} size={28} color="#FFFFFF" />
+          <View style={[styles.operationPopupIconWrap, isSuccess ? styles.operationPopupIconSuccess : isInfo ? styles.operationPopupIconInfo : styles.operationPopupIconError]}>
+            <MaterialCommunityIcons name={isSuccess ? "check-circle" : isInfo ? "information" : "close-circle"} size={28} color="#FFFFFF" />
           </View>
-          <Text style={styles.operationPopupTitle}>{isSuccess ? 'Success' : 'Action failed'}</Text>
+          <Text style={styles.operationPopupTitle}>{isSuccess ? 'Success' : isInfo ? 'Notice' : 'Action failed'}</Text>
           <Text style={styles.operationPopupBody}>{text}</Text>
           <SecondaryButton label="Done" tone="contrast" onPress={onClose} />
         </Pressable>
@@ -7716,6 +8118,108 @@ const styles = StyleSheet.create({
   customerWorkspace: {
     flex: 1,
     gap: 16,
+  },
+  moreHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  moreAvatarWrap: {
+    width: 62,
+    height: 62,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EAF6EE',
+    borderWidth: 1,
+    borderColor: '#CFE5D7',
+  },
+  moreSectionLabelRow: {
+    marginTop: 4,
+  },
+  moreSectionLabel: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  moreOptionRow: {
+    minHeight: 64,
+    borderRadius: 16,
+    backgroundColor: '#F7FBF8',
+    borderWidth: 1,
+    borderColor: '#DDEADF',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  moreOptionRowPressed: {
+    opacity: 0.86,
+  },
+  moreOptionIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E8F4EC',
+  },
+  moreOptionTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  moreOptionDescription: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 1,
+  },
+  moreInfoCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#D8E8DC',
+    backgroundColor: '#F7FBF8',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  moreInfoTitle: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  moreInfoBody: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  moreStatsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  moreStatCard: {
+    flex: 1,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#D8E8DC',
+    backgroundColor: '#F7FBF8',
+    paddingHorizontal: 10,
+    paddingVertical: 11,
+    gap: 2,
+  },
+  moreStatValue: {
+    color: colors.primary,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  moreStatLabel: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: '700',
   },
   customerTabScroll: {
     flex: 1,
@@ -10220,6 +10724,9 @@ const styles = StyleSheet.create({
   },
   operationPopupIconSuccess: {
     backgroundColor: colors.success,
+  },
+  operationPopupIconInfo: {
+    backgroundColor: colors.primary,
   },
   operationPopupIconError: {
     backgroundColor: '#D64545',

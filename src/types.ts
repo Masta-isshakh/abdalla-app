@@ -8,7 +8,7 @@ export type ItemKind = 'service' | 'product';
 
 export type CatalogApprovalStatus = 'draft' | 'pending' | 'approved' | 'rejected';
 
-export type LoyaltyScope = 'admin' | 'company';             
+export type LoyaltyScope = 'admin' | 'company';                                                                                       
 
 export type NotificationAudience = 'admin' | 'company' | 'customer';
 
@@ -106,6 +106,33 @@ export interface CompanyInvitation {
   emailDeliveryStatus: 'pending' | 'sent' | 'failed';
   emailDeliveryError?: string;
   emailSentAtLabel?: string;
+}
+
+export type SupportRequestType = 'contact' | 'feedback';
+
+export type SupportRequestStatus = 'new' | 'inReview' | 'resolved';
+
+export interface SupportRequest {
+  id: string;
+  requestType: SupportRequestType;
+  category: string;
+  requesterName: string;
+  requesterEmail: string;
+  requesterPhone: string;
+  subject: string;
+  message: string;
+  status: SupportRequestStatus;
+  createdAtLabel: string;
+}
+
+export interface SupportRequestDraft {
+  requestType: SupportRequestType;
+  category: string;
+  requesterName: string;
+  requesterEmail: string;
+  requesterPhone: string;
+  subject?: string;
+  message: string;
 }
 
 export interface CatalogItem {
