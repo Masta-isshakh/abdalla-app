@@ -5507,7 +5507,7 @@ function CustomerWorkspace({
 
                     {authMode === 'signin' ? (
                       <>
-                        <FormField label="Email" value={signInForm.email} onChangeText={(value) => onSignInFormChange((current) => ({ ...current, email: value }))} error={authErrors.email} theme={customerTheme.inputTheme} />
+                        <FormField label="Email or Username" value={signInForm.email} onChangeText={(value) => onSignInFormChange((current) => ({ ...current, email: value }))} error={authErrors.email} theme={customerTheme.inputTheme} />
                         <FormField label="Password" value={signInForm.password} onChangeText={(value) => onSignInFormChange((current) => ({ ...current, password: value }))} error={authErrors.password} secureTextEntry theme={customerTheme.inputTheme} />
                       </>
                     ) : (
@@ -6658,7 +6658,7 @@ function validateLoyaltyDraft(draft: { title: string; description: string; point
 
 function validateSignInDraft(draft: { email: string; password: string }) {
   const errors: ValidationMap = {};
-  if (!isEmail(draft.email)) errors.email = 'Use a valid email address.';
+  if (!draft.email.trim()) errors.email = 'Email or username is required.';
   if (!draft.password.trim()) errors.password = 'Password is required.';
   return errors;
 }

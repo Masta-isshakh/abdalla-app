@@ -224,6 +224,10 @@ function normalizeText(value?: string) {
   return (value ?? '').trim().toLowerCase();
 }
 
+function isLikelyEmail(value: string) {
+  return value.includes('@');
+}
+
 function formatAddress(address: Address) {
   return [address.area, address.street, address.building, address.unitNumber].filter(Boolean).join(', ');
 }
@@ -678,7 +682,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const attributes = await fetchUserAttributes();
       const tokenGroups = session.tokens?.idToken?.payload?.['cognito:groups'];
       const nextGroups = Array.isArray(tokenGroups)
-        ? tokenGroups.filter((entry): entry is string => typeof entry === 'string')
+        ? tokenGroups
+            .filter((entry): entry is string => typeof entry === 'string')
+            .map((entry) => entry.trim().toLowerCase())
         : [];
       const nextAuthUser: AuthUser = {
         userId: currentUser.userId,
@@ -815,17 +821,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setAuthMessage('');
     setSignInChallenge('none');
     try {
-      const normalizedEmail = email.trim().toLowerCase();
-      const response = await signIn({ username: normalizedEmail, password });
+      const identifier = email.trim();
+      const identifierCandidates = Array.from(new Set([
+        identifier,
+        isLikelyEmail(identifier) ? identifier.toLowerCase() : identifier,
+      ].filter(Boolean)));
+
+      let response: Awaited<ReturnType<typeof signIn>> | null = null;
+      let lastError: unknown = null;
+
+      for (const candidate of identifierCandidates) {
+        try {
+          response = await signIn({ username: candidate, password });
+          break;
+        } catch (error) {
+          lastError = error;
+          const message = error instanceof Error ? error.message : String(error);
+          const isRetryableIdentifierMismatch = /User does not exist|Incorrect username|Unable to verify secret hash|NotAuthorizedException/i.test(message);
+          if (!isRetryableIdentifierMismatch || candidate === identifierCandidates[identifierCandidates.length - 1]) {
+            throw error;
+          }
+        }
+      }
+
+      if (!response) {
+        throw (lastError instanceof Error ? lastError : new Error('Unable to sign in.'));
+      }
+
       if (!response.isSignedIn) {
         if (response.nextStep.signInStep === 'CONFIRM_SIGN_UP') {
-          setPendingEmail(normalizedEmail);
+          setPendingEmail(identifier);
           setNeedsConfirmation(true);
           throw new Error('Confirm your email before signing in.');
         }
 
         if (response.nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
-          setPendingEmail(normalizedEmail);
+          setPendingEmail(identifier);
           setSignInChallenge('newPasswordRequired');
           setAuthMessage('Set a new password to finish signing in.');
           return;
