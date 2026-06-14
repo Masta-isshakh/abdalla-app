@@ -69,21 +69,25 @@ const CUSTOM_MUTATION_DOCUMENTS: Record<string, string> = {
   `,
 };
 
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
+function isUsefulErrorMessage(message: unknown): message is string {
+  return typeof message === 'string' && !!message.trim() && !/^an unknown error has occurred\.?$/i.test(message.trim());
+}
 
+function toErrorMessage(error: unknown): string {
   if (!error || typeof error !== 'object') {
     return 'Mutation failed.';
   }
 
   const candidate = error as {
     message?: unknown;
+    errorMessage?: unknown;
+    code?: unknown;
+    name?: unknown;
     errors?: Array<{ message?: unknown }>;
     cause?: unknown;
     originalError?: unknown;
     recoverySuggestion?: unknown;
+    underlyingError?: unknown;
   };
 
   const graphQlMessages = Array.isArray(candidate.errors)
@@ -96,11 +100,15 @@ function toErrorMessage(error: unknown): string {
     return graphQlMessages.join(' | ');
   }
 
-  if (typeof candidate.message === 'string' && candidate.message.trim()) {
+  if (isUsefulErrorMessage(candidate.message)) {
     return candidate.message;
   }
 
-  const nestedMessage = [candidate.cause, candidate.originalError]
+  if (isUsefulErrorMessage(candidate.errorMessage)) {
+    return candidate.errorMessage;
+  }
+
+  const nestedMessage = [candidate.cause, candidate.originalError, candidate.underlyingError]
     .map((entry) => toErrorMessage(entry))
     .find((entry) => entry && entry !== 'Mutation failed.');
 
@@ -108,8 +116,20 @@ function toErrorMessage(error: unknown): string {
     return nestedMessage;
   }
 
-  if (typeof candidate.recoverySuggestion === 'string' && candidate.recoverySuggestion.trim()) {
+  if (typeof candidate.message === 'string' && candidate.message.trim()) {
+    return candidate.message;
+  }
+
+  if (isUsefulErrorMessage(candidate.recoverySuggestion)) {
     return candidate.recoverySuggestion;
+  }
+
+  if (isUsefulErrorMessage(candidate.code)) {
+    return String(candidate.code);
+  }
+
+  if (isUsefulErrorMessage(candidate.name)) {
+    return String(candidate.name);
   }
 
   try {
@@ -228,6 +248,28 @@ function normalizeText(value?: string) {
 
 function isLikelyEmail(value: string) {
   return value.includes('@');
+}
+
+function normalizePhoneNumber(value: string) {
+  const compact = value.trim().replace(/[\s\-()]/g, '');
+  if (!compact) {
+    return '';
+  }
+
+  if (/^\+\d{8,15}$/.test(compact)) {
+    return compact;
+  }
+
+  const digits = compact.replace(/\D/g, '');
+  if (digits.length === 8) {
+    return `+974${digits}`;
+  }
+
+  if (digits.length >= 8 && digits.length <= 15) {
+    return `+${digits}`;
+  }
+
+  return '';
 }
 
 function formatAddress(address: Address) {
@@ -1007,7 +1049,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       throw new Error(`Sign-in step ${nextStepName} not yet supported. Please try again.`);
     } catch (error) {
-      setAuthMessage(error instanceof Error ? error.message : 'Unable to sign in.');
+      setAuthMessage(toErrorMessage(error));
       throw error;
     } finally {
       setBusy(false);
@@ -1048,7 +1090,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setNeedsConfirmation(false);
       await refreshAuthUser();
     } catch (error) {
-      setAuthMessage(error instanceof Error ? error.message : 'Unable to set a new password.');
+      setAuthMessage(toErrorMessage(error));
       throw error;
     } finally {
       setBusy(false);
@@ -1062,19 +1104,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setRequiredSignInAttributes([]);
     try {
       const normalizedEmail = payload.email.trim().toLowerCase();
+      const normalizedPhone = normalizePhoneNumber(payload.phone);
 
       if (MANUAL_ADMIN_EMAILS.includes(normalizedEmail)) {
         setAuthMessage('Admin accounts are created manually. Use sign in with the admin credentials instead.');
         return;
       }
 
-      const response = await signUp({ username: normalizedEmail, password: payload.password, options: { userAttributes: { email: normalizedEmail, name: payload.fullName } } });
+      if (!normalizedPhone) {
+        throw new Error('Use a valid phone number with country code, for example +97455551234.');
+      }
+
+      const response = await signUp({
+        username: normalizedEmail,
+        password: payload.password,
+        options: {
+          userAttributes: {
+            email: normalizedEmail,
+            name: payload.fullName.trim(),
+            phone_number: normalizedPhone,
+          },
+          clientMetadata: {
+            appRole: 'customer',
+          },
+        },
+      });
       setPendingEmail(normalizedEmail);
       setNeedsConfirmation(response.nextStep.signUpStep !== 'DONE');
-      setProfile((current: UserProfile) => ({ ...current, fullName: payload.fullName, email: normalizedEmail, phone: payload.phone }));
+      setProfile((current: UserProfile) => ({ ...current, fullName: payload.fullName, email: normalizedEmail, phone: normalizedPhone }));
       setAuthMessage('Account created. Enter the email verification code.');
     } catch (error) {
-      setAuthMessage(error instanceof Error ? error.message : 'Unable to create account.');
+      setAuthMessage(toErrorMessage(error));
       throw error;
     } finally {
       setBusy(false);
@@ -1109,7 +1169,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setNeedsConfirmation(false);
       setAuthMessage('Email verified. You can sign in now.');
     } catch (error) {
-      setAuthMessage(error instanceof Error ? error.message : 'Unable to confirm your code.');
+      setAuthMessage(toErrorMessage(error));
       throw error;
     } finally {
       setBusy(false);

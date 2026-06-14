@@ -6634,19 +6634,18 @@ function formatOtpFailure(prefix: string, error: unknown) {
 }
 
 function getDisplayErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-
   const authError = error as any;
-  const message = [
-    authError?.message,
+  const messages = [
     authError?.errorMessage,
     authError?.cause?.message,
     authError?.underlyingError?.message,
+    authError?.errors?.[0]?.message,
+    authError?.message,
     authError?.name,
     authError?.code,
-  ].find((entry) => typeof entry === 'string' && entry.trim());
+  ].filter((entry) => typeof entry === 'string' && entry.trim()) as string[];
+
+  const message = messages.find((entry) => !/^an unknown error has occurred\.?$/i.test(entry.trim())) ?? messages[0];
 
   if (typeof message === 'string' && message.trim()) {
     return message;
