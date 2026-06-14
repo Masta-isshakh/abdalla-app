@@ -204,6 +204,7 @@ function WorkspaceScreen() {
     supportRequests,
     needsConfirmation,
     signInChallenge,
+    requiredSignInAttributes,
     offerPromotions,
     availabilitySlots,
     placeBooking,
@@ -273,6 +274,7 @@ function WorkspaceScreen() {
   const [signUpForm, setSignUpForm] = useState({ fullName: '', email: '', password: '', phone: '' });
   const [confirmCode, setConfirmCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [newPasswordAttributes, setNewPasswordAttributes] = useState<Record<string, string>>({});
 
   const [profileForm, setProfileForm] = useState<UserProfile>(profile);
   const [addressForm, setAddressForm] = useState<Address>(addresses[0] ?? emptyAddress());
@@ -1729,21 +1731,52 @@ function WorkspaceScreen() {
 
   async function handleCompleteNewPassword() {
     const trimmedPassword = newPassword.trim();
+    const attributeValues: Record<string, string> = {};
+    const attributeErrors: ValidationMap = {};
+
     if (trimmedPassword.length < 8) {
       setAuthErrors((current) => ({ ...current, newPassword: 'New password must be at least 8 characters.' }));
       setCustomerBanner({ tone: 'error', text: 'Enter a valid new password to complete sign-in.' });
       return;
     }
 
+    requiredSignInAttributes.forEach((attribute) => {
+      const value = (newPasswordAttributes[attribute] ?? getDefaultSignInAttributeValue(attribute, signInForm.email, profileForm)).trim();
+      attributeValues[attribute] = value;
+
+      if (!value) {
+        attributeErrors[getSignInAttributeErrorKey(attribute)] = `${getSignInAttributeLabel(attribute)} is required.`;
+        return;
+      }
+
+      if (attribute === 'email' && !isEmail(value)) {
+        attributeErrors[getSignInAttributeErrorKey(attribute)] = 'Use a valid email address.';
+      }
+
+      if (attribute === 'phone_number' && value.replace(/[^0-9+]/g, '').length < 7) {
+        attributeErrors[getSignInAttributeErrorKey(attribute)] = 'Use a valid phone number with country code.';
+      }
+    });
+
+    if (Object.keys(attributeErrors).length) {
+      setAuthErrors((current) => ({ ...current, ...attributeErrors }));
+      setCustomerBanner({ tone: 'error', text: 'Complete the required account details to finish sign-in.' });
+      return;
+    }
+
     startGlobalLoading('Updating password...');
     try {
-      await completeNewPassword(trimmedPassword);
+      await completeNewPassword(trimmedPassword, attributeValues);
       setAuthErrors((current) => {
         const next = { ...current };
         delete next.newPassword;
+        requiredSignInAttributes.forEach((attribute) => {
+          delete next[getSignInAttributeErrorKey(attribute)];
+        });
         return next;
       });
       setNewPassword('');
+      setNewPasswordAttributes({});
       setCustomerBanner({ tone: 'success', text: 'Password updated. You are now signed in.' });
     } catch (error) {
       setCustomerBanner({ tone: 'error', text: getDisplayErrorMessage(error, 'Unable to set a new password.') });
@@ -1951,7 +1984,7 @@ function WorkspaceScreen() {
               tab={customerTab}
               onTabChange={requestCustomerTabChange}
               authUser={authUser}
-              currentUserRole={currentUserRecord?.role ?? 'customer'}
+              currentUserRole={currentUserRecord?.role ?? (activeRole === 'guest' ? 'customer' : activeRole)}
               companies={companies}
               categorySettings={appCategorySettings}
               marketplaceItems={marketplaceItems}
@@ -1996,8 +2029,11 @@ function WorkspaceScreen() {
               onConfirmCodeChange={setConfirmCode}
               needsConfirmation={needsConfirmation}
               signInChallenge={signInChallenge}
+              requiredSignInAttributes={requiredSignInAttributes}
               newPassword={newPassword}
               onNewPasswordChange={setNewPassword}
+              newPasswordAttributes={newPasswordAttributes}
+              onNewPasswordAttributeChange={setNewPasswordAttributes}
               onAuthAction={handleAuthAction}
               onConfirmCode={handleConfirmCode}
               onCompleteNewPassword={handleCompleteNewPassword}
@@ -4169,8 +4205,11 @@ type CustomerWorkspaceProps = {
   onConfirmCodeChange: (value: string) => void;
   needsConfirmation: boolean;
   signInChallenge: 'none' | 'newPasswordRequired';
+  requiredSignInAttributes: string[];
   newPassword: string;
   onNewPasswordChange: (value: string) => void;
+  newPasswordAttributes: Record<string, string>;
+  onNewPasswordAttributeChange: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   onAuthAction: () => void;
   onConfirmCode: () => void;
   onCompleteNewPassword: () => void;
@@ -4233,8 +4272,11 @@ function CustomerWorkspace({
   onConfirmCodeChange,
   needsConfirmation,
   signInChallenge,
+  requiredSignInAttributes,
   newPassword,
   onNewPasswordChange,
+  newPasswordAttributes,
+  onNewPasswordAttributeChange,
   onAuthAction,
   onConfirmCode,
   onCompleteNewPassword,
@@ -5532,7 +5574,21 @@ function CustomerWorkspace({
                     {signInChallenge === 'newPasswordRequired' ? (
                       <View style={styles.moreInfoCard}>
                         <Text style={styles.moreInfoTitle}>New password required</Text>
+                        {requiredSignInAttributes.length ? (
+                          <Text style={styles.moreInfoBody}>Cognito also needs these account details before this manually-created user can sign in.</Text>
+                        ) : null}
                         <FormField label="New password" value={newPassword} onChangeText={onNewPasswordChange} error={authErrors.newPassword} secureTextEntry theme={customerTheme.inputTheme} />
+                        {requiredSignInAttributes.map((attribute) => (
+                          <FormField
+                            key={attribute}
+                            label={getSignInAttributeLabel(attribute)}
+                            value={newPasswordAttributes[attribute] ?? getDefaultSignInAttributeValue(attribute, signInForm.email, profileForm)}
+                            onChangeText={(value) => onNewPasswordAttributeChange((current) => ({ ...current, [attribute]: value }))}
+                            error={authErrors[getSignInAttributeErrorKey(attribute)]}
+                            placeholder={getSignInAttributePlaceholder(attribute)}
+                            theme={customerTheme.inputTheme}
+                          />
+                        ))}
                         <PrimaryButton label="Update password" onPress={onCompleteNewPassword} loading={authBusy} disabled={authBusy} />
                       </View>
                     ) : null}
@@ -6601,6 +6657,35 @@ function getDisplayErrorMessage(error: unknown, fallback: string) {
   }
 
   return fallback;
+}
+
+function getSignInAttributeErrorKey(attribute: string) {
+  return `newPasswordAttribute:${attribute}`;
+}
+
+function getSignInAttributeLabel(attribute: string) {
+  if (attribute === 'phone_number') return 'Phone number';
+  if (attribute === 'email') return 'Email';
+  if (attribute === 'name') return 'Full name';
+
+  return attribute
+    .replace(/^custom:/, '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function getSignInAttributePlaceholder(attribute: string) {
+  if (attribute === 'phone_number') return '+97455551234';
+  if (attribute === 'email') return 'name@example.com';
+  if (attribute === 'name') return 'Full name';
+  return undefined;
+}
+
+function getDefaultSignInAttributeValue(attribute: string, signInIdentifier: string, profile: UserProfile) {
+  if (attribute === 'email' && isEmail(signInIdentifier)) return signInIdentifier.trim().toLowerCase();
+  if (attribute === 'name') return profile.fullName;
+  if (attribute === 'phone_number') return profile.phone;
+  return '';
 }
 
 function isHexColor(value: string) {

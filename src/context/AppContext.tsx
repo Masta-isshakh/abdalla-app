@@ -165,6 +165,7 @@ interface AppContextValue {
   authMessage: string;
   needsConfirmation: boolean;
   signInChallenge: 'none' | 'newPasswordRequired';
+  requiredSignInAttributes: string[];
   activeRole: AppRole;
   profile: UserProfile;
   addresses: Address[];
@@ -172,6 +173,7 @@ interface AppContextValue {
   companies: Company[];
   appCategorySettings: AppCategorySetting[];
   invitations: CompanyInvitation[];
+  supportRequests: SupportRequest[];
   catalogItems: CatalogItem[];
   offerPromotions: OfferPromotion[];
   notifications: AppNotification[];
@@ -184,7 +186,7 @@ interface AppContextValue {
   currentCompany: Company | null;
   marketplaceItems: CatalogItem[];
   signInWithEmail: (email: string, password: string) => Promise<void>;
-  completeNewPassword: (newPassword: string) => Promise<void>;
+  completeNewPassword: (newPassword: string, attributes?: Record<string, string>) => Promise<void>;
   signUpWithEmail: (payload: SignUpPayload) => Promise<void>;
   confirmEmailCode: (code: string) => Promise<void>;
   signOutCurrentUser: () => Promise<void>;
@@ -230,6 +232,40 @@ function isLikelyEmail(value: string) {
 
 function formatAddress(address: Address) {
   return [address.area, address.street, address.building, address.unitNumber].filter(Boolean).join(', ');
+}
+
+function companyMatchesEmail(company: Pick<Company, 'ownerEmail' | 'supportEmail'>, email: string) {
+  const normalizedEmail = normalizeText(email);
+  return normalizeText(company.ownerEmail) === normalizedEmail || normalizeText(company.supportEmail) === normalizedEmail;
+}
+
+function displayNameFromEmail(email: string) {
+  const localPart = email.split('@')[0] || 'Company';
+  return localPart
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ') || 'Company';
+}
+
+function toCompanyRecord(entry: any): Company {
+  const name = entry.name ?? displayNameFromEmail(entry.supportEmail ?? entry.ownerEmail ?? 'company@jahzeen.app');
+
+  return {
+    id: entry.id,
+    name,
+    slug: entry.slug ?? slugify(name),
+    description: entry.description ?? 'Partner workspace',
+    category: entry.category ?? APP_DEFAULT_COMPANY_CATEGORY,
+    supportEmail: entry.supportEmail ?? entry.ownerEmail ?? '',
+    supportPhone: entry.supportPhone ?? '',
+    accentColor: entry.accentColor ?? '#0F7B45',
+    logoText: entry.logoText ?? name.slice(0, 2).toUpperCase(),
+    profileImageUrl: entry.profileImageUrl ?? '',
+    ownerEmail: entry.ownerEmail ?? entry.supportEmail ?? '',
+    isActive: !!entry.isActive,
+    createdAtLabel: entry.createdAtLabel ?? nowLabel(),
+  };
 }
 
 function nowLabel() {
@@ -278,6 +314,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [authMessage, setAuthMessage] = useState('');
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
   const [signInChallenge, setSignInChallenge] = useState<'none' | 'newPasswordRequired'>('none');
+  const [requiredSignInAttributes, setRequiredSignInAttributes] = useState<string[]>([]);
   const [pendingEmail, setPendingEmail] = useState('');
   const [profile, setProfile] = useState<UserProfile>(starterProfile);
   const [addresses, setAddresses] = useState<Address[]>([starterAddress]);
@@ -406,10 +443,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const currentCompany = useMemo(() => {
     if (!currentUserRecord?.companyId) {
+      const normalizedEmail = authUser?.email.toLowerCase() ?? '';
+      if (normalizedEmail && authGroups.includes('company')) {
+        return companies.find((entry) => companyMatchesEmail(entry, normalizedEmail)) ?? null;
+      }
+
       return null;
     }
     return companies.find((entry) => entry.id === currentUserRecord.companyId) ?? null;
-  }, [companies, currentUserRecord]);
+  }, [authGroups, authUser, companies, currentUserRecord]);
 
   const marketplaceItems = useMemo(
     () => catalogItems.filter((item) => item.isPublished && item.approvalStatus === 'approved' && companies.find((entry) => entry.id === item.companyId)?.isActive),
@@ -595,28 +637,104 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await safeCreate('AuditEvent', { ...event, metadata: JSON.stringify(event.metadata) });
   }
 
-  async function ensureUserRecord(nextAuthUser: AuthUser) {
+  function resolveRoleFromGroups(groups: string[], email: string, fallback: AppUserRecord['role'] = 'customer') {
+    if (groups.includes('admin') || MANUAL_ADMIN_EMAILS.includes(email)) {
+      return 'admin';
+    }
+
+    if (groups.includes('company')) {
+      return 'company';
+    }
+
+    if (groups.includes('customer')) {
+      return 'customer';
+    }
+
+    return fallback;
+  }
+
+  async function ensureCompanyWorkspaceForEmail(email: string) {
+    const normalizedEmail = email.trim().toLowerCase();
+    const localCompany = companies.find((entry) => companyMatchesEmail(entry, normalizedEmail));
+
+    if (localCompany) {
+      return localCompany;
+    }
+
+    const remoteCompanies = await safeList('Company');
+    const normalizedRemoteCompanies: Company[] = (remoteCompanies as any[]).map(toCompanyRecord);
+    const remoteCompany = normalizedRemoteCompanies.find((entry) => companyMatchesEmail(entry, normalizedEmail));
+
+    if (normalizedRemoteCompanies.length) {
+      setCompanies((current) => {
+        const currentIds = new Set(current.map((entry) => entry.id));
+        const missingCompanies = normalizedRemoteCompanies.filter((entry) => !currentIds.has(entry.id));
+        return missingCompanies.length ? [...missingCompanies, ...current] : current;
+      });
+    }
+
+    if (remoteCompany) {
+      return remoteCompany;
+    }
+
+    const fallbackName = `${displayNameFromEmail(normalizedEmail)} Workspace`;
+    const fallbackCompany: Company = {
+      id: `company-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: fallbackName,
+      slug: slugify(fallbackName),
+      description: 'Company workspace created for a manually provisioned Cognito company user.',
+      category: APP_DEFAULT_COMPANY_CATEGORY,
+      supportEmail: normalizedEmail,
+      supportPhone: '',
+      accentColor: '#0F7B45',
+      logoText: fallbackName.slice(0, 2).toUpperCase(),
+      profileImageUrl: '',
+      ownerEmail: normalizedEmail,
+      isActive: true,
+      createdAtLabel: nowLabel(),
+    };
+
+    setCompanies((current) => [fallbackCompany, ...current]);
+    await safeCreate('Company', { ...fallbackCompany });
+    return fallbackCompany;
+  }
+
+  async function ensureUserRecord(nextAuthUser: AuthUser, groups: string[]) {
     const email = nextAuthUser.email.trim().toLowerCase();
     const existingUser = users.find((entry) => entry.email.toLowerCase() === email);
     const matchingInvitation = invitations.find((entry) => entry.email.toLowerCase() === email && entry.status === 'pending');
+    const targetRole = resolveRoleFromGroups(groups, email, matchingInvitation ? 'company' : existingUser?.role ?? 'customer');
+    let companyId = matchingInvitation?.companyId ?? existingUser?.companyId;
+    let companyName = matchingInvitation?.companyName ?? existingUser?.companyName;
+    let invitedByEmail = matchingInvitation?.invitedByEmail ?? existingUser?.invitedByEmail;
+
+    if (targetRole === 'company' && !companyId) {
+      const company = await ensureCompanyWorkspaceForEmail(email);
+      companyId = company.id;
+      companyName = company.name;
+    }
 
     if (existingUser) {
-      if (matchingInvitation || existingUser.status !== 'active') {
-        const nextRole = MANUAL_ADMIN_EMAILS.includes(email) ? 'admin' : matchingInvitation ? 'company' : existingUser.role;
-        const nextCompanyId = matchingInvitation?.companyId ?? existingUser.companyId;
-        const nextCompanyName = matchingInvitation?.companyName ?? existingUser.companyName;
-        const nextInvitedByEmail = matchingInvitation?.invitedByEmail ?? existingUser.invitedByEmail;
+      const shouldUpdateUser =
+        matchingInvitation ||
+        existingUser.status !== 'active' ||
+        existingUser.fullName !== nextAuthUser.fullName ||
+        existingUser.role !== targetRole ||
+        existingUser.companyId !== companyId ||
+        existingUser.companyName !== companyName ||
+        existingUser.invitedByEmail !== invitedByEmail;
 
+      if (shouldUpdateUser) {
         setUsers((current) =>
           current.map((entry) =>
             entry.id === existingUser.id
               ? {
                   ...entry,
                   fullName: nextAuthUser.fullName,
-                  role: nextRole,
-                  companyId: nextCompanyId,
-                  companyName: nextCompanyName,
-                  invitedByEmail: nextInvitedByEmail,
+                  role: targetRole,
+                  companyId,
+                  companyName,
+                  invitedByEmail,
                   status: 'active',
                 }
               : entry,
@@ -625,10 +743,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         await safeUpdate('AppUser', {
           id: existingUser.id,
           fullName: nextAuthUser.fullName,
-          role: nextRole,
-          companyId: nextCompanyId,
-          companyName: nextCompanyName,
-          invitedByEmail: nextInvitedByEmail,
+          role: targetRole,
+          companyId,
+          companyName,
+          invitedByEmail,
           status: 'active',
         });
 
@@ -643,20 +761,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    let role: AppUserRecord['role'] = 'customer';
-    let companyId: string | undefined;
-    let companyName: string | undefined;
-    let invitedByEmail: string | undefined;
-
-    if (MANUAL_ADMIN_EMAILS.includes(email)) {
-      role = 'admin';
-    } else if (matchingInvitation) {
-      role = 'company';
-      companyId = matchingInvitation.companyId;
-      companyName = matchingInvitation.companyName;
-      invitedByEmail = matchingInvitation.invitedByEmail;
+    if (matchingInvitation) {
       setInvitations((current) => current.map((entry) => (entry.id === matchingInvitation.id ? { ...entry, status: 'accepted' } : entry)));
       setCompanies((current) => current.map((entry) => (entry.id === matchingInvitation.companyId ? { ...entry, ownerEmail: email } : entry)));
+      await safeUpdate('CompanyInvitation', { id: matchingInvitation.id, status: 'accepted' });
+      await safeUpdate('Company', { id: matchingInvitation.companyId, ownerEmail: email });
     }
 
     const newUser: AppUserRecord = {
@@ -664,7 +773,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       email,
       fullName: nextAuthUser.fullName,
       phone: profile.phone,
-      role,
+      role: targetRole,
       companyId,
       companyName,
       invitedByEmail,
@@ -685,7 +794,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ? tokenGroups
             .filter((entry): entry is string => typeof entry === 'string')
             .map((entry) => entry.trim().toLowerCase())
-        : [];
+        : typeof tokenGroups === 'string'
+          ? [tokenGroups.trim().toLowerCase()].filter(Boolean)
+          : [];
       const nextAuthUser: AuthUser = {
         userId: currentUser.userId,
         email: attributes.email ?? '',
@@ -694,13 +805,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setAuthUser(nextAuthUser);
       setAuthGroups(nextGroups);
       setSignInChallenge('none');
+      setRequiredSignInAttributes([]);
       setProfile((current: UserProfile) => ({ ...current, fullName: nextAuthUser.fullName || current.fullName, email: nextAuthUser.email || current.email }));
-      await ensureUserRecord(nextAuthUser);
+      await ensureUserRecord(nextAuthUser, nextGroups);
       setAuthMessage('');
     } catch {
       setAuthUser(null);
       setAuthGroups([]);
       setSignInChallenge('none');
+      setRequiredSignInAttributes([]);
     }
   }
 
@@ -728,7 +841,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setUsers(remoteUsers.map((entry: any) => ({ id: entry.id, email: entry.email, fullName: entry.fullName, phone: entry.phone ?? '', role: entry.role, companyId: entry.companyId ?? undefined, companyName: entry.companyName ?? undefined, invitedByEmail: entry.invitedByEmail ?? undefined, status: entry.status })));
       }
       if (remoteCompanies.length) {
-        setCompanies(remoteCompanies.map((entry: any) => ({ id: entry.id, name: entry.name, slug: entry.slug, description: entry.description ?? '', category: entry.category ?? APP_DEFAULT_COMPANY_CATEGORY, supportEmail: entry.supportEmail, supportPhone: entry.supportPhone ?? '', accentColor: entry.accentColor ?? '#0F7B45', logoText: entry.logoText ?? entry.name.slice(0, 2).toUpperCase(), profileImageUrl: entry.profileImageUrl ?? '', ownerEmail: entry.ownerEmail ?? '', isActive: !!entry.isActive, createdAtLabel: entry.createdAtLabel ?? nowLabel() })));
+        const normalizedRemoteCompanies: Company[] = (remoteCompanies as any[]).map(toCompanyRecord);
+        setCompanies((current) => {
+          const remoteIds = new Set(normalizedRemoteCompanies.map((entry) => entry.id));
+          const localOnlyCompanies = current.filter((entry) => !remoteIds.has(entry.id));
+          return [...normalizedRemoteCompanies, ...localOnlyCompanies];
+        });
       }
       if (remoteCategorySettings.length) {
         setAppCategorySettings(remoteCategorySettings.map((entry: any) => ({ id: entry.id, category: entry.category, isComingSoon: !!entry.isComingSoon })));
@@ -820,6 +938,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setBusy(true);
     setAuthMessage('');
     setSignInChallenge('none');
+    setRequiredSignInAttributes([]);
     try {
       const identifier = email.trim();
       const identifierCandidates = Array.from(new Set([
@@ -862,12 +981,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         throw new Error('Sign-in could not be completed. Please try again.');
       }
 
-      const nextStepName = (nextStep.signInStep || nextStep.challengeName || '').toString();
+      const nextStepName = (nextStep.signInStep || (nextStep as { challengeName?: string }).challengeName || '').toString();
 
       // NEW_PASSWORD_REQUIRED challenge
       if (nextStepName === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED' || nextStepName === 'NEW_PASSWORD_REQUIRED') {
+        const missingAttributes = Array.isArray((nextStep as { missingAttributes?: unknown[] }).missingAttributes)
+          ? (nextStep as { missingAttributes: unknown[] }).missingAttributes
+              .filter((entry): entry is string => typeof entry === 'string')
+              .map((entry) => entry.trim())
+              .filter(Boolean)
+          : [];
         setPendingEmail(identifier);
         setSignInChallenge('newPasswordRequired');
+        setRequiredSignInAttributes(missingAttributes);
         setAuthMessage('Set a new password to finish signing in.');
         return;
       }
@@ -888,17 +1014,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  async function completeNewPassword(newPassword: string) {
+  async function completeNewPassword(newPassword: string, attributes: Record<string, string> = {}) {
     setBusy(true);
     setAuthMessage('');
     try {
-      const response = await confirmSignIn({ challengeResponse: newPassword.trim() });
+      const cleanedAttributes = Object.fromEntries(
+        Object.entries(attributes)
+          .map(([key, value]) => [key, value.trim()])
+          .filter(([, value]) => !!value),
+      ) as Record<string, string>;
+
+      const response = await confirmSignIn({
+        challengeResponse: newPassword.trim(),
+        options: Object.keys(cleanedAttributes).length ? { userAttributes: cleanedAttributes as any } : undefined,
+      });
 
       if (!response.isSignedIn) {
+        if (response.nextStep?.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
+          const missingAttributes = Array.isArray((response.nextStep as { missingAttributes?: unknown[] }).missingAttributes)
+            ? (response.nextStep as { missingAttributes: unknown[] }).missingAttributes
+                .filter((entry): entry is string => typeof entry === 'string')
+                .map((entry) => entry.trim())
+                .filter(Boolean)
+            : [];
+          setRequiredSignInAttributes(missingAttributes);
+        }
+
         throw new Error('Password update could not be completed. Try again.');
       }
 
       setSignInChallenge('none');
+      setRequiredSignInAttributes([]);
       setNeedsConfirmation(false);
       await refreshAuthUser();
     } catch (error) {
@@ -913,6 +1059,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setBusy(true);
     setAuthMessage('');
     setSignInChallenge('none');
+    setRequiredSignInAttributes([]);
     try {
       const normalizedEmail = payload.email.trim().toLowerCase();
 
@@ -980,6 +1127,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setPendingEmail('');
       setNeedsConfirmation(false);
       setSignInChallenge('none');
+      setRequiredSignInAttributes([]);
       if (signedOutEmail) {
         await createAuditEvent({ actorEmail: signedOutEmail, actorRole: activeRole === 'guest' ? 'system' : activeRole, entityType: 'auth', entityId: signedOutEmail, action: 'signOut', status: 'info', summary: 'User signed out of the workspace.' });
       }
@@ -1676,7 +1824,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, signInChallenge, activeRole, profile, addresses, users, companies, appCategorySettings, invitations, supportRequests, catalogItems, offerPromotions, notifications, auditEvents, bookings, availabilitySlots, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, signInWithEmail, completeNewPassword, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, reviewCatalogItem, deleteCatalogItem, saveOfferPromotion, reviewOfferPromotion, deleteOfferPromotion, markNotificationRead, submitSupportRequest, saveLoyaltyProgram, saveCategorySetting, saveAvailabilitySlot, deleteAvailabilitySlot, placeBooking, changeBookingStatus, submitRating }}>
+    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, signInChallenge, requiredSignInAttributes, activeRole, profile, addresses, users, companies, appCategorySettings, invitations, supportRequests, catalogItems, offerPromotions, notifications, auditEvents, bookings, availabilitySlots, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, signInWithEmail, completeNewPassword, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, reviewCatalogItem, deleteCatalogItem, saveOfferPromotion, reviewOfferPromotion, deleteOfferPromotion, markNotificationRead, submitSupportRequest, saveLoyaltyProgram, saveCategorySetting, saveAvailabilitySlot, deleteAvailabilitySlot, placeBooking, changeBookingStatus, submitRating }}>
       {children}
     </AppContext.Provider>
   );
