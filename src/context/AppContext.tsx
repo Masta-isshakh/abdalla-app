@@ -848,26 +848,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         throw (lastError instanceof Error ? lastError : new Error('Unable to sign in.'));
       }
 
-      if (!response.isSignedIn) {
-        if (response.nextStep.signInStep === 'CONFIRM_SIGN_UP') {
-          setPendingEmail(identifier);
-          setNeedsConfirmation(true);
-          throw new Error('Confirm your email before signing in.');
-        }
+      // Check if sign-in completed
+      if (response.isSignedIn) {
+        setNeedsConfirmation(false);
+        setSignInChallenge('none');
+        await refreshAuthUser();
+        return;
+      }
 
-        if (response.nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
-          setPendingEmail(identifier);
-          setSignInChallenge('newPasswordRequired');
-          setAuthMessage('Set a new password to finish signing in.');
-          return;
-        }
-
+      // Handle sign-in challenges
+      const nextStep = response.nextStep;
+      if (!nextStep) {
         throw new Error('Sign-in could not be completed. Please try again.');
       }
 
-      setNeedsConfirmation(false);
-      setSignInChallenge('none');
-      await refreshAuthUser();
+      // NEW_PASSWORD_REQUIRED challenge
+      if (nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
+        setPendingEmail(identifier);
+        setSignInChallenge('newPasswordRequired');
+        setAuthMessage('Set a new password to finish signing in.');
+        return;
+      }
+
+      // CONFIRM_SIGN_UP required
+      if (nextStep.signInStep === 'CONFIRM_SIGN_UP') {
+        setPendingEmail(identifier);
+        setNeedsConfirmation(true);
+        throw new Error('Please confirm your email before signing in.');
+      }
+
+      throw new Error(`Sign-in step ${nextStep.signInStep} not yet supported. Please try again.`);
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : 'Unable to sign in.');
       throw error;

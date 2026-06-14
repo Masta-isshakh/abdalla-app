@@ -5,7 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { confirmSignUp as confirmPhoneSignUp, resendSignUpCode, signUp as signUpWithPhoneOtp } from 'aws-amplify/auth';
+import { confirmSignUp, resendSignUpCode, signUp } from 'aws-amplify/auth';
 import {
   ActivityIndicator,
   Image,
@@ -1064,7 +1064,7 @@ function WorkspaceScreen() {
 
     startGlobalLoading('Sending SMS verification code...');
     try {
-      const signUpResult = await signUpWithPhoneOtp({
+      const signUpResult = await signUp({
         username: normalizedPhone,
         password: generateEphemeralPassword(),
         options: {
@@ -1142,7 +1142,7 @@ function WorkspaceScreen() {
     setPhoneVerificationBusy(true);
     startGlobalLoading('Verifying SMS code...');
     try {
-      await confirmPhoneSignUp({
+      await confirmSignUp({
         username,
         confirmationCode: phoneVerificationForm.code.trim(),
       });
