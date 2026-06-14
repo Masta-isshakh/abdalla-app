@@ -862,8 +862,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         throw new Error('Sign-in could not be completed. Please try again.');
       }
 
+      const nextStepName = (nextStep.signInStep || nextStep.challengeName || '').toString();
+
       // NEW_PASSWORD_REQUIRED challenge
-      if (nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
+      if (nextStepName === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED' || nextStepName === 'NEW_PASSWORD_REQUIRED') {
         setPendingEmail(identifier);
         setSignInChallenge('newPasswordRequired');
         setAuthMessage('Set a new password to finish signing in.');
@@ -871,13 +873,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
 
       // CONFIRM_SIGN_UP required
-      if (nextStep.signInStep === 'CONFIRM_SIGN_UP') {
+      if (nextStepName === 'CONFIRM_SIGN_UP' || nextStepName === 'CONFIRM_SIGN_UP_STEP') {
         setPendingEmail(identifier);
         setNeedsConfirmation(true);
         throw new Error('Please confirm your email before signing in.');
       }
 
-      throw new Error(`Sign-in step ${nextStep.signInStep} not yet supported. Please try again.`);
+      throw new Error(`Sign-in step ${nextStepName} not yet supported. Please try again.`);
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : 'Unable to sign in.');
       throw error;

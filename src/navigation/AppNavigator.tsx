@@ -1721,7 +1721,7 @@ function WorkspaceScreen() {
         });
       }
     } catch (error) {
-      setCustomerBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Authentication failed.' });
+      setCustomerBanner({ tone: 'error', text: getDisplayErrorMessage(error, 'Authentication failed.') });
     } finally {
       stopGlobalLoading();
     }
@@ -1746,7 +1746,7 @@ function WorkspaceScreen() {
       setNewPassword('');
       setCustomerBanner({ tone: 'success', text: 'Password updated. You are now signed in.' });
     } catch (error) {
-      setCustomerBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to set a new password.' });
+      setCustomerBanner({ tone: 'error', text: getDisplayErrorMessage(error, 'Unable to set a new password.') });
     } finally {
       stopGlobalLoading();
     }
@@ -1822,7 +1822,7 @@ function WorkspaceScreen() {
       setConfirmCode('');
       setCustomerBanner({ tone: 'success', text: 'Email confirmed. You can sign in now.' });
     } catch (error) {
-      setCustomerBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to confirm email.' });
+      setCustomerBanner({ tone: 'error', text: getDisplayErrorMessage(error, 'Unable to confirm email.') });
     } finally {
       stopGlobalLoading();
     }
@@ -6575,6 +6575,32 @@ function getAuthErrorDetails(error: unknown) {
 function formatOtpFailure(prefix: string, error: unknown) {
   const details = getAuthErrorDetails(error);
   return `${prefix} [${details.code}] ${details.message}`;
+}
+
+function getDisplayErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  const authError = error as any;
+  const message = [
+    authError?.message,
+    authError?.errorMessage,
+    authError?.cause?.message,
+    authError?.underlyingError?.message,
+    authError?.name,
+    authError?.code,
+  ].find((entry) => typeof entry === 'string' && entry.trim());
+
+  if (typeof message === 'string' && message.trim()) {
+    return message;
+  }
+
+  if (typeof error === 'string' && error.trim()) {
+    return error;
+  }
+
+  return fallback;
 }
 
 function isHexColor(value: string) {
