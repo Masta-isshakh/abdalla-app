@@ -5,7 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { confirmSignUp, resendSignUpCode, signUp } from 'aws-amplify/auth';
+import { autoSignIn, confirmSignUp, resendSignUpCode, signIn, signUp } from 'aws-amplify/auth';
 import {
   ActivityIndicator,
   Image,
@@ -90,6 +90,7 @@ const tableToneFilterMemory: Record<string, 'all' | 'error' | 'warning' | 'succe
 const TABLE_TONE_FILTER_STORAGE_PREFIX = 'jahzeen-table-tone-filter:';
 const CUSTOMER_FILTER_STORAGE_PREFIX = 'jahzeen-customer-filters:';
 const CUSTOMER_ONBOARDING_STORAGE_KEY = 'jahzeen-customer-onboarding:v1';
+const PHONE_OTP_PASSWORD_STORAGE_PREFIX = 'jahzeen-phone-otp-password:';
 const DEFAULT_MAP_PIN = { latitude: 25.2854, longitude: 51.531 }; // Doha Corniche fallback
 const CATEGORY_DEFINITIONS = [
   { label: 'Home Cleaning', comingSoon: false },
@@ -210,6 +211,7 @@ function WorkspaceScreen() {
     placeBooking,
     profile,
     ratings,
+    refreshCurrentAuthUser,
     resendCompanyInvitation,
     revokeInvitation,
     saveAddress,
@@ -529,16 +531,6 @@ function WorkspaceScreen() {
   ]);
 
   useEffect(() => {
-    if (!onboardingHydrated || authUser) {
-      return;
-    }
-
-    if (!guestOnboardingProfile.locationSet) {
-      setOnboardingStep('location');
-    }
-  }, [authUser, guestOnboardingProfile.locationSet, onboardingHydrated]);
-
-  useEffect(() => {
     setProfileForm(profile);
   }, [profile]);
 
@@ -852,7 +844,7 @@ function WorkspaceScreen() {
     addressForm.street.trim(),
   ].filter(Boolean).join(', ') || 'Set your location';
 
-  const canAccessRestrictedTabs = authUser ? true : guestOnboardingProfile.phoneVerified && guestOnboardingProfile.accountSetup;
+  const canAccessRestrictedTabs = !!authUser;
   const shouldShowOnboarding = !!onboardingStep && !authUser;
 
   function openRestrictedTabFlow(targetTab: CustomerRestrictedTab) {
@@ -863,25 +855,8 @@ function WorkspaceScreen() {
 
     setOnboardingTargetTab(targetTab);
     setCustomerTab('home');
-    if (!guestOnboardingProfile.locationSet) {
-      setOnboardingStep('location');
-      setCustomerBanner({ tone: 'info', text: 'Set your location first to continue.' });
-      return;
-    }
-
-    if (!guestOnboardingProfile.phoneVerified) {
-      setOnboardingStep('phone');
-      setCustomerBanner({ tone: 'info', text: 'Verify your phone number to open Orders and More.' });
-      return;
-    }
-
-    if (!guestOnboardingProfile.accountSetup) {
-      setOnboardingStep('account');
-      setCustomerBanner({ tone: 'info', text: 'Complete your account setup to unlock Orders and More.' });
-      return;
-    }
-
-    setCustomerTab(targetTab);
+    setOnboardingStep('phone');
+    setCustomerBanner({ tone: 'info', text: 'Verify your phone number to open Orders and More.' });
   }
 
   function requestCustomerTabChange(nextTab: CustomerTabKey) {
@@ -1066,16 +1041,24 @@ function WorkspaceScreen() {
 
     startGlobalLoading('Sending SMS verification code...');
     try {
+      const ephemeralPassword = generateEphemeralPassword();
       const signUpResult = await signUp({
         username: normalizedPhone,
-        password: generateEphemeralPassword(),
+        password: ephemeralPassword,
         options: {
           userAttributes: {
             phone_number: normalizedPhone,
             email: buildOtpEmailFromPhone(normalizedPhone),
           },
+          clientMetadata: {
+            appRole: 'customer',
+          },
+          autoSignIn: {
+            authFlowType: 'USER_PASSWORD_AUTH',
+          },
         },
       });
+      await AsyncStorage.setItem(`${PHONE_OTP_PASSWORD_STORAGE_PREFIX}${normalizedPhone}`, ephemeralPassword);
       const deliveryDetails = (signUpResult as any)?.nextStep?.codeDeliveryDetails;
       const medium = deliveryDetails?.deliveryMedium;
       const destination = deliveryDetails?.destination;
@@ -1147,20 +1130,50 @@ function WorkspaceScreen() {
       await confirmSignUp({
         username,
         confirmationCode: phoneVerificationForm.code.trim(),
+        options: {
+          clientMetadata: {
+            appRole: 'customer',
+          },
+        },
       });
+      let signInOutput: Awaited<ReturnType<typeof autoSignIn>> | Awaited<ReturnType<typeof signIn>>;
+      try {
+        signInOutput = await autoSignIn();
+      } catch (autoSignInError) {
+        const storedPassword = await AsyncStorage.getItem(`${PHONE_OTP_PASSWORD_STORAGE_PREFIX}${verifiedPhone}`);
+        if (!storedPassword) {
+          throw autoSignInError;
+        }
+
+        signInOutput = await signIn({
+          username: verifiedPhone,
+          password: storedPassword,
+          options: {
+            authFlowType: 'USER_PASSWORD_AUTH',
+          },
+        });
+      }
+      if (!signInOutput.isSignedIn) {
+        throw new Error('Phone verified, but the session could not be opened. Refresh and try again.');
+      }
+      await refreshCurrentAuthUser();
+      await AsyncStorage.removeItem(`${PHONE_OTP_PASSWORD_STORAGE_PREFIX}${verifiedPhone}`);
 
       setGuestOnboardingProfile((current) => ({
         ...current,
         phoneVerified: true,
+        accountSetup: true,
         phone: verifiedPhone,
       }));
       setProfileForm((current) => ({ ...current, phone: verifiedPhone || current.phone }));
       setOnboardingErrors({});
-      setOnboardingStep('account');
+      setOnboardingStep(null);
+      setOnboardingTargetTab(null);
+      setCustomerTab(onboardingTargetTab ?? 'orders');
       setPendingPhoneOtpUsername('');
       setPendingPhoneOtpTarget('');
-      setCustomerBanner({ tone: 'success', text: 'Phone number verified successfully.' });
-      setOperationPopup({ tone: 'success', text: 'Phone number verified successfully.' });
+      setCustomerBanner({ tone: 'success', text: 'Phone number verified. Your customer account is ready.' });
+      setOperationPopup({ tone: 'success', text: 'Phone number verified. Your customer account is ready.' });
     } catch (error) {
       const verifyMessage = error instanceof Error ? error.message : 'Invalid verification code.';
       setOnboardingErrors((current) => ({ ...current, code: verifyMessage }));
@@ -1505,7 +1518,7 @@ function WorkspaceScreen() {
 
   async function handleCatalogSave() {
     if (!currentCompany) {
-      setCompanyBanner({ tone: 'error', text: 'No company workspace is active. Sign in again and retry.' });
+      setCompanyBanner({ tone: 'error', text: 'No company workspace is active. Refresh your session and retry.' });
       return;
     }
 
@@ -1829,7 +1842,7 @@ function WorkspaceScreen() {
 
   function handleNotificationPress() {
     if (!customerNotifications.length) {
-      setCustomerBanner({ tone: 'info', text: authUser ? 'No new notifications right now.' : 'Sign in to receive booking updates and personal notifications.' });
+      setCustomerBanner({ tone: 'info', text: authUser ? 'No new notifications right now.' : 'Verify your phone number to receive booking updates and personal notifications.' });
       return;
     }
 
@@ -1853,7 +1866,7 @@ function WorkspaceScreen() {
         return next;
       });
       setConfirmCode('');
-      setCustomerBanner({ tone: 'success', text: 'Email confirmed. You can sign in now.' });
+      setCustomerBanner({ tone: 'success', text: 'Email confirmed.' });
     } catch (error) {
       setCustomerBanner({ tone: 'error', text: getDisplayErrorMessage(error, 'Unable to confirm email.') });
     } finally {
@@ -1903,7 +1916,7 @@ function WorkspaceScreen() {
     const errors = validateBookingDraft(bookingComposer, authUser, addresses);
     setBookingErrors(errors);
     if (Object.keys(errors).length) {
-      setCustomerBanner({ tone: 'error', text: authUser ? 'Fix the booking details before placing the order.' : 'Open Profile and sign in before placing a booking.' });
+      setCustomerBanner({ tone: 'error', text: authUser ? 'Fix the booking details before placing the order.' : 'Verify your phone number before placing a booking.' });
       if (!authUser) {
         requestCustomerTabChange('profile');
       }
@@ -2299,7 +2312,7 @@ function WorkspaceScreen() {
           </View>
           <Text style={styles.heroTitle}>{activeWorkspaceLabel}</Text>
           <Text style={styles.heroBody}>
-            Admins control onboarding and partner governance, companies operate their own publishing workspace, and customers can browse publicly and sign in only when they need to transact.
+            Admins control onboarding and partner governance, companies operate their own publishing workspace, and customers can browse publicly before phone verification.
           </Text>
           {!!authMessage && <Text style={styles.messageText}>{authMessage}</Text>}
         </View>
@@ -4313,7 +4326,7 @@ function CustomerWorkspace({
   const [providerDetailOpen, setProviderDetailOpen] = useState(false);
   const [homeCarouselPage, setHomeCarouselPage] = useState(0);
   const [promoStartIndex, setPromoStartIndex] = useState(0);
-  const [activeMoreSection, setActiveMoreSection] = useState<'overview' | 'account' | 'addresses' | 'payment' | 'wallet' | 'notifications' | 'region' | 'preferences' | 'contact' | 'privacy' | 'feedback' | 'signin'>('overview');
+  const [activeMoreSection, setActiveMoreSection] = useState<'overview' | 'account' | 'addresses' | 'payment' | 'wallet' | 'notifications' | 'region' | 'preferences' | 'contact' | 'privacy' | 'feedback'>('overview');
   const [notificationPreferences, setNotificationPreferences] = useState({ pushEnabled: true, orderUpdates: true, offers: true, system: true });
   const [preferenceSettings, setPreferenceSettings] = useState({ reducedMotion: false, compactCards: false, autoLocation: true, haptics: true });
   const [regionLanguage, setRegionLanguage] = useState<{ region: string; language: 'en' | 'ar' }>({
@@ -5118,7 +5131,7 @@ function CustomerWorkspace({
           </SectionCard>
 
           {bookingComposer.itemId ? (
-            <SectionCard title="Booking composer" subtitle={authUser ? 'Customer flow: provider → service → time slot → payment → confirmation.' : 'Guests can prepare an order here, then sign in from Profile to complete it.'} cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+            <SectionCard title="Booking composer" subtitle={authUser ? 'Customer flow: provider → service → time slot → payment → confirmation.' : 'Guests can prepare an order here, then verify their phone from More to complete it.'} cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
               <View style={styles.rowGap}>
                 <FormField label="Date" value={bookingComposer.scheduleDate} onChangeText={(value) => onBookingComposerChange((current) => ({ ...current, scheduleDate: value }))} error={bookingErrors.scheduleDate} theme={customerTheme.inputTheme} />
                 <FormField label="Time" value={bookingComposer.scheduleTime} onChangeText={(value) => onBookingComposerChange((current) => ({ ...current, scheduleTime: value }))} error={bookingErrors.scheduleTime} theme={customerTheme.inputTheme} />
@@ -5131,7 +5144,7 @@ function CustomerWorkspace({
                 <ChoiceChip label="Apple Pay" selected={bookingComposer.paymentMethod === 'applePay'} onPress={() => onBookingComposerChange((current) => ({ ...current, paymentMethod: 'applePay' }))} />
               </View>
               {bookingErrors.auth ? <FieldError text={bookingErrors.auth} /> : null}
-              <PrimaryButton label={authUser ? 'Place booking' : 'Open profile to login'} onPress={authUser ? onPlaceBooking : () => onTabChange('profile')} />
+              <PrimaryButton label={authUser ? 'Place booking' : 'Verify phone'} onPress={authUser ? onPlaceBooking : () => onTabChange('profile')} />
             </SectionCard>
           ) : null}
         </ScrollView>
@@ -5196,7 +5209,7 @@ function CustomerWorkspace({
               </View>
             )) : <EmptyState title="No bookings yet" body="Place a booking from Explore after a company publishes services or products." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
           ) : (
-            <EmptyState title="Sign in required" body="Open the Profile tab to sign in, then your orders and ratings will appear here." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
+            <EmptyState title="Phone verification required" body="Verify your mobile number to open Orders and track your bookings." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
           )}
         </SectionCard>
         </ScrollView>
@@ -5210,7 +5223,7 @@ function CustomerWorkspace({
               <NotificationRow key={notification.id} notification={notification} onOpen={() => onOpenNotification(notification)} darkMode={darkMode} />
             )) : <EmptyState title="No notifications yet" body="When bookings move, promotions go live, or your account needs attention, updates will appear here." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
           ) : (
-            <EmptyState title="Sign in required" body="Notifications are available after you sign in to your customer account." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
+            <EmptyState title="Phone verification required" body="Notifications are available after your mobile number is verified." cardStyle={customerTheme.empty} titleStyle={customerTheme.title} bodyStyle={customerTheme.subtitle} />
           )}
         </SectionCard>
         </ScrollView>
@@ -5221,14 +5234,14 @@ function CustomerWorkspace({
           <ScrollView style={styles.customerTabScroll} contentContainerStyle={styles.customerTabScrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             {activeMoreSection === 'overview' ? (
               <>
-                <SectionCard title="My Account" subtitle={authUser ? `${profileForm.fullName || 'Account'} · ${profileForm.email}` : 'Guest mode active. Sign in to access customer, admin, or company workspace.'} cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
+                <SectionCard title="My Account" subtitle={authUser ? `${profileForm.fullName || 'Account'} · ${profileForm.phone || profileForm.email}` : 'Verify your phone number to access Orders and More.'} cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
                   <View style={styles.moreHeaderRow}>
                     <View style={styles.moreAvatarWrap}>
                       <MaterialCommunityIcons name="account-circle-outline" size={48} color={colors.primary} />
                     </View>
                     <View style={styles.infoBodyGrow}>
                       <Text style={[styles.infoTitle, customerTheme.title]}>{profileForm.fullName || 'Guest User'}</Text>
-                      <Text style={[styles.helperText, customerTheme.subtitle]}>{authUser ? `Signed in as ${currentUserRole}` : 'Sign in to unlock orders, notifications, and workspace switching.'}</Text>
+                      <Text style={[styles.helperText, customerTheme.subtitle]}>{authUser ? `Active workspace: ${currentUserRole}` : 'Phone verification unlocks orders, notifications, and workspace switching.'}</Text>
                     </View>
                   </View>
                   <View style={styles.moreSectionLabelRow}>
@@ -5242,7 +5255,6 @@ function CustomerWorkspace({
                     { key: 'notifications', label: 'Notification', icon: 'bell-outline', description: 'Alerts and communication controls' },
                     { key: 'region', label: 'Region & Language', icon: 'translate', description: 'Localization and region defaults' },
                     { key: 'preferences', label: 'Preferences', icon: 'tune-vertical-variant', description: 'Experience and personalization settings' },
-                    { key: 'signin', label: 'Sign In', icon: 'login', description: 'Sign in and switch to admin/company workspace' },
                   ].map((option) => (
                     <Pressable key={`more-option-${option.key}`} style={({ pressed }) => [styles.moreOptionRow, pressed && styles.moreOptionRowPressed]} onPress={() => setActiveMoreSection(option.key as any)}>
                       <View style={styles.moreOptionIconWrap}>
@@ -5281,7 +5293,7 @@ function CustomerWorkspace({
                 <FormField label="Full name" value={profileForm.fullName} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, fullName: value }))} error={profileErrors.fullName} theme={customerTheme.inputTheme} />
                 <FormField label="Email" value={profileForm.email} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, email: value }))} error={profileErrors.email} theme={customerTheme.inputTheme} />
                 <FormField label="Phone" value={profileForm.phone} onChangeText={(value) => onProfileFormChange((current) => ({ ...current, phone: value }))} error={profileErrors.phone} theme={customerTheme.inputTheme} />
-                {authUser ? <PrimaryButton label="Save account" onPress={onSaveProfile} /> : <SecondaryButton label="Go to Sign In" onPress={() => setActiveMoreSection('signin')} />}
+                {authUser ? <PrimaryButton label="Save account" onPress={onSaveProfile} /> : <Text style={[styles.helperText, customerTheme.subtitle]}>Verify your phone number from Orders or More to manage your account.</Text>}
               </SectionCard>
             ) : null}
 
@@ -5322,7 +5334,7 @@ function CustomerWorkspace({
                   <FormField label="Unit" value={addressForm.unitNumber} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, unitNumber: value }))} theme={customerTheme.inputTheme} />
                   <FormField label="Phone" value={addressForm.contactPhone} onChangeText={(value) => onAddressFormChange((current) => ({ ...current, contactPhone: value }))} error={addressErrors.contactPhone} theme={customerTheme.inputTheme} />
                 </View>
-                {authUser ? <PrimaryButton label="Save default address" onPress={onSaveAddress} /> : <SecondaryButton label="Go to Sign In" onPress={() => setActiveMoreSection('signin')} />}
+                {authUser ? <PrimaryButton label="Save default address" onPress={onSaveAddress} /> : <Text style={[styles.helperText, customerTheme.subtitle]}>Verify your phone number from Orders or More to save addresses.</Text>}
               </SectionCard>
             ) : null}
 
@@ -5340,7 +5352,7 @@ function CustomerWorkspace({
                   <FormField label="Expiry" value={paymentDraft.expiry} onChangeText={(value) => setPaymentDraft((current) => ({ ...current, expiry: value }))} theme={customerTheme.inputTheme} placeholder="MM/YY" />
                 </View>
                 <SelectField label="Card brand" value={paymentDraft.brand} options={['Visa', 'Mastercard', 'AMEX', 'Mada']} onSelect={(value) => setPaymentDraft((current) => ({ ...current, brand: value }))} />
-                {authUser ? <PrimaryButton label="Save payment profile" onPress={onSaveProfile} /> : <SecondaryButton label="Go to Sign In" onPress={() => setActiveMoreSection('signin')} />}
+                {authUser ? <PrimaryButton label="Save payment profile" onPress={onSaveProfile} /> : <Text style={[styles.helperText, customerTheme.subtitle]}>Verify your phone number from Orders or More to save payment details.</Text>}
               </SectionCard>
             ) : null}
 
@@ -5530,72 +5542,6 @@ function CustomerWorkspace({
               </SectionCard>
             ) : null}
 
-            {activeMoreSection === 'signin' ? (
-              <SectionCard title="Sign In" subtitle="Sign in to your account. Admin and company accounts automatically open their dedicated workspace." cardStyle={customerTheme.card} titleStyle={customerTheme.title} subtitleStyle={customerTheme.subtitle}>
-                <SecondaryButton label="Back to More" onPress={() => setActiveMoreSection('overview')} />
-                {authUser ? (
-                  <View style={styles.moreInfoCard}>
-                    <Text style={styles.moreInfoTitle}>You are signed in</Text>
-                    <Text style={styles.moreInfoBody}>{`${profileForm.email} · ${currentUserRole}`}</Text>
-                    <Text style={styles.moreInfoBody}>To switch to another workspace account, sign out and sign in with the target account.</Text>
-                    <SecondaryButton label={authBusy ? 'Signing out...' : 'Sign out'} onPress={() => onSignOut()} loading={authBusy} disabled={authBusy} />
-                  </View>
-                ) : (
-                  <>
-                    <View style={styles.toggleRow}>
-                      <ChoiceChip label="Sign in" selected={authMode === 'signin'} onPress={() => onAuthModeChange('signin')} />
-                      <ChoiceChip label="Create account" selected={authMode === 'signup'} onPress={() => onAuthModeChange('signup')} />
-                    </View>
-
-                    {authMode === 'signin' ? (
-                      <>
-                        <FormField label="Email or Username" value={signInForm.email} onChangeText={(value) => onSignInFormChange((current) => ({ ...current, email: value }))} error={authErrors.email} theme={customerTheme.inputTheme} />
-                        <FormField label="Password" value={signInForm.password} onChangeText={(value) => onSignInFormChange((current) => ({ ...current, password: value }))} error={authErrors.password} secureTextEntry theme={customerTheme.inputTheme} />
-                      </>
-                    ) : (
-                      <>
-                        <FormField label="Full name" value={signUpForm.fullName} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, fullName: value }))} error={authErrors.fullName} theme={customerTheme.inputTheme} />
-                        <FormField label="Email" value={signUpForm.email} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, email: value }))} error={authErrors.email} theme={customerTheme.inputTheme} />
-                        <FormField label="Phone" value={signUpForm.phone} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, phone: value }))} error={authErrors.phone} theme={customerTheme.inputTheme} />
-                        <FormField label="Password" value={signUpForm.password} onChangeText={(value) => onSignUpFormChange((current) => ({ ...current, password: value }))} error={authErrors.password} secureTextEntry theme={customerTheme.inputTheme} />
-                      </>
-                    )}
-
-                    <PrimaryButton label={authMode === 'signin' ? 'Sign in now' : 'Create account'} onPress={onAuthAction} loading={authBusy} disabled={authBusy} />
-
-                    {needsConfirmation ? (
-                      <View style={styles.moreInfoCard}>
-                        <Text style={styles.moreInfoTitle}>Confirm your email</Text>
-                        <FormField label="Verification code" value={confirmCode} onChangeText={onConfirmCodeChange} theme={customerTheme.inputTheme} />
-                        <PrimaryButton label="Confirm code" onPress={onConfirmCode} loading={authBusy} disabled={authBusy} />
-                      </View>
-                    ) : null}
-
-                    {signInChallenge === 'newPasswordRequired' ? (
-                      <View style={styles.moreInfoCard}>
-                        <Text style={styles.moreInfoTitle}>New password required</Text>
-                        {requiredSignInAttributes.length ? (
-                          <Text style={styles.moreInfoBody}>Cognito also needs these account details before this manually-created user can sign in.</Text>
-                        ) : null}
-                        <FormField label="New password" value={newPassword} onChangeText={onNewPasswordChange} error={authErrors.newPassword} secureTextEntry theme={customerTheme.inputTheme} />
-                        {requiredSignInAttributes.map((attribute) => (
-                          <FormField
-                            key={attribute}
-                            label={getSignInAttributeLabel(attribute)}
-                            value={newPasswordAttributes[attribute] ?? getDefaultSignInAttributeValue(attribute, signInForm.email, profileForm)}
-                            onChangeText={(value) => onNewPasswordAttributeChange((current) => ({ ...current, [attribute]: value }))}
-                            error={authErrors[getSignInAttributeErrorKey(attribute)]}
-                            placeholder={getSignInAttributePlaceholder(attribute)}
-                            theme={customerTheme.inputTheme}
-                          />
-                        ))}
-                        <PrimaryButton label="Update password" onPress={onCompleteNewPassword} loading={authBusy} disabled={authBusy} />
-                      </View>
-                    ) : null}
-                  </>
-                )}
-              </SectionCard>
-            ) : null}
           </ScrollView>
         </KeyboardAvoidingView>
       ) : null}
@@ -6806,7 +6752,7 @@ function validateBookingDraft(
   addresses: Address[],
 ) {
   const errors: ValidationMap = {};
-  if (!authUser) errors.auth = 'Sign in to place a booking.';
+  if (!authUser) errors.auth = 'Verify your phone number to place a booking.';
   if (!draft.itemId) errors.itemId = 'Choose an item first.';
   if (!draft.slotId) errors.slotId = 'Choose an available time slot first.';
   if (!draft.scheduleDate.trim()) errors.scheduleDate = 'Booking date is required.';

@@ -205,6 +205,7 @@ interface AppContextValue {
   currentUserRecord: AppUserRecord | null;
   currentCompany: Company | null;
   marketplaceItems: CatalogItem[];
+  refreshCurrentAuthUser: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   completeNewPassword: (newPassword: string, attributes?: Record<string, string>) => Promise<void>;
   signUpWithEmail: (payload: SignUpPayload) => Promise<void>;
@@ -829,7 +830,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   async function refreshAuthUser() {
     try {
       const currentUser = await getCurrentUser();
-      const session = await fetchAuthSession();
+      const session = await fetchAuthSession({ forceRefresh: true });
       const attributes = await fetchUserAttributes();
       const tokenGroups = session.tokens?.idToken?.payload?.['cognito:groups'];
       const nextGroups = Array.isArray(tokenGroups)
@@ -1006,7 +1007,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (!response) {
-        throw (lastError instanceof Error ? lastError : new Error('Unable to sign in.'));
+        throw (lastError instanceof Error ? lastError : new Error('Unable to open the session.'));
       }
 
       // Check if sign-in completed
@@ -1107,7 +1108,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const normalizedPhone = normalizePhoneNumber(payload.phone);
 
       if (MANUAL_ADMIN_EMAILS.includes(normalizedEmail)) {
-        setAuthMessage('Admin accounts are created manually. Use sign in with the admin credentials instead.');
+        setAuthMessage('Admin access is assigned manually in Cognito after phone verification.');
         return;
       }
 
@@ -1167,7 +1168,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           : undefined,
       });
       setNeedsConfirmation(false);
-      setAuthMessage('Email verified. You can sign in now.');
+      setAuthMessage('Email verified.');
     } catch (error) {
       setAuthMessage(toErrorMessage(error));
       throw error;
@@ -1392,7 +1393,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     await Promise.all([
       createNotification({ recipientRole: 'admin', title: `Invitation sent to ${invitation.email}`, body: `${invitation.companyName} is waiting for company owner activation.`, kind: 'invitation', destinationTab: 'companies' }),
-      createNotification({ recipientRole: 'company', recipientEmail: invitation.email, companyId: invitation.companyId, title: `You were invited to ${invitation.companyName}`, body: 'Use the email invitation from Cognito to sign in with your temporary password and create a new one.', kind: 'invitation', destinationTab: 'overview' }),
+        createNotification({ recipientRole: 'company', recipientEmail: invitation.email, companyId: invitation.companyId, title: `You were invited to ${invitation.companyName}`, body: 'Verify your phone number, then ask an operator to move your Cognito user into the company group.', kind: 'invitation', destinationTab: 'overview' }),
     ]);
   }
 
@@ -1820,7 +1821,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   async function placeBooking(draft: BookingDraft) {
     if (!authUser) {
-      throw new Error('Please sign in before booking.');
+      throw new Error('Please verify your phone number before booking.');
     }
     const item = catalogItems.find((entry) => entry.id === draft.itemId && entry.companyId === draft.companyId);
     const address = addresses.find((entry) => entry.id === draft.addressId) ?? addresses[0];
@@ -1884,7 +1885,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, signInChallenge, requiredSignInAttributes, activeRole, profile, addresses, users, companies, appCategorySettings, invitations, supportRequests, catalogItems, offerPromotions, notifications, auditEvents, bookings, availabilitySlots, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, signInWithEmail, completeNewPassword, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, reviewCatalogItem, deleteCatalogItem, saveOfferPromotion, reviewOfferPromotion, deleteOfferPromotion, markNotificationRead, submitSupportRequest, saveLoyaltyProgram, saveCategorySetting, saveAvailabilitySlot, deleteAvailabilitySlot, placeBooking, changeBookingStatus, submitRating }}>
+    <AppContext.Provider value={{ initialized, busy, authUser, authMessage, needsConfirmation, signInChallenge, requiredSignInAttributes, activeRole, profile, addresses, users, companies, appCategorySettings, invitations, supportRequests, catalogItems, offerPromotions, notifications, auditEvents, bookings, availabilitySlots, ratings, loyaltyPrograms, currentUserRecord, currentCompany, marketplaceItems, refreshCurrentAuthUser: refreshAuthUser, signInWithEmail, completeNewPassword, signUpWithEmail, confirmEmailCode, signOutCurrentUser, saveProfile, saveAddress, createCompany, updateCompany, setCompanyActive, deleteCompany, inviteCompany, resendCompanyInvitation, revokeInvitation, saveCatalogItem, reviewCatalogItem, deleteCatalogItem, saveOfferPromotion, reviewOfferPromotion, deleteOfferPromotion, markNotificationRead, submitSupportRequest, saveLoyaltyProgram, saveCategorySetting, saveAvailabilitySlot, deleteAvailabilitySlot, placeBooking, changeBookingStatus, submitRating }}>
       {children}
     </AppContext.Provider>
   );
