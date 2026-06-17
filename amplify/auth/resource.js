@@ -10,7 +10,12 @@ export const auth = defineAuth({
     groups: ['admin', 'company', 'customer'],
     loginWith: {
         email: true,
-        phone: true,
+        phone: {
+            verificationMessage: (code) => `Jahzeen verification code: ${code()}. This code expires shortly. Do not share it.`,
+        },
+    },
+    senders: {
+        sms: {},
     },
     triggers: {
         customMessage: authCustomMessage,

@@ -501,6 +501,16 @@ function WorkspaceScreen() {
       return;
     }
 
+    if (!guestOnboardingProfile.locationSet) {
+      setOnboardingStep('location');
+    }
+  }, [authUser, guestOnboardingProfile.locationSet, onboardingHydrated]);
+
+  useEffect(() => {
+    if (!onboardingHydrated || authUser) {
+      return;
+    }
+
     AsyncStorage.setItem(
       CUSTOMER_ONBOARDING_STORAGE_KEY,
       JSON.stringify({
@@ -855,6 +865,12 @@ function WorkspaceScreen() {
 
     setOnboardingTargetTab(targetTab);
     setCustomerTab('home');
+    if (!guestOnboardingProfile.locationSet) {
+      setOnboardingStep('location');
+      setCustomerBanner({ tone: 'info', text: 'Set your location first to continue.' });
+      return;
+    }
+
     setOnboardingStep('phone');
     setCustomerBanner({ tone: 'info', text: 'Verify your phone number to open Orders and More.' });
   }
@@ -868,20 +884,22 @@ function WorkspaceScreen() {
     setCustomerTab(nextTab);
   }
 
-  async function applyReverseGeocodedAddress(latitude: number, longitude: number) {
+  async function applyReverseGeocodedAddress(latitude: number, longitude: number, fallbackLabel = 'Pinned Location') {
     const geocoded = await Location.reverseGeocodeAsync({ latitude, longitude });
     const primary = geocoded[0];
     const fallbackPhone = phoneVerificationForm.phone.trim() || guestOnboardingProfile.phone.trim() || '+97455551234';
-
-    setAddressForm((current) => ({
-      ...current,
-      label: current.label.trim() || 'Pinned Location',
-      area: current.area.trim() || primary?.district || primary?.subregion || primary?.city || 'Doha',
-      street: current.street.trim() || [primary?.streetNumber, primary?.street].filter(Boolean).join(' ').trim() || primary?.name || 'Pinned location',
-      building: current.building.trim() || primary?.streetNumber || '1',
-      contactPhone: current.contactPhone.trim() || fallbackPhone,
+    const nextAddress = {
+      ...addressForm,
+      label: addressForm.label.trim() || fallbackLabel,
+      area: addressForm.area.trim() || primary?.district || primary?.subregion || primary?.city || 'Doha',
+      street: addressForm.street.trim() || [primary?.streetNumber, primary?.street].filter(Boolean).join(' ').trim() || primary?.name || 'Pinned location',
+      building: addressForm.building.trim() || primary?.streetNumber || '1',
+      contactPhone: addressForm.contactPhone.trim() || fallbackPhone,
       isDefault: true,
-    }));
+    };
+
+    setAddressForm(nextAddress);
+    return nextAddress;
   }
 
   async function fetchCurrentGpsLocation() {
@@ -890,7 +908,7 @@ function WorkspaceScreen() {
       const permission = await Location.requestForegroundPermissionsAsync();
       if (permission.status !== 'granted') {
         setCustomerBanner({ tone: 'error', text: 'Location permission is required. Please enable it to continue.' });
-        return;
+        return null;
       }
 
       const currentPosition = await Location.getCurrentPositionAsync({
@@ -907,7 +925,7 @@ function WorkspaceScreen() {
         ...current,
         ...nextPin,
       }));
-      await applyReverseGeocodedAddress(nextPin.latitude, nextPin.longitude);
+      const nextAddress = await applyReverseGeocodedAddress(nextPin.latitude, nextPin.longitude, 'Current Location');
 
       setGuestOnboardingProfile((current) => ({
         ...current,
@@ -920,8 +938,10 @@ function WorkspaceScreen() {
         return next;
       });
       setCustomerBanner({ tone: 'success', text: 'Current GPS location detected.' });
+      return { ...nextPin, address: nextAddress };
     } catch (error) {
       setCustomerBanner({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to fetch your current location.' });
+      return null;
     } finally {
       setLocationBusy(false);
     }
@@ -950,17 +970,28 @@ function WorkspaceScreen() {
   }
 
   async function handleOnboardingLocationContinue() {
-    if (locationMode === 'current' && (!guestOnboardingProfile.latitude || !guestOnboardingProfile.longitude)) {
-      await fetchCurrentGpsLocation();
-    }
-
-    const nextAddressDraft = {
+    let selectedLatitude = guestOnboardingProfile.latitude;
+    let selectedLongitude = guestOnboardingProfile.longitude;
+    let nextAddressDraft = {
       ...addressForm,
       label: addressForm.label.trim() || (locationMode === 'current' ? 'Current Location' : 'Pinned Location'),
       isDefault: true,
     };
 
-    if (!guestOnboardingProfile.latitude || !guestOnboardingProfile.longitude) {
+    if (locationMode === 'current' && !hasLocationCoordinates(selectedLatitude, selectedLongitude)) {
+      const detectedLocation = await fetchCurrentGpsLocation();
+      if (detectedLocation) {
+        selectedLatitude = detectedLocation.latitude;
+        selectedLongitude = detectedLocation.longitude;
+        nextAddressDraft = {
+          ...detectedLocation.address,
+          label: detectedLocation.address.label.trim() || 'Current Location',
+          isDefault: true,
+        };
+      }
+    }
+
+    if (!hasLocationCoordinates(selectedLatitude, selectedLongitude)) {
       setOnboardingErrors((current) => ({ ...current, locationPin: 'Choose your exact map pin before continuing.' }));
       setCustomerBanner({ tone: 'error', text: 'Pin your location on map or use current GPS location.' });
       return;
@@ -984,7 +1015,13 @@ function WorkspaceScreen() {
       }
     }
 
-    setGuestOnboardingProfile((current) => ({ ...current, locationSet: true }));
+    setAddressForm(nextAddressDraft);
+    setGuestOnboardingProfile((current) => ({
+      ...current,
+      locationSet: true,
+      latitude: selectedLatitude,
+      longitude: selectedLongitude,
+    }));
     setOnboardingErrors({});
     if (onboardingTargetTab === 'orders' || onboardingTargetTab === 'profile') {
       setOnboardingStep('phone');
@@ -6548,6 +6585,10 @@ function generateEphemeralPassword() {
 function buildOtpEmailFromPhone(phoneE164: string) {
   const digits = phoneE164.replace(/\D/g, '');
   return `otp+${digits}@jahzeen.app`;
+}
+
+function hasLocationCoordinates(latitude: number | null, longitude: number | null) {
+  return typeof latitude === 'number' && typeof longitude === 'number';
 }
 
 function getAuthErrorDetails(error: unknown) {
