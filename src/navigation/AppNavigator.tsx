@@ -6617,6 +6617,15 @@ function getAuthErrorDetails(error: unknown) {
 
 function formatOtpFailure(prefix: string, error: unknown) {
   const details = getAuthErrorDetails(error);
+  const combined = `${details.code} ${details.message}`.toLowerCase();
+  if (combined.includes('sandbox')) {
+    return `${prefix} [${details.code}] ${details.message} AWS SNS SMS sandbox only sends to verified numbers. Verify this phone in SNS sandbox or move the account out of sandbox.`;
+  }
+
+  if (combined.includes('codedeliveryfailure') || combined.includes('unable to deliver message')) {
+    return `${prefix} [${details.code}] ${details.message} Check AWS SNS SMS settings, spending limit, and sandbox/production status.`;
+  }
+
   return `${prefix} [${details.code}] ${details.message}`;
 }
 
